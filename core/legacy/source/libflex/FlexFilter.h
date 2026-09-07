@@ -56,7 +56,7 @@ public:
             OrdMagResult ordmagResult;                  // OrdMag result for this tag (for compatibility)
             // Summary stats
             uint32_t nRetainWindow = 0;       // Cells in retain window
-            uint32_t nSimpleCells = 0;        // Simple cells (auto-pass, UMI > retain threshold)
+            uint32_t nSimpleCells = 0;        // Simple cells (auto-pass, UMI >= retain threshold)
             uint32_t nTailTested = 0;         // Tail cells tested by ED
             uint32_t nSimplePassers = 0;      // Simple cells passing
             uint32_t nTailPassers = 0;        // Tail cells passing
@@ -92,7 +92,7 @@ public:
         // If ANY of these conditions are met, Simple EmptyDrops runs as fallback
         uint32_t simpleEDMinRescues = 50;      // Min ED rescues before fallback triggers
         uint32_t simpleEDMinAmbient = 100;     // Min ambient cells (UMI <= ambientUmiMax)
-        uint32_t simpleEDMinCandidates = 100;  // Min candidates above lowerTestingBound
+        uint32_t simpleEDMinCandidates = 100;  // Min candidates at or above lowerTestingBound
         bool useSimpleEmptyDrops = false;      // Force enable Simple EmptyDrops (--use-simple-empty-drops)
         
         // Debug flags

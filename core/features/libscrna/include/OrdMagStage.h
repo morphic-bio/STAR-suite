@@ -21,7 +21,7 @@ struct SimpleEmptyDropsResult {
     vector<uint32> ambientIndices;      // Ambient cell indices (for ambient profile)
     uint32 retainThreshold;             // UMI threshold for simple filtering
     uint32 nCellsSimple;                // Number of cells passing simple filter
-    uint32 minUMI;                      // Minimum UMI for candidates
+    uint32 minUMI;                      // Inclusive minimum UMI for candidates
     uint32 medianVal;                   // Median UMI value
     uint32 candidateLastRank;           // Last rank considered as candidate
     std::pair<uint32, uint32> ambientRange;  // Range of ambient indices (1-based)
@@ -36,7 +36,7 @@ struct SimpleEmptyDropsParams {
     uint32 nExpectedCells = 0;      // Expected number of cells (default: 3000)
     double maxPercentile = 0.0;      // Max percentile for robust max (default: 0.99)
     double maxMinRatio = 0.0;         // Max/min ratio (default: 10.0)
-    uint32 umiMin = 0;              // Minimum UMI threshold (default: 500)
+    uint32 umiMin = 0;              // Inclusive minimum UMI threshold (default: 500)
     double umiMinFracMedian = 0.0;   // Min UMI as fraction of median (default: 0.01)
     uint32 candMaxN = 0;            // Maximum candidates (default: 20000)
     uint32 indMin = 0;              // Min index for ambient cells (default: 45000)

@@ -93,7 +93,7 @@ extern "C" uint64_t solo_genomic_only_probe_gene_count() { return 0; }
 
 // Global ProbeListIndex loader for inline path (independent of SoloFeature owner)
 static ProbeListIndex* gProbeIndex = nullptr;
-static bool gProbeIndexLoaded = false;
+static std::once_flag gProbeIndexInitOnce;
 
 // Reject logging infrastructure for trace-drops debugging
 static FILE* g_rejectLogFile = nullptr;
@@ -287,22 +287,22 @@ static void logRejectReason(const SoloReadBarcode& soloBar, uint64_t iRead, int3
 }
 
 const ProbeListIndex* getGlobalProbeIndex(const SoloReadFeature* rf) {
-    if (gProbeIndexLoaded) return gProbeIndex;
-    gProbeIndexLoaded = true;
     if (rf == nullptr) return nullptr;
-    const std::string& path = rf->pSolo.probeListPath;
-    if (path.empty() || path == "-") return nullptr;
-    ProbeListIndex* idx = new ProbeListIndex();
-    uint32_t deprecatedCount = 0;
-    if (!idx->load(path, rf->pSolo.removeDeprecated, &deprecatedCount)) {
-        delete idx;
-        return nullptr;
-    }
-    if (rf->pSolo.removeDeprecated && deprecatedCount > 0) {
-        // Note: Cannot log here as we don't have access to logMain in this context
-        // Logging will happen in STAR.cpp initialization
-    }
-    gProbeIndex = idx;
+    std::call_once(gProbeIndexInitOnce, [rf]() {
+        const std::string& path = rf->pSolo.probeListPath;
+        if (path.empty() || path == "-") return;
+        ProbeListIndex* idx = new ProbeListIndex();
+        uint32_t deprecatedCount = 0;
+        if (!idx->load(path, rf->pSolo.removeDeprecated, &deprecatedCount)) {
+            delete idx;
+            return;
+        }
+        if (rf->pSolo.removeDeprecated && deprecatedCount > 0) {
+            // Note: Cannot log here as we don't have access to logMain in this context
+            // Logging will happen in STAR.cpp initialization
+        }
+        gProbeIndex = idx;
+    });
     return gProbeIndex;
 }
 
@@ -826,20 +826,14 @@ FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
         const std::string &chrName = tr->chrName;
         bool isProbeChr = !chrName.empty() && chrName.rfind("ENSG", 0) == 0;
 
-        auto isCanonicalProbeCigar = [](const std::string &cig) -> bool {
-            return cig == "40S50M" || cig == "50M40S" || cig == "50M";
-        };
-
         CandidateView cv;
         cv.mapq = tr->mapq;
         cv.asScore = tr->asScore;
         cv.nm = tr->nm;
-        cv.probeCigarOk = true;
         cv.zgGeneIdx15.clear();
 
         if (isProbeChr) {
             cv.isGenomic = false;
-            cv.probeCigarOk = isCanonicalProbeCigar(tr->cigarString);
             cv.probeRegion = FlexGdnaProbeMetadata::instance().regionForProbeId(chrName);
             FLEX_COUNT_INC(probeAlignCount);
 
@@ -1055,38 +1049,29 @@ FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
                          resolvedGeneIdx) != candidate.zgGeneIdx15.end();
     };
 
-    bool resolvedGenomic = true;
     const CandidateView* winningCandidate = nullptr;
     for (const CandidateView& cv : candidates) {
-        if (cv.isGenomic || !cv.probeCigarOk || !candidateHasGene(cv))
-            continue;
-        if (winningCandidate == nullptr || candidateScore(cv) > candidateScore(*winningCandidate))
+        if (!candidateHasGene(cv)) continue;
+        if (winningCandidate == nullptr
+            || candidateScore(cv) > candidateScore(*winningCandidate)
+            || (candidateScore(cv) == candidateScore(*winningCandidate)
+                && winningCandidate->isGenomic && !cv.isGenomic)) {
             winningCandidate = &cv;
-    }
-    if (winningCandidate != nullptr) {
-        resolvedGenomic = false;
-    } else {
-        for (const CandidateView& cv : candidates) {
-            if (!cv.isGenomic || !candidateHasGene(cv))
-                continue;
-            if (winningCandidate == nullptr || candidateScore(cv) > candidateScore(*winningCandidate))
-                winningCandidate = &cv;
         }
     }
+    const bool resolvedGenomic = winningCandidate == nullptr || winningCandidate->isGenomic;
 
     FlexGdnaRegion resolvedProbeRegion = FlexGdnaUnknown;
     if (!resolvedGenomic) {
-        bool haveBestProbe = false;
-        int bestProbeScore = 0;
+        const int winningScore = candidateScore(*winningCandidate);
+        bool haveProbeRegion = false;
         for (const CandidateView& cv : candidates) {
-            if (cv.isGenomic || !cv.probeCigarOk || !candidateHasGene(cv))
+            if (cv.isGenomic || !candidateHasGene(cv) || candidateScore(cv) != winningScore)
                 continue;
-            const int score = candidateScore(cv);
-            if (!haveBestProbe || score > bestProbeScore) {
-                haveBestProbe = true;
-                bestProbeScore = score;
+            if (!haveProbeRegion) {
+                haveProbeRegion = true;
                 resolvedProbeRegion = cv.probeRegion;
-            } else if (score == bestProbeScore) {
+            } else {
                 resolvedProbeRegion =
                     flexGdnaMergeRegion(resolvedProbeRegion, cv.probeRegion);
             }

@@ -1,3 +1,15 @@
+STAR-suite Flex canonical exact-probe policy --- 2026/09/07
+==========================================================
+* Made an unambiguous exact H0 match to an included 50-base Flex probe authoritative without adding a policy selector that could accidentally route those reads through alignment.
+* Preserved verified H1 KEEP and certified H1 DENY decisions; only unencodable probe windows and absent cache keys pass to residual alignment.
+* Documented that whole-read alignment can differ from exact H0 because bases after the probe window are assay payload and can create unrelated genomic alignments.
+
+STAR-suite Flex alignment length-gate fix --- 2026/09/07
+========================================================
+* Disabled the generic whole-read score and match fraction gates by default in `--flex yes`, because Flex normally aligns the probe-bearing prefix and soft-clips the assay remainder.
+* Made parallel H1/H2 synthetic verification bypass those fractional gates without mutating shared alignment parameters, and made its lazy probe-index initialization thread-safe. Both races could reject valid cache variants.
+* Preserved explicit `--outFilterScoreMinOverLread` and `--outFilterMatchNminOverLread` values, and left all non-Flex behavior unchanged.
+
 STAR-suite Flex BGZF sorted-BAM bridge --- 2026/09/05
 ====================================================
 * Added an opt-in direct bridge from paired BGZF FASTQ into the existing STAR mapping chunks for fused STAR-Flex coordinate-sorted BAM runs.

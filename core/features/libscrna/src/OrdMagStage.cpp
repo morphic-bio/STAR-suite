@@ -4,6 +4,7 @@
  */
 
 #include "OrdMagStage.h"
+#include "EmptyDropsMultinomial.h"
 #include "pcg_random.hpp"
 #include <algorithm>
 #include <cmath>
@@ -351,7 +352,7 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
     // Compute candidate limit
     uint32 candLimit = 0;
     for (uint32 ii = 0; ii < nCB; ii++) {
-        if (nUMIperCB[ii] > minUMI) {
+        if (meetsEmptyDropsCandidateFloor(nUMIperCB[ii], minUMI)) {
             candLimit++;
         }
     }
@@ -497,7 +498,7 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilter(
     // Compute candidate limit
     uint32 candLimit = 0;
     for (uint32 ii = 0; ii < nCB; ii++) {
-        if (nUMIperCB[ii] > minUMI) {
+        if (meetsEmptyDropsCandidateFloor(nUMIperCB[ii], minUMI)) {
             candLimit++;
         }
     }

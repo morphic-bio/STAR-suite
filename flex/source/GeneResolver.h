@@ -19,25 +19,18 @@ struct CandidateView {
     int mapq = -1;                       // alignment MAPQ if available; -1 means unknown
     int asScore = 0;                     // alignment score analogue (AS) if available
     int nm = -1;                         // mismatch count analogue (NM) if available
-    bool probeCigarOk = true;            // for probe alignments: true if CIGAR passes probe QA
     FlexGdnaRegion probeRegion = FlexGdnaUnknown; // exact probe-contig region; genomic candidates are unknown
 };
 
-// Resolve a single gene from a group of candidates using probe-first policy
+// Resolve a single gene from a group of candidates using their STAR scores.
 // Returns: resolved gene index (15-bit), or 0 if ambiguous/unresolved/dropped
 //
 // Logic:
-// - If probe alignments exist:
-//   - All probe genes agree (single distinct gene) → returns that gene
-//   - Probe genes disagree (multiple distinct) → returns 0 (drop)
-//   - Ignores genomic hits when probe exists
-// - If no probe alignments:
-//   - Exactly one genomic assignment → returns that gene
-//   - Multiple genomic genes → falls through to fallback (don't blanket-drop)
-//   - No genes → falls through to fallback
-// - Fallback: unique-max ZG tie-break across all candidates
-//   - Unique max → returns that gene
-//   - Tie → returns 0 (drop)
+// - Rank all eligible probe and genomic alignments together by AS/NM.
+// - Return the gene when every alignment in the best-score tier supports the
+//   same gene.
+// - Return 0 when equal-best evidence supports different genes.
+// - Lower-scoring conflicting evidence does not veto a better alignment.
 //
 // Note: Multigene fanout is removed - this resolver returns a single gene or 0.
 //

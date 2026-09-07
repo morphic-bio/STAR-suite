@@ -13,6 +13,8 @@
 
 #include "EmptyDropsMultinomial.h"
 #include "OrdMagStage.h"
+#include "AdaptiveAmbientWindow.h"
+#include "FlexTagGroup.h"
 #include "scrna_api.h"
 
 using std::cerr;
@@ -29,14 +31,23 @@ struct Args {
     string barcodes_path;
     string out_barcodes;
     string out_dir;
+    vector<string> barcode_tags;
     string mode = "simple";
+    bool flex_tag_aware = false;
     bool include_zero_umis = false;
     uint32_t expected_cells = 0;
     uint32_t umi_min = 0;
+    uint32_t cand_max_n = 0;
     uint32_t sim_n = 0;
+    uint32_t mc_threads = 0;
     uint32_t ed_retain_count = 0;
+    uint32_t ordmag_retain_count = 0;
     uint32_t lower_testing_bound = 0;
     uint32_t ambient_umi_max = 0;
+    uint32_t ind_min = 0;
+    uint32_t ind_max = 0;
+    uint32_t max_expected_cells = 0;
+    uint64_t ambient_umi_target_per_tag = 0;
     double fdr = 0.0;
     double raw_pvalue = 0.0;
     bool use_fdr_gate = false;
@@ -52,12 +63,28 @@ struct Args {
 void usage(const char* prog) {
     cerr << "Usage: " << prog << " --matrix matrix.mtx --barcodes barcodes.tsv --out barcodes.tsv"
          << " [--mode simple|full] [--out-dir DIR] [--expected-cells N] [--umi-min N]"
-         << " [--sim-n N] [--ed-retain-count N] [--lower-testing-bound N]"
-         << " [--ambient-umi-max N] [--fdr X] [--raw-pvalue X] [--use-fdr-gate]"
+         << " [--cand-max-n N] [--sim-n N] [--mc-threads N]"
+         << " [--ed-retain-count N] [--ordmag-retain-count N] [--lower-testing-bound N]"
+         << " [--ambient-umi-max N] [--ind-min N] [--ind-max N]"
+         << " [--max-expected-cells N] [--fdr X] [--raw-pvalue X] [--use-fdr-gate]"
          << " [--apply-bh-correction] [--use-bootstrap] [--direct-ed-surface]"
          << " [--use-legacy-rank-ambient] [--use-guarded-rank-ambient]"
          << " [--ambient-fallback-min-abs N] [--ambient-fallback-min-frac X]"
+         << " [--flex-tag-aware] [--barcode-tag TAG8 ...]"
+         << " [--ambient-umi-target-per-tag N]"
          << " [--include-zero-umis]\n";
+}
+
+bool parse_uint64(const string& s, uint64_t* out) {
+    if (!out) return false;
+    char* end = nullptr;
+    errno = 0;
+    unsigned long long v = std::strtoull(s.c_str(), &end, 10);
+    if (errno != 0 || end == s.c_str() || *end != '\0') {
+        return false;
+    }
+    *out = static_cast<uint64_t>(v);
+    return true;
 }
 
 bool parse_uint32(const string& s, uint32_t* out) {
@@ -337,13 +364,13 @@ int run_direct_ed_surface(const vector<string>& barcodes,
     candidate_indices.reserve(retain_indices.size());
     candidate_counts.reserve(retain_indices.size());
     for (size_t local_idx = 0; local_idx < retain_indices.size(); local_idx++) {
-        if (retain_umi[local_idx] > config->lower_testing_bound) {
+        if (meetsEmptyDropsCandidateFloor(retain_umi[local_idx], config->lower_testing_bound)) {
             candidate_indices.push_back(static_cast<uint32_t>(local_idx));
             candidate_counts.push_back(retain_umi[local_idx]);
         }
     }
 
-    std::cerr << "[scrna_simpleed] Direct ED candidates (UMI > "
+    std::cerr << "[scrna_simpleed] Direct ED candidates (UMI >= "
               << config->lower_testing_bound << "): " << candidate_indices.size() << "\n";
 
     EmptyDropsParams ed_params;
@@ -450,6 +477,9 @@ int run_simpleed_custom_ambient(const vector<string>& barcodes,
                                 bool use_guarded_rank_ambient,
                                 uint32_t ambient_fallback_min_abs,
                                 double ambient_fallback_min_frac,
+                                uint32_t max_expected_cells,
+                                uint32_t ordmag_retain_count,
+                                uint64_t ambient_umi_target,
                                 scrna_ed_result* result) {
     if (!config || !result) {
         return -1;
@@ -470,6 +500,19 @@ int run_simpleed_custom_ambient(const vector<string>& barcodes,
         ? std::min<uint32_t>(config->ed_retain_count, umi_counts.size())
         : static_cast<uint32_t>(umi_counts.size());
 
+    AdaptiveAmbientWindow adaptiveWindow;
+    adaptiveWindow.start = std::min<uint32_t>(config->ind_min, umi_counts.size());
+    adaptiveWindow.end = retain_count;
+    if (ambient_umi_target > 0) {
+        adaptiveWindow = selectAdaptiveAmbientWindow(
+            umi_idx, config->ind_min, retain_count, ambient_umi_target);
+        retain_count = adaptiveWindow.end;
+        std::cerr << "[scrna_simpleed] Adaptive ambient window: ["
+                  << adaptiveWindow.start << ", " << adaptiveWindow.end
+                  << "), mass=" << adaptiveWindow.umiMass
+                  << ", target=" << ambient_umi_target << "\n";
+    }
+
     std::vector<uint32_t> retain_indices;
     std::vector<uint32_t> retain_umi;
     retain_indices.reserve(retain_count);
@@ -480,6 +523,13 @@ int run_simpleed_custom_ambient(const vector<string>& barcodes,
         retain_umi.push_back(umi_counts[orig_idx]);
     }
 
+    const uint32_t simple_count = ordmag_retain_count > 0
+        ? std::min<uint32_t>(ordmag_retain_count, retain_umi.size())
+        : static_cast<uint32_t>(retain_umi.size());
+    vector<uint32_t> simple_umi(retain_umi.begin(), retain_umi.begin() + simple_count);
+    std::cerr << "[scrna_simpleed] OrdMag retain window: " << simple_count
+              << "; ambient-accessible retain window: " << retain_count << "\n";
+
     SimpleEmptyDropsParams simple_params;
     simple_params.nExpectedCells = config->n_expected_cells;
     simple_params.maxPercentile = config->max_percentile;
@@ -488,21 +538,23 @@ int run_simpleed_custom_ambient(const vector<string>& barcodes,
     simple_params.umiMinFracMedian = config->umi_min_frac_median;
     simple_params.candMaxN = config->cand_max_n;
     simple_params.indMin = config->ind_min;
-    simple_params.indMax = config->ind_max;
+    simple_params.indMax = retain_count;
 
     SimpleEmptyDropsResult simple_result;
     if (config->use_bootstrap) {
         simple_params.useBootstrap = true;
         simple_params.nExpectedCells = 0;
-        simple_params.maxExpectedCells = std::min(config->ind_min / 2, static_cast<uint32_t>(262144));
+        simple_params.maxExpectedCells = max_expected_cells > 0
+            ? max_expected_cells
+            : std::min(config->ind_min / 2, static_cast<uint32_t>(262144));
         if (simple_params.maxExpectedCells < 1000) {
             simple_params.maxExpectedCells = 90000;
         }
         simple_result = SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
-            retain_umi, retain_indices.size(), simple_params);
+            simple_umi, simple_umi.size(), simple_params);
     } else {
         simple_result = SimpleEmptyDropsStage::runCRSimpleFilter(
-            retain_umi, retain_indices.size(), simple_params);
+            simple_umi, simple_umi.size(), simple_params);
     }
 
     std::cerr << "[scrna_simpleed] Custom ambient simple filter: "
@@ -512,7 +564,9 @@ int run_simpleed_custom_ambient(const vector<string>& barcodes,
     std::vector<uint32_t> ambient_retain_indices;
     if (use_legacy_rank_ambient) {
         uint32_t ambient_start = std::min<uint32_t>(config->ind_min, retain_indices.size());
-        uint32_t ambient_end = std::min<uint32_t>(config->ind_max, retain_indices.size());
+        uint32_t ambient_end = ambient_umi_target > 0
+            ? std::min<uint32_t>(adaptiveWindow.end, retain_indices.size())
+            : std::min<uint32_t>(config->ind_max, retain_indices.size());
         ambient_retain_indices.reserve(ambient_end > ambient_start ? ambient_end - ambient_start : 0);
         for (uint32_t rank = ambient_start; rank < ambient_end; rank++) {
             ambient_retain_indices.push_back(rank);
@@ -625,7 +679,7 @@ int run_simpleed_custom_ambient(const vector<string>& barcodes,
 
     EmptyDropsParams ed_params;
     ed_params.indMin = config->ind_min;
-    ed_params.indMax = config->ind_max;
+    ed_params.indMax = retain_count;
     ed_params.umiMin = config->umi_min;
     ed_params.umiMinFracMedian = config->umi_min_frac_median;
     ed_params.candMaxN = config->cand_max_n;
@@ -737,6 +791,15 @@ int main(int argc, char** argv) {
             args.out_barcodes = argv[++i];
         } else if (key == "--out-dir" && i + 1 < argc) {
             args.out_dir = argv[++i];
+        } else if (key == "--flex-tag-aware") {
+            args.flex_tag_aware = true;
+        } else if (key == "--barcode-tag" && i + 1 < argc) {
+            args.barcode_tags.push_back(argv[++i]);
+        } else if (key == "--ambient-umi-target-per-tag" && i + 1 < argc) {
+            if (!parse_uint64(argv[++i], &args.ambient_umi_target_per_tag)) {
+                cerr << "Invalid --ambient-umi-target-per-tag value\n";
+                return 2;
+            }
         } else if (key == "--mode" && i + 1 < argc) {
             args.mode = argv[++i];
         } else if (key == "--include-zero-umis") {
@@ -751,14 +814,29 @@ int main(int argc, char** argv) {
                 cerr << "Invalid --umi-min value\n";
                 return 2;
             }
+        } else if (key == "--cand-max-n" && i + 1 < argc) {
+            if (!parse_uint32(argv[++i], &args.cand_max_n)) {
+                cerr << "Invalid --cand-max-n value\n";
+                return 2;
+            }
         } else if (key == "--sim-n" && i + 1 < argc) {
             if (!parse_uint32(argv[++i], &args.sim_n)) {
                 cerr << "Invalid --sim-n value\n";
                 return 2;
             }
+        } else if (key == "--mc-threads" && i + 1 < argc) {
+            if (!parse_uint32(argv[++i], &args.mc_threads)) {
+                cerr << "Invalid --mc-threads value\n";
+                return 2;
+            }
         } else if (key == "--ed-retain-count" && i + 1 < argc) {
             if (!parse_uint32(argv[++i], &args.ed_retain_count)) {
                 cerr << "Invalid --ed-retain-count value\n";
+                return 2;
+            }
+        } else if (key == "--ordmag-retain-count" && i + 1 < argc) {
+            if (!parse_uint32(argv[++i], &args.ordmag_retain_count)) {
+                cerr << "Invalid --ordmag-retain-count value\n";
                 return 2;
             }
         } else if (key == "--lower-testing-bound" && i + 1 < argc) {
@@ -769,6 +847,21 @@ int main(int argc, char** argv) {
         } else if (key == "--ambient-umi-max" && i + 1 < argc) {
             if (!parse_uint32(argv[++i], &args.ambient_umi_max)) {
                 cerr << "Invalid --ambient-umi-max value\n";
+                return 2;
+            }
+        } else if (key == "--ind-min" && i + 1 < argc) {
+            if (!parse_uint32(argv[++i], &args.ind_min)) {
+                cerr << "Invalid --ind-min value\n";
+                return 2;
+            }
+        } else if (key == "--ind-max" && i + 1 < argc) {
+            if (!parse_uint32(argv[++i], &args.ind_max)) {
+                cerr << "Invalid --ind-max value\n";
+                return 2;
+            }
+        } else if (key == "--max-expected-cells" && i + 1 < argc) {
+            if (!parse_uint32(argv[++i], &args.max_expected_cells)) {
+                cerr << "Invalid --max-expected-cells value\n";
                 return 2;
             }
         } else if (key == "--ambient-fallback-min-abs" && i + 1 < argc) {
@@ -810,6 +903,57 @@ int main(int argc, char** argv) {
     if (args.matrix_path.empty() || args.barcodes_path.empty() || args.out_barcodes.empty()) {
         usage(argv[0]);
         return 2;
+    }
+
+    if (args.flex_tag_aware) {
+        if (args.barcode_tags.empty()) {
+            cerr << "--flex-tag-aware requires at least one --barcode-tag TAG8\n";
+            return 2;
+        }
+        const uint64_t n_tags = std::max<size_t>(1, args.barcode_tags.size());
+        auto scaled = [&](uint64_t per_tag, const char* label) -> uint32_t {
+            const uint64_t value = per_tag * n_tags;
+            if (value > std::numeric_limits<uint32_t>::max()) {
+                cerr << label << " exceeds uint32 range for " << n_tags << " tags\n";
+                std::exit(2);
+            }
+            return static_cast<uint32_t>(value);
+        };
+        for (const string& tag : args.barcode_tags) {
+            if (tag.size() != 8) {
+                cerr << "--barcode-tag requires an 8-base TAG8 value: " << tag << "\n";
+                return 2;
+            }
+        }
+        std::sort(args.barcode_tags.begin(), args.barcode_tags.end());
+        if (std::adjacent_find(args.barcode_tags.begin(), args.barcode_tags.end()) != args.barcode_tags.end()) {
+            cerr << "Duplicate --barcode-tag values are not allowed\n";
+            return 2;
+        }
+        args.mode = "full";
+        args.use_bootstrap = true;
+        args.use_legacy_rank_ambient = true;
+        args.use_guarded_rank_ambient = false;
+        args.use_fdr_gate = true;
+        args.apply_bh_correction = true;
+        if (args.ambient_umi_target_per_tag == 0) args.ambient_umi_target_per_tag = 500000;
+        if (args.ind_min == 0) args.ind_min = scaled(45000, "ambient start");
+        if (args.ind_max == 0) args.ind_max = scaled(90000, "ambient base end");
+        if (args.ed_retain_count == 0) args.ed_retain_count = args.ind_max;
+        if (args.ordmag_retain_count == 0) args.ordmag_retain_count = scaled(90000, "OrdMag retain count");
+        if (args.max_expected_cells == 0) args.max_expected_cells = scaled(22500, "maximum expected cells");
+        if (args.umi_min == 0) args.umi_min = 500;
+        if (args.lower_testing_bound == 0) args.lower_testing_bound = 500;
+        if (args.cand_max_n == 0) args.cand_max_n = 100000;
+        if (args.sim_n == 0) args.sim_n = 10000;
+        if (args.mc_threads == 0) args.mc_threads = 8;
+        if (args.raw_pvalue == 0.0) args.raw_pvalue = 0.05;
+        if (args.fdr == 0.0) args.fdr = 0.01;
+        cerr << "[scrna_simpleed] Flex tag-aware caller: tags=" << n_tags
+             << " ambient-ranks=[" << args.ind_min << ',' << args.ind_max << ")"
+             << " ambient-target-per-tag=" << args.ambient_umi_target_per_tag
+             << " ordmag-retain=" << args.ordmag_retain_count
+             << " max-expected=" << args.max_expected_cells << "\n";
     }
 
     vector<string> barcodes;
@@ -888,7 +1032,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (!args.include_zero_umis) {
+    if (!args.include_zero_umis || !args.barcode_tags.empty()) {
         const uint32_t old_cols = n_cols;
         vector<uint32_t> counts_filtered;
         counts_filtered.reserve(n_cols);
@@ -897,7 +1041,9 @@ int main(int argc, char** argv) {
         vector<uint32_t> old_to_new(old_cols, std::numeric_limits<uint32_t>::max());
 
         for (uint32_t i = 0; i < old_cols; i++) {
-            if (counts32[i] > 0) {
+            const bool keep_nonzero = args.include_zero_umis || counts32[i] > 0;
+            const bool keep_tag = barcodeHasAnyFlexTag(barcodes[i], args.barcode_tags);
+            if (keep_nonzero && keep_tag) {
                 old_to_new[i] = static_cast<uint32_t>(barcodes_filtered.size());
                 barcodes_filtered.push_back(barcodes[i]);
                 counts_filtered.push_back(counts32[i]);
@@ -905,13 +1051,17 @@ int main(int argc, char** argv) {
         }
 
         if (counts_filtered.empty()) {
-            cerr << "All cells have zero UMIs after filtering; cannot run EmptyDrops\n";
+            cerr << "No cells remain after barcode/UMI filtering; cannot run EmptyDrops\n";
             return 1;
         }
 
         const uint32_t dropped = old_cols - static_cast<uint32_t>(counts_filtered.size());
-        cerr << "[scrna_simpleed] Dropped " << dropped << " zero-UMI cells; kept "
-             << counts_filtered.size() << "\n";
+        cerr << "[scrna_simpleed] Dropped " << dropped
+             << " cells by barcode/UMI filtering; kept " << counts_filtered.size();
+        if (!args.barcode_tags.empty()) {
+            cerr << " across " << args.barcode_tags.size() << " tag(s)";
+        }
+        cerr << "\n";
 
         barcodes.swap(barcodes_filtered);
         counts32.swap(counts_filtered);
@@ -989,8 +1139,14 @@ int main(int argc, char** argv) {
     if (args.umi_min > 0) {
         config->umi_min = args.umi_min;
     }
+    if (args.cand_max_n > 0) {
+        config->cand_max_n = args.cand_max_n;
+    }
     if (args.sim_n > 0) {
         config->sim_n = args.sim_n;
+    }
+    if (args.mc_threads > 0) {
+        config->mc_threads = args.mc_threads;
     }
     if (args.ed_retain_count > 0) {
         config->ed_retain_count = args.ed_retain_count;
@@ -1000,6 +1156,12 @@ int main(int argc, char** argv) {
     }
     if (args.ambient_umi_max > 0) {
         config->ambient_umi_max = args.ambient_umi_max;
+    }
+    if (args.ind_min > 0) {
+        config->ind_min = args.ind_min;
+    }
+    if (args.ind_max > 0) {
+        config->ind_max = args.ind_max;
     }
     if (args.fdr > 0.0) {
         config->fdr = args.fdr;
@@ -1021,6 +1183,19 @@ int main(int argc, char** argv) {
     scrna_ed_result result;
     std::memset(&result, 0, sizeof(result));
     int rc = 0;
+    uint64_t ambient_umi_target = 0;
+    if (args.ambient_umi_target_per_tag > 0) {
+        const uint64_t n_tags = std::max<size_t>(1, args.barcode_tags.size());
+        if (args.ambient_umi_target_per_tag >
+            std::numeric_limits<uint64_t>::max() / n_tags) {
+            cerr << "Ambient UMI target exceeds uint64 range for " << n_tags
+                 << " tags\n";
+            scrna_ed_config_destroy(config);
+            return 2;
+        }
+        ambient_umi_target = args.ambient_umi_target_per_tag * n_tags;
+    }
+
     if (args.direct_ed_surface) {
         rc = run_direct_ed_surface(barcodes, counts32, sparse_gene_ids, sparse_counts,
                                    sparse_cell_index, n_genes_per_cell, n_rows, config, &result);
@@ -1031,6 +1206,9 @@ int main(int argc, char** argv) {
                                          args.use_guarded_rank_ambient,
                                          args.ambient_fallback_min_abs,
                                          args.ambient_fallback_min_frac,
+                                         args.max_expected_cells,
+                                         args.ordmag_retain_count,
+                                         ambient_umi_target,
                                          &result);
     } else {
         rc = scrna_emptydrops_run(&input, config, &result);

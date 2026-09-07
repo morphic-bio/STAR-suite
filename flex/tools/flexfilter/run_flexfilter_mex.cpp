@@ -76,7 +76,7 @@ void printUsage(const char* progName) {
     std::cerr << "  --ed-use-fdr                Use FDR gate\n";
     std::cerr << "  --ed-use-rawp               Use raw p-value gate (default)\n";
     std::cerr << "  --ed-rawp-threshold <F>     Raw p-value threshold (default: 0.01)\n";
-    std::cerr << "  --ed-lower-bound <N>        Lower UMI bound (cells <= N excluded; default: 500)\n";
+    std::cerr << "  --ed-lower-bound <N>        Inclusive UMI floor (cells < N excluded; default: 500)\n";
     std::cerr << "  --ed-ambient-umi-max <N>    Max UMI for ambient (default: 100)\n";
     std::cerr << "  --ed-retain-count <N>       Retain window size (default: 120000)\n";
     std::cerr << "\nSimple EmptyDrops (fallback filter):\n";

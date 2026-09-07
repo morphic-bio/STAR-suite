@@ -28,10 +28,17 @@ public:
 
     // Match a pre-packed 8-base BAM-encoded tag (packed at position 0, length 8) against sample codes.
     // Used when the caller already extracted the 8 bases at sampleProbeOffset.
-    uint32_t detectSampleFromPackedTag(const uint8_t *packedTag8) const;
+    // exactOnly restricts the lookup to listed sequences, for nearby offsets;
+    // *ambiguous is set when one-mismatch rescue found owners tied at this
+    // offset, which callers treat as final rather than searching on.
+    uint32_t detectSampleFromPackedTag(const uint8_t *packedTag8, bool exactOnly = false, bool *ambiguous = nullptr) const;
     // Match eight A/C/G/T bases encoded with base 0 in the least-significant
     // two bits (A=0, C=1, G=2, T=3), as stored by CBQ.
-    uint32_t detectSampleFromTwoBitTag(uint16_t packedTag8) const;
+    uint32_t detectSampleFromTwoBitTag(uint16_t packedTag8, bool exactOnly = false, bool *ambiguous = nullptr) const;
+    // Tag lookup table statistics, for the run log: exact entries, one-mismatch
+    // entries accepted, one-mismatch entries rejected as ambiguous.
+    void tagTableStats(uint32_t &exact, uint32_t &mismatch1, uint32_t &ambiguous) const;
+    uint32_t tagTableMaxOccupancy() const { return tagMaxOccupancy_; }
 
     // Convenience helper: parse a BAM record and detect the sample index from its sequence.
     // The record pointer must reference the beginning of a BAM alignment (block_size field first).
@@ -75,11 +82,50 @@ private:
     std::unordered_map<uint32_t,std::string> whitelistIndexToLabel_;
     std::vector<uint32_t> sampleCodes_;                  // nsamples * 8 encoded sequences (canonical + variants)
     std::vector<uint8_t> variantCountsPerSample_;        // actual number of sequences stored per sample (<=8)
+    // Split the two-bit-packed tag into 3/3/2-base pieces. Each piece table is
+    // keyed by the two unchanged pieces and stores a CSR list of listed-tag
+    // ids. A tag within one substitution of a listed tag must occur in at
+    // least one of these lists. The complete lookup is small enough to remain
+    // cache-resident and does not allocate a 4^8 direct-address table.
+    struct TagPieceTable {
+        std::vector<uint16_t> offsets;
+        std::vector<uint16_t> ids;
+    };
+    std::array<TagPieceTable, 3> tagPieceTables_;
+    std::vector<uint16_t> tagCodes_;
+    std::vector<uint16_t> tagOwners_;
+    bool tagTableBuilt_ = false;
+    uint32_t tagStatExact_ = 0, tagStatMismatch_ = 0, tagStatAmbiguous_ = 0;
+    uint32_t tagMaxOccupancy_ = 0;
+    void buildTagTable();
+    uint32_t lookupIndex(uint16_t index, bool exactOnly, bool *ambiguous) const;
+    uint32_t lookupCode(uint32_t code, bool exactOnly, bool *ambiguous) const;
+    static inline uint16_t pieceKey(uint16_t index, unsigned table) {
+        if (table == 0u) return static_cast<uint16_t>(index >> 6u); // P1,P2
+        if (table == 1u) { // P0,P2
+            return static_cast<uint16_t>((index & 0x003Fu) | ((index >> 6u) & 0x03C0u));
+        }
+        return static_cast<uint16_t>(index & 0x0FFFu); // P0,P1
+    }
+    static inline uint16_t codeToIndex(uint32_t code) {
+        // code holds eight BAM nibbles, base 0 in the high nibble; the index holds
+        // two bits per base, base 0 in the low bits, matching the CBQ packing.
+        uint16_t index = 0;
+        for (unsigned i = 0; i < 8; ++i) {
+            const uint32_t nib = (code >> (4u * (7u - i))) & 0xFu;
+            const uint16_t b = nib == 1u ? 0u : nib == 2u ? 1u : nib == 4u ? 2u : 3u;
+            index = static_cast<uint16_t>(index | (b << (2u * i)));
+        }
+        return index;
+    }
 
     // Token -> sample index. Written once per token (first writer wins, under
     // the mutex); read on every read of every thread, so reads are lock-free.
     static std::array<std::atomic<uint16_t>, 32> tokenToSampleIdx_;
     static std::mutex tokenLUTMutex_;
+    static std::once_flag canonicalByIdxOnce_;
+    static std::once_flag labelsByIdxOnce_;
+    static std::once_flag canonicalTagsOnce_;
     static std::vector<std::string> canonicalByIdx_;
     static std::vector<std::string> labelsByIdx_;
 
