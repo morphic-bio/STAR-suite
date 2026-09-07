@@ -231,10 +231,11 @@ void testOffsetZeroH0H1Routing(const std::string& directory)
     const std::string h1Sequence = cacheFixtureSequence(2);
     const std::string denySequence = cacheFixtureSequence(3);
     const std::string ambiguousSequence = cacheFixtureSequence(4);
+    const std::string h1x2Sequence = cacheFixtureSequence(5);
     std::string ambiguousAlternate = ambiguousSequence;
     ambiguousAlternate[18] = ambiguousAlternate[18] == 'A' ? 'C' : 'A';
 
-    std::vector<FlexHashScreenCache::Record> records(5);
+    std::vector<FlexHashScreenCache::Record> records(6);
     require(FlexHashScreenCache::encodeProbeWindow(
                 h0Sequence.c_str(), 0, records[0].seqLo, records[0].seqHi),
             "H0 fixture encoding");
@@ -265,6 +266,12 @@ void testOffsetZeroH0H1Routing(const std::string& directory)
             "ambiguous fixture second-gene encoding");
     records[4].resolvedGeneIdx15 = 44;
     records[4].cacheClass = 1;
+
+    require(FlexHashScreenCache::encodeProbeWindow(
+                h1x2Sequence.c_str(), 0, records[5].seqLo, records[5].seqHi),
+            "H1X2 fixture encoding");
+    records[5].resolvedGeneIdx15 = 55;
+    records[5].cacheClass = FlexHashCacheH1X2;
 
     const std::string path = directory + "/offset0_cache_v3.bin";
     std::string error;
@@ -330,8 +337,30 @@ void testOffsetZeroH0H1Routing(const std::string& directory)
     decision = cache.classifyReadH0H1Offset0SingleN(
         nSequence.c_str(), nSequence.size());
     require(decision.action == FlexHashScreenDecision::Keep &&
-                decision.geneIdx15 == 11,
+                decision.geneIdx15 == 11 && decision.singleN &&
+                decision.cacheClass == FlexHashCacheH1 &&
+                decision.singleNCacheClass == FlexHashCacheH0,
             "one N with a unique cached gene routes to KEEP");
+
+    std::string h1N = h1Sequence;
+    h1N[7] = 'N';
+    decision = cache.classifyReadH0H1Offset0SingleN(
+        h1N.c_str(), h1N.size());
+    require(decision.action == FlexHashScreenDecision::Keep &&
+                decision.geneIdx15 == 22 && decision.singleN &&
+                decision.cacheClass == FlexHashCacheH1 &&
+                decision.singleNCacheClass == FlexHashCacheH1,
+            "one N with a unique H1 cached gene routes to KEEP");
+
+    std::string h1x2N = h1x2Sequence;
+    h1x2N[39] = 'N';
+    decision = cache.classifyReadH0H1Offset0SingleN(
+        h1x2N.c_str(), h1x2N.size());
+    require(decision.action == FlexHashScreenDecision::Keep &&
+                decision.geneIdx15 == 55 && decision.singleN &&
+                decision.cacheClass == FlexHashCacheH1 &&
+                decision.singleNCacheClass == FlexHashCacheH1X2,
+            "one N with a unique H1X2 cached gene routes to KEEP");
 
     std::string denyN = denySequence;
     denyN[10] = 'N';
@@ -362,6 +391,22 @@ void testOffsetZeroH0H1Routing(const std::string& directory)
                 decision.geneIdx15 == 11,
             "CBQ one-N lookup agrees with FASTQ lookup");
 
+    encodeCbqProbeWindow(h1Sequence, cbqLo, cbqHi);
+    decision = cache.classifyCbqH0H1Offset0SingleN(
+        cbqLo, cbqHi, UINT64_C(1) << 7);
+    require(decision.action == FlexHashScreenDecision::Keep &&
+                decision.geneIdx15 == 22 && decision.singleN &&
+                decision.singleNCacheClass == FlexHashCacheH1,
+            "CBQ one-N lookup resolves a unique H1 record");
+
+    encodeCbqProbeWindow(h1x2Sequence, cbqLo, cbqHi);
+    decision = cache.classifyCbqH0H1Offset0SingleN(
+        cbqLo, cbqHi, UINT64_C(1) << 39);
+    require(decision.action == FlexHashScreenDecision::Keep &&
+                decision.geneIdx15 == 55 && decision.singleN &&
+                decision.singleNCacheClass == FlexHashCacheH1X2,
+            "CBQ one-N lookup resolves a unique H1X2 record");
+
     encodeCbqProbeWindow(denySequence, cbqLo, cbqHi);
     decision = cache.classifyCbqH0H1Offset0SingleN(
         cbqLo, cbqHi, UINT64_C(1) << 10);
@@ -373,6 +418,12 @@ void testOffsetZeroH0H1Routing(const std::string& directory)
         cbqLo, cbqHi, UINT64_C(1) << 18);
     require(decision.action == FlexHashScreenDecision::Pass,
             "CBQ one-N multi-gene result remains eligible for alignment");
+
+    encodeCbqProbeWindow(h0Sequence, cbqLo, cbqHi);
+    decision = cache.classifyCbqH0H1Offset0SingleN(
+        cbqLo, cbqHi, (UINT64_C(1) << 4) | (UINT64_C(1) << 27));
+    require(decision.action == FlexHashScreenDecision::Pass && !decision.singleN,
+            "CBQ windows with two Ns remain eligible for alignment");
 }
 
 } // namespace

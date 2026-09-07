@@ -1,3 +1,8 @@
+STAR-suite Flex BAM single-N parity --- 2026/09/07
+==================================================
+* Applied the fused path's conservative exactly-one-N H0/H1/H1X2 retry to the ordinary Flex mapping/BAM path.
+* Kept conflicts, deny records, and windows with two or more uncalled bases eligible for residual alignment.
+
 STAR-suite Flex decision sidecar --- 2026/09/07
 ================================================
 * Added the optional `--soloFlexDecisionSidecar` binary diagnostic for read-level cache and residual-alignment audits.

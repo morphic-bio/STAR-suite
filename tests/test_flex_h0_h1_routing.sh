@@ -242,13 +242,21 @@ run_case fastq 1 0
 run_case cbq 1 0
 
 run_bam_sidecar_case() {
-    local out_dir="${TEST_ROOT}/fastq_bam_sidecar"
+    local input_kind="$1"
+    local out_dir="${TEST_ROOT}/${input_kind}_bam_sidecar"
+    local -a input_args
+    if [[ "${input_kind}" == "fastq" ]]; then
+        input_args=(--readFilesIn "${TEST_ROOT}/r2.fastq" "${TEST_ROOT}/r1.fastq")
+    else
+        input_args=(--readFilesType Binseq PE --readFilesCbqRangeMode off
+                    --readFilesIn "${TEST_ROOT}/routing.cbq")
+    fi
     mkdir -p "${out_dir}"
     "${STAR_BIN}" \
         --runThreadN 2 \
         --dynamicThreadInterface 1 \
         --genomeDir "${GENOME_DIR}" \
-        --readFilesIn "${TEST_ROOT}/r2.fastq" "${TEST_ROOT}/r1.fastq" \
+        "${input_args[@]}" \
         --soloType CB_UMI_Simple \
         --soloCBstart 1 --soloCBlen 16 \
         --soloUMIstart 17 --soloUMIlen 12 \
@@ -289,12 +297,13 @@ run_bam_sidecar_case() {
         NR == 3 && !($5 == "KEEP" && $6 == "H1") { exit 1 }
         NR == 4 && !($5 == "KEEP" && $6 == "H1X2") { exit 1 }
         NR == 5 && !($5 == "DENY" && $6 == "NEGATIVE") { exit 1 }
-        NR == 6 && !($5 == "MISS" && $8 == 0 && $17 == 1 && $18 == 1) { exit 1 }
+        NR == 6 && !($5 == "KEEP" && $6 == "H1" && $7 == "H0" && $8 == 1 && $9 == 1 && $17 == 0 && $23 == "CACHE_KEEP") { exit 1 }
         NR == 8 && !($5 == "DENY" && $6 == "." && $15 == 1 && $23 == "SAMPLE_TAG_REJECT") { exit 1 }
     ' "${out_dir}/flex_decisions.tsv" \
-        || die "ordinary Flex/BAM decision provenance differs"
+        || die "ordinary ${input_kind} Flex/BAM decision provenance differs"
 }
 
-run_bam_sidecar_case
+run_bam_sidecar_case fastq
+run_bam_sidecar_case cbq
 
 echo "PASS: FASTQ and packed CBQ agree for H0/H1/H1X2 plus single-N routing; --soloProbeMismatch 0 restores exact-cache behavior"
