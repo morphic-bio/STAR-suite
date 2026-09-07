@@ -306,7 +306,9 @@ class ReadAlign {
         int createExtendWindowsWithAlign(uint a1, uint aStr); //extends and windows with one alignment
         void assignAlignToWindow(uint a1, uint aLength, uint aStr, uint aNrep, uint aFrag, uint aRstart,bool aAnchor, uint sjA); //assigns one alignment to a window
 
-        void mappedFilter();
+        // applyReadLengthFraction=false is reserved for synthetic Flex probe
+        // verification, whose padded pair length is not an alignment target.
+        void mappedFilter(bool applyReadLengthFraction=true);
         void chimericDetection();
         bool chimericDetectionOld();
         void chimericDetectionOldOutput();

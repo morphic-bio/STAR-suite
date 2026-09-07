@@ -79,15 +79,10 @@ int ReadAlign::flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t le
 
     // Only 50bp of the 90bp R2 aligns (the probe region); the rest is padding
     // + sample tag. Score/match thresholds scaled by Lread (R2+R1=119) or even
-    // readLength[0] (90) reject every H1/H2 variant. Temporarily zero the
-    // per-read-length scaling so mappedFilter() uses only absolute thresholds.
-    const double savedScoreOvL = P.outFilterScoreMinOverLread;
-    const double savedMatchOvL = P.outFilterMatchNminOverLread;
-    P.outFilterScoreMinOverLread = 0;
-    P.outFilterMatchNminOverLread = 0;
-    mappedFilter();
-    P.outFilterScoreMinOverLread = savedScoreOvL;
-    P.outFilterMatchNminOverLread = savedMatchOvL;
+    // readLength[0] (90) reject every H1/H2 variant. Ask mappedFilter() to use
+    // only absolute thresholds. Do not modify the shared Parameters object:
+    // cache generation validates variants concurrently on all mapping workers.
+    mappedFilter(false);
 
     // Check mapping result now, before outputAlignments() which will set
     // unmapType=4 because the barcode mate (R1) never maps to the genome.

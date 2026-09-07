@@ -335,6 +335,7 @@ declare -a STANDARD_TESTS=(
     "${SCRIPT_DIR}/run_solo_smoke.sh"
     "${SCRIPT_DIR}/test_readFilesIn_max_mates.sh"
     "${SCRIPT_DIR}/test_flex_alignment_gate_defaults.sh"
+    "${SCRIPT_DIR}/test_flex_h1_verifier_thread_safety.sh"
     
     # 2) CR compatibility + CR multi
     "${SCRIPT_DIR}/run_cr_compat_integration_smoke.sh"
