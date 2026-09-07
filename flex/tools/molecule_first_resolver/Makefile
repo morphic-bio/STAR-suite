@@ -12,8 +12,9 @@ CPPFLAGS += -I$(FLEX_SRC) -I$(CORE_SRC) -I$(HTSLIB_DIR) -DSTAR_SUITE_VERSION=\"$
 RESOLVER_SRC := $(FLEX_SRC)/solo/MoleculeFirstResolver.cpp
 MULTIGENE_SRC := $(CORE_SRC)/MultiGeneUmiCr.cpp
 SIDECAR_SRC := $(CORE_SRC)/SpatialFeatureSidecar.cpp
+FLEX_DECISION_SIDECAR_SRC := $(CORE_SRC)/FlexDecisionSidecar.cpp
 TARGETS := molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize \
-	spatial_feature_sidecar_dump spatial_feature_sidecar_join
+	spatial_feature_sidecar_dump spatial_feature_sidecar_join flex_decision_sidecar_dump
 TEST_TARGET := test_molecule_first_resolver
 SIDECAR_JOIN_TEST := test_spatial_feature_sidecar_join
 
@@ -36,6 +37,9 @@ spatial_feature_sidecar_dump: spatial_feature_sidecar_dump.cpp $(SIDECAR_SRC) $(
 
 spatial_feature_sidecar_join: spatial_feature_sidecar_join.cpp $(SIDECAR_SRC) $(CORE_SRC)/SpatialFeatureSidecar.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ spatial_feature_sidecar_join.cpp $(SIDECAR_SRC) -lz -lcrypto
+
+flex_decision_sidecar_dump: flex_decision_sidecar_dump.cpp $(FLEX_DECISION_SIDECAR_SRC) $(CORE_SRC)/FlexDecisionSidecar.h
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ flex_decision_sidecar_dump.cpp $(FLEX_DECISION_SIDECAR_SRC)
 
 $(HTSLIB):
 	$(MAKE) -C $(HTSLIB_DIR) lib-static

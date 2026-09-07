@@ -14,6 +14,7 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include "FlexDecisionSidecar.h"
 
 // --- Hash screen dump (env-gated: STAR_DUMP_HASH_SCREEN=<path>) ---
 // Binary format: 8-byte magic "HSCRN001", 8-byte nReads placeholder,
@@ -461,6 +462,28 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             }
         }
         hashScreenDumpWrite(Read0[0], readLengthOriginal[0], hashScreenSampleIdx, hashScreenDecision_);
+        if (P.pSolo.flexDecisionSidecarWriter != nullptr) {
+            if (iReadAll == 0) {
+                exitWithError(
+                    "EXITING because the Flex decision sidecar received STAR read ordinal zero\n",
+                    std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+            }
+            const uint64_t sidecarOrdinal = iReadAll - 1;
+            soloRead->readBar->flexDecisionSidecarOrdinal = sidecarOrdinal;
+            std::string sidecarError;
+            if (!P.pSolo.flexDecisionSidecarWriter->recordTriage(
+                    sidecarOrdinal, readFilesIndex,
+                    flex_decision_sidecar::kMissingLaneOrdinal,
+                    readName, std::strlen(readName), hashScreenDecision_,
+                    sampleDetReady_, hashScreenSampleOK, detectedSampleByte_,
+                    hashScreenDecision_.action == FlexHashScreenDecision::Pass,
+                    false, sidecarError)) {
+                exitWithError(
+                    "EXITING because the Flex decision sidecar write failed: "
+                        + sidecarError + "\n",
+                    std::cerr, P.inOut->logMain, EXIT_CODE_FILE_WRITE, P);
+            }
+        }
         if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
             if (spatialFlex) {
                 if (iReadAll == 0 || hashScreenDecision_.geneIdx15 == 0
@@ -651,6 +674,7 @@ int ReadAlign::oneReadFromPacket(EnrichedPacket &pkt) {
             soloRead->readBar->cbMatchInd[i] = pkt.cbMatchInd[i];
         soloRead->readBar->umiB = pkt.umiB;
         soloRead->readBar->detectedSampleToken = pkt.detectedSampleToken;
+        soloRead->readBar->flexDecisionSidecarOrdinal = pkt.iReadAll;
     }
 
     // Convert ASCII sequences to numeric encoding (must happen before hash screen

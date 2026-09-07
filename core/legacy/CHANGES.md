@@ -1,3 +1,8 @@
+STAR-suite Flex decision sidecar --- 2026/09/07
+================================================
+* Added the optional `--soloFlexDecisionSidecar` binary diagnostic for read-level cache and residual-alignment audits.
+* Recorded H0, H1, experimental H1X2, exactly-one-N, cache deny/miss, sample-tag rejection, and alignment-resolution provenance without changing the default Flex path.
+
 STAR-suite experimental Flex split-half cache --- 2026/09/07
 ============================================================
 * Added the opt-in `H1X2` cache tier for full 50-base probe keys with at most one mismatch in each 25-base half.

@@ -24,6 +24,11 @@ struct FlexHashScreenDecision {
     uint8_t negativeCode = 0;
     int8_t offset = 0;
     FlexGdnaRegion probeRegion = FlexGdnaUnknown;
+    // Diagnostic provenance for the conservative exactly-one-N retry. The
+    // runtime cacheClass remains H1 for compatibility; singleNCacheClass
+    // identifies the underlying cache tier that supplied the unique gene.
+    bool singleN = false;
+    uint8_t singleNCacheClass = 0xFF;
 };
 
 enum FlexHashScreenCacheClass : uint8_t {

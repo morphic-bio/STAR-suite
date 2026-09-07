@@ -2074,6 +2074,15 @@ soloHashScreenFile          -
                             If omitted, STAR will use STAR_FLEX_HASH_SCREEN_CACHE or auto-discover
                             flex_h01_sequence_cache.bin next to the probe list.
 
+soloFlexDecisionSidecar     -
+    string:                 optional path for a versioned, fixed-width Flex cache-decision diagnostic sidecar
+                            -            ... disabled (default; no file and no diagnostic I/O)
+                            FILE         ... record one slot per input pair, keyed by the run's zero-based global ordinal
+                            Records include lane/local ordinal, normalized read-name hash, sample-tag decision,
+                            H0/H1/H1X2/deny/miss and single-N provenance, plus residual-alignment result.
+                            Global ordinals match STAR/BAM state in that run; lane/local ordinal and name hash
+                            are the stable cross-thread-count join keys. Diagnostic mode adds random-access I/O.
+
 hashCacheOutput             -
     string:                 output path for FH01SEQ1 v2/v3 binary (required for --runMode hashCacheGenerate).
                             v3 is emitted when complete probe-region metadata are available; otherwise v2.

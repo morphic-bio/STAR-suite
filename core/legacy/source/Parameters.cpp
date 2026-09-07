@@ -690,6 +690,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <uint32>   (-1, -1, "soloBucketCount", &pSolo.bucketCount));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "no-hash-screen", &pSolo.hashScreenDisableStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloHashScreenFile", &pSolo.hashScreenFile));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloFlexDecisionSidecar", &pSolo.flexDecisionSidecarPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "hashCacheOutput", &pSolo.hashCacheOutput));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "hashCacheTiers", &pSolo.hashCacheTiers));
     parArray.push_back(new ParameterInfoScalar <uint32>   (-1, -1, "hashCacheParentLimit", &pSolo.hashCacheParentLimit));
