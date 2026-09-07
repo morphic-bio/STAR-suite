@@ -26,6 +26,14 @@ struct FlexHashScreenDecision {
     FlexGdnaRegion probeRegion = FlexGdnaUnknown;
 };
 
+enum FlexHashScreenCacheClass : uint8_t {
+    FlexHashCacheH0 = 0,
+    FlexHashCacheH1 = 1,
+    FlexHashCacheNegative = 2,
+    FlexHashCacheH2 = 3,
+    FlexHashCacheH1X2 = 4
+};
+
 class FlexHashScreenCache {
 public:
     struct Record {

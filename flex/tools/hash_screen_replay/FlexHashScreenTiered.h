@@ -9,7 +9,7 @@
 //            with exact-match-only (no sampleIdx=0 fallback). On hit with
 //            gene>0 → immediate KEEP. Resolves ~78% of reads.
 //
-//   rest_ — everything else (H0 globals + H1 + deny), sorted.
+//   rest_ — everything else (H0 globals + H1/H1X2/H2 + deny), sorted.
 //            8.0M records, ~192 MB. Searched with full findRecord (with
 //            sampleIdx=0 fallback) + classifyHits. Identical logic to flat.
 class TieredCache {
@@ -20,6 +20,7 @@ public:
 
     size_t h0Count()      const { return h0Count_; }
     size_t h1Count()      const { return h1Count_; }
+    size_t h1x2Count()    const { return h1x2Count_; }
     size_t h2Count()      const { return h2Count_; }
     size_t denyCount()    const { return denyCount_; }
     size_t droppedCount() const { return dropped_; }
@@ -43,6 +44,7 @@ private:
     std::vector<Record> rest_;   // everything else (slow tier)
     size_t h0Count_ = 0;        // all cacheClass==0 (for stats)
     size_t h1Count_ = 0;
+    size_t h1x2Count_ = 0;
     size_t h2Count_ = 0;
     size_t denyCount_ = 0;
     size_t dropped_ = 0;

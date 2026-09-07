@@ -464,8 +464,9 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
         if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
             if (spatialFlex) {
                 if (iReadAll == 0 || hashScreenDecision_.geneIdx15 == 0
-                    || (hashScreenDecision_.cacheClass != 0
-                        && hashScreenDecision_.cacheClass != 1)) {
+                    || (hashScreenDecision_.cacheClass != FlexHashCacheH0
+                        && hashScreenDecision_.cacheClass != FlexHashCacheH1
+                        && hashScreenDecision_.cacheClass != FlexHashCacheH1X2)) {
                     exitWithError(
                         "EXITING because native spatial Flex received an invalid "
                         "H0/H1 cache keep decision\n",

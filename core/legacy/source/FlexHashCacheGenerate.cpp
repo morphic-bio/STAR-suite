@@ -40,7 +40,7 @@ struct SeqPairHash {
     }
 };
 
-/** Dedup key: H1/H2 use sampleKey==0 (global); H0 uses runtime hash-screen sample index (matches FH01SEQ1 record). */
+/** Dedup key: non-exact tiers use sampleKey==0; H0 uses the runtime hash-screen sample index. */
 struct DedupKey {
     uint64_t seqLo = 0;
     uint64_t seqHi = 0;
@@ -54,6 +54,7 @@ struct DedupBucket {
     bool denyAny = false;
     bool hasKeep = false;
     bool conflict = false;
+    bool h1x2Seen = false;
     uint16_t gene = 0;
     uint8_t cacheClass = 0;
     FlexGdnaRegion probeRegion = FlexGdnaUnknown;
@@ -86,6 +87,29 @@ static char numToAcgt(char g) {
     }
 }
 
+static uint8_t acgtToNum(char base) {
+    switch (base) {
+        case 'A': return 0;
+        case 'C': return 1;
+        case 'G': return 2;
+        case 'T': return 3;
+        default: return 4;
+    }
+}
+
+static inline void mutatePackedProbeBase(uint64_t& seqLo, uint64_t& seqHi,
+                                         int position, uint8_t altCode) {
+    if (position < 18) {
+        const unsigned shift = static_cast<unsigned>(2 * (17 - position));
+        seqHi = (seqHi & ~(UINT64_C(3) << shift)) |
+                (static_cast<uint64_t>(altCode) << shift);
+    } else {
+        const unsigned shift = static_cast<unsigned>(2 * (49 - position));
+        seqLo = (seqLo & ~(UINT64_C(3) << shift)) |
+                (static_cast<uint64_t>(altCode) << shift);
+    }
+}
+
 static void trimToken(std::string& s) {
     while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
         s.erase(s.begin());
@@ -95,8 +119,8 @@ static void trimToken(std::string& s) {
     }
 }
 
-static void parseTiers(const std::string& s, bool& h0, bool& h1, bool& h2) {
-    h0 = h1 = h2 = false;
+static void parseTiers(const std::string& s, bool& h0, bool& h1, bool& h1x2, bool& h2) {
+    h0 = h1 = h1x2 = h2 = false;
     std::istringstream iss(s);
     std::string tok;
     while (std::getline(iss, tok, ',')) {
@@ -108,11 +132,13 @@ static void parseTiers(const std::string& s, bool& h0, bool& h1, bool& h2) {
             h0 = true;
         } else if (tok == "H1") {
             h1 = true;
+        } else if (tok == "H1X2") {
+            h1x2 = true;
         } else if (tok == "H2") {
             h2 = true;
         }
     }
-    if (!h0 && !h1 && !h2) {
+    if (!h0 && !h1 && !h1x2 && !h2) {
         h0 = h1 = h2 = true;
     }
 }
@@ -210,6 +236,15 @@ static void mergeDedupRecord(khash_t(flexdedup)* buckets, const FlexHashScreenCa
         kh_val(buckets, it) = DedupBucket();
     }
     DedupBucket& b = kh_val(buckets, it);
+    // H1X2 deliberately has no alignment oracle. A full 50-base variant that
+    // can be generated from more than one probe is therefore ambiguous even
+    // when the probe rows share a gene identifier.
+    if (rec.cacheClass == FlexHashCacheH1X2) {
+        if (b.h1x2Seen) {
+            b.conflict = true;
+        }
+        b.h1x2Seen = true;
+    }
     if (rec.cacheClass == 2 || rec.resolvedGeneIdx15 == 0) {
         b.denyAny = true;
         return;
@@ -250,7 +285,8 @@ static std::vector<FlexHashScreenCache::Record> finalizeFromBuckets(khash_t(flex
             r.cacheClass = b.cacheClass;
             r.probeRegion = b.probeRegion;
             r.negativeCode = 0;
-            // H0: sampleKey is hash-screen index per sample; H1/H2 use sampleKey==0 (global fallback in findRecord).
+            // H0: sampleKey is hash-screen index per sample; non-exact tiers
+            // use sampleKey==0 (global fallback in findRecord).
             r.sampleIdx = key.sampleKey;
         }
         out.push_back(r);
@@ -303,8 +339,8 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
                          << " probes\n";
     }
 
-    bool wantH0 = false, wantH1 = false, wantH2 = false;
-    parseTiers(P.pSolo.hashCacheTiers, wantH0, wantH1, wantH2);
+    bool wantH0 = false, wantH1 = false, wantH1X2 = false, wantH2 = false;
+    parseTiers(P.pSolo.hashCacheTiers, wantH0, wantH1, wantH1X2, wantH2);
 
     std::vector<std::unique_ptr<ReadAlignChunk>> chunks;
     chunks.reserve(P.runThreadN);
@@ -378,7 +414,8 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
 
     std::vector<std::vector<FlexHashScreenCache::Record>> threadRecords(static_cast<size_t>(P.runThreadN));
 
-    P.inOut->logMain << "[HASH-CACHE-GEN] tiers H0=" << wantH0 << " H1=" << wantH1 << " H2=" << wantH2
+    P.inOut->logMain << "[HASH-CACHE-GEN] tiers H0=" << wantH0 << " H1=" << wantH1
+                     << " H1X2=" << wantH1X2 << " H2=" << wantH2
                      << " threads=" << P.runThreadN << "\n";
 
     // ---- Pass 1: H0 + H1 ----
@@ -400,8 +437,8 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
                 // authoritative under the canonical Flex policy.  Do not run
                 // H0 through whole-read alignment: bases beyond the 50-base
                 // probe window are assay payload and can create unrelated
-                // genomic alignments.  H1/H2 decisions below remain verified
-                // with the normal alignment/resolution path.
+                // genomic alignments. H1/H2 decisions below remain verified;
+                // the explicitly selected H1X2 compatibility tier does not.
                 for (uint32_t s = 1u; s <= nSamplesSeq; ++s) {
                     const uint16_t rowS = h0RowSampleIdx[s];
                     if (rowS == 0u) {
@@ -439,7 +476,7 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
         }
     }
 
-    // ---- Build H0/H1 sequence lookup set for H2 pre-check ----
+    // ---- Build H0/H1 buckets ----
     khash_t(flexdedup)* buckets = kh_init(flexdedup);
     size_t totalH01Records = 0;
     for (const auto& tr : threadRecords) {
@@ -454,6 +491,121 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
         }
     }
 
+    threadRecords.clear();
+    threadRecords.shrink_to_fit();
+
+    // ---- Pass 2: experimental H1X2 ----
+    // This tier is generated only when H1X2 is named explicitly in
+    // --hashCacheTiers. Materialize every non-exact 50-mer with at most one
+    // substitution in each 25-base half: 150 single substitutions plus 75*75
+    // paired substitutions per probe. No alignment is performed; duplicate
+    // full keys become DENY during the common dedup pass below.
+    std::vector<std::string> h1x2TmpPaths;
+    if (wantH1X2) {
+        std::atomic<uint64_t> h1x2Generated{0};
+        h1x2TmpPaths.resize(static_cast<size_t>(P.runThreadN));
+
+#pragma omp parallel num_threads(P.runThreadN)
+        {
+            const int tid = omp_get_thread_num();
+            uint64_t localGenerated = 0;
+            const std::string tmpPath = P.outFileNamePrefix + "h1x2_tmp_t" +
+                                        std::to_string(tid) + ".bin";
+            h1x2TmpPaths[static_cast<size_t>(tid)] = tmpPath;
+            std::ofstream tmpOut(tmpPath, std::ios::binary);
+
+            auto writeVariant = [&](const GenomeProbeRow& pr, uint64_t seqLo,
+                                    uint64_t seqHi) {
+                FlexHashScreenCache::Record rec;
+                rec.seqLo = seqLo;
+                rec.seqHi = seqHi;
+                rec.resolvedGeneIdx15 = pr.geneIdx15;
+                rec.cacheClass = FlexHashCacheH1X2;
+                rec.probeRegion = pr.probeRegion;
+                rec.negativeCode = 0;
+                rec.sampleIdx = 0;
+                tmpOut.write(reinterpret_cast<const char*>(&rec), sizeof(rec));
+                ++localGenerated;
+            };
+
+#pragma omp for schedule(dynamic, 4)
+            for (size_t pi = 0; pi < probes.size(); ++pi) {
+                const GenomeProbeRow& pr = probes[pi];
+                uint64_t parentLo = 0;
+                uint64_t parentHi = 0;
+                if (!FlexHashScreenCache::encodeProbeWindow(
+                        pr.seq, 0, parentLo, parentHi)) {
+                    continue;
+                }
+
+                // Exactly one changed base in either half.
+                for (int pos = 0; pos < 50; ++pos) {
+                    const uint8_t ref = acgtToNum(pr.seq[pos]);
+                    for (uint8_t alt = 0; alt < 4; ++alt) {
+                        if (alt == ref) continue;
+                        uint64_t seqLo = parentLo;
+                        uint64_t seqHi = parentHi;
+                        mutatePackedProbeBase(seqLo, seqHi, pos, alt);
+                        writeVariant(pr, seqLo, seqHi);
+                    }
+                }
+
+                // Exactly one changed base in each half.
+                for (int left = 0; left < 25; ++left) {
+                    const uint8_t leftRef = acgtToNum(pr.seq[left]);
+                    for (uint8_t leftAlt = 0; leftAlt < 4; ++leftAlt) {
+                        if (leftAlt == leftRef) continue;
+                        uint64_t leftLo = parentLo;
+                        uint64_t leftHi = parentHi;
+                        mutatePackedProbeBase(leftLo, leftHi, left, leftAlt);
+                        for (int right = 25; right < 50; ++right) {
+                            const uint8_t rightRef = acgtToNum(pr.seq[right]);
+                            for (uint8_t rightAlt = 0; rightAlt < 4; ++rightAlt) {
+                                if (rightAlt == rightRef) continue;
+                                uint64_t seqLo = leftLo;
+                                uint64_t seqHi = leftHi;
+                                mutatePackedProbeBase(seqLo, seqHi, right, rightAlt);
+                                writeVariant(pr, seqLo, seqHi);
+                            }
+                        }
+                    }
+                }
+            }
+            tmpOut.close();
+            h1x2Generated += localGenerated;
+        }
+        P.inOut->logMain << "[HASH-CACHE-GEN] experimental H1X2: "
+                         << h1x2Generated.load()
+                         << " non-exact variants generated (no alignment)\n";
+    }
+
+    uint64_t h1x2TmpRecords = 0;
+    for (const auto& tmpPath : h1x2TmpPaths) {
+        std::ifstream tmpIn(tmpPath, std::ios::binary | std::ios::ate);
+        if (tmpIn.good()) {
+            const std::streamoff size = tmpIn.tellg();
+            if (size > 0) {
+                h1x2TmpRecords += static_cast<uint64_t>(
+                    size / static_cast<std::streamoff>(
+                               sizeof(FlexHashScreenCache::Record)));
+            }
+        }
+    }
+    if (h1x2TmpRecords > 0) {
+        kh_resize(flexdedup, buckets,
+                  kh_size(buckets) + static_cast<khint_t>(h1x2TmpRecords));
+    }
+    for (const auto& tmpPath : h1x2TmpPaths) {
+        std::ifstream tmpIn(tmpPath, std::ios::binary);
+        if (!tmpIn.good()) continue;
+        FlexHashScreenCache::Record rec;
+        while (tmpIn.read(reinterpret_cast<char*>(&rec), sizeof(rec))) {
+            mergeDedupRecord(buckets, rec);
+        }
+        tmpIn.close();
+        std::remove(tmpPath.c_str());
+    }
+
     typedef std::pair<uint64_t, uint64_t> SeqPair;
     std::unordered_set<SeqPair, SeqPairHash> h01SeqSet;
     if (wantH2) {
@@ -466,12 +618,10 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
             h01SeqSet.emplace(key.seqLo, key.seqHi);
         }
         P.inOut->logMain << "[HASH-CACHE-GEN] H2 pre-check set: " << h01SeqSet.size()
-                         << " unique H0/H1 sequences\n";
+                         << " unique earlier-tier sequences\n";
     }
-    threadRecords.clear();
-    threadRecords.shrink_to_fit();
 
-    // ---- Pass 2: H2 (KEEP-only, streamed to per-thread temp files) ----
+    // ---- Pass 3: H2 (KEEP-only, streamed to per-thread temp files) ----
     std::vector<std::string> h2TmpPaths;
     if (wantH2) {
         std::atomic<uint64_t> h2Skipped{0};
