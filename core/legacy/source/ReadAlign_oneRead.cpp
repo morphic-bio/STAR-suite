@@ -425,14 +425,24 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
         const bool spatialFlex = P.soloSpatialFlexIntegratedEnabled;
         bool hashScreenSampleOK = true;
         uint16_t hashScreenSampleIdx = 0;
+        const auto classifyFlexOffset0 = [&]() {
+            FlexHashScreenDecision decision =
+                FlexHashScreenCache::instance().classifyReadH0H1Offset0(
+                    Read0[0], readLengthOriginal[0]);
+            if (decision.action == FlexHashScreenDecision::Pass
+                && P.pSolo.probeMismatch >= 1) {
+                decision = FlexHashScreenCache::instance()
+                    .classifyReadH0H1Offset0SingleN(
+                        Read0[0], readLengthOriginal[0]);
+            }
+            return decision;
+        };
         // Read0[0] is still ASCII-encoded at this point (numeric conversion
         // happens later at complementSeqNumbers). The hash screen encodes
         // A/C/G/T characters; moving this call after convertNucleotidesToNumbers
         // would silently break classification.
         if (spatialFlex) {
-            hashScreenDecision_ =
-                FlexHashScreenCache::instance().classifyReadH0H1Offset0(
-                    Read0[0], readLengthOriginal[0]);
+            hashScreenDecision_ = classifyFlexOffset0();
         } else {
             soloRead->readBar->getCBandUMI(
                 Read0, Qual0, readLengthOriginal, readNameExtra[0],
@@ -450,10 +460,9 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             hashScreenSampleOK = !sampleDetReady_ || detectedSampleByte_ != 0xFF;
             if (hashScreenSampleOK) {
                 // Keep ordinary/BAM-producing Flex on the same cache policy
-                // as fused ingest: H0 first, then H1/deny, at offset 0 only.
-                hashScreenDecision_ =
-                    FlexHashScreenCache::instance().classifyReadH0H1Offset0(
-                        Read0[0], readLengthOriginal[0]);
+                // as fused ingest: H0 first, then H1/deny, followed by the
+                // conservative exactly-one-N retry, all at offset 0.
+                hashScreenDecision_ = classifyFlexOffset0();
             } else {
                 // An unmatched configured sample tag is terminal in fused
                 // ingest because residual alignment cannot make it eligible
