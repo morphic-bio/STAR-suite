@@ -197,6 +197,45 @@ struct FlexBgzfRangeTask {
     int laneId = 0;
 };
 
+// One record of a FASTQ batch: byte offsets into the batch arena. The five
+// strings are stored NUL-terminated so the consumer can hand plain char* to the
+// existing barcode and screen code without copying again.
+struct FlexFastqRecordRef {
+    uint32_t offName = 0, offSeq0 = 0, offQual0 = 0, offSeq1 = 0, offQual1 = 0;
+    uint32_t nameLen = 0, len0 = 0, len1 = 0;
+};
+
+// A batch of FASTQ records read from one lane. The lane reader fills these and
+// hands them to the fused workers, so decompression and the per-read work
+// (sample tag, hash screen, CB/UMI, recording) no longer share a thread. With a
+// single delivered file pair there is one lane, and without this the reader was
+// the only busy thread while the rest of the pool idled.
+struct FlexFastqBatch {
+    int laneId = -1;
+    uint64_t globalFirst = 0;
+    std::vector<FlexFastqRecordRef> recs;
+    std::vector<char> data;
+
+    void reset(int lane) {
+        laneId = lane;
+        globalFirst = 0;
+        recs.clear();
+        data.clear();
+    }
+    // Appends a NUL-terminated copy and returns its offset in the arena.
+    uint32_t append(const char *text, uint32_t length) {
+        const uint32_t at = static_cast<uint32_t>(data.size());
+        data.insert(data.end(), text, text + length);
+        data.push_back('\0');
+        return at;
+    }
+    const char *at(uint32_t offset) const { return data.data() + offset; }
+    char *at(uint32_t offset) { return data.data() + offset; }
+};
+
+static constexpr uint32_t kFlexFastqBatchRecords = 2048;
+static constexpr size_t kFlexFastqBatchPool = 64;
+
 struct FlexPipelineState {
     BoundedQueue<ReadPacket> readerQ;
     std::vector<BoundedQueue<DecisionPacket>*> soloQ;
@@ -227,12 +266,20 @@ struct FlexPipelineState {
     // batches; FEATURE covers bounded BGZF inflate work items.
     bool dynamicPermitsEnabled = false;
 
+    // FASTQ lane readers hand batches here; every fused thread consumes them.
+    BoundedQueue<FlexFastqBatch*> fastqReadyQ{kFlexFastqBatchPool};
+    BoundedQueue<FlexFastqBatch*> fastqFreeQ{kFlexFastqBatchPool};
+    std::atomic<int> fastqReadersDone{0};
+
     std::atomic<bool> inputFailed{false};
     std::mutex inputErrorMutex;
     std::string inputError;
 
     ~FlexPipelineState() {
         for (auto* q : soloQ) delete q;
+        FlexFastqBatch *batch = nullptr;
+        while (fastqReadyQ.try_pop(batch)) delete batch;
+        while (fastqFreeQ.try_pop(batch)) delete batch;
     }
 
     void init(int lanes, int soloConsumers, int triageThreads = 1, size_t queueCapacity = 256) {
@@ -241,6 +288,11 @@ struct FlexPipelineState {
         nTriage = triageThreads;
         for (int i = 0; i < nSolo; ++i)
             soloQ.push_back(new BoundedQueue<DecisionPacket>(queueCapacity));
+        for (size_t i = 0; i < kFlexFastqBatchPool; ++i) {
+            FlexFastqBatch *batch = new FlexFastqBatch();
+            batch->recs.reserve(kFlexFastqBatchRecords);
+            if (!fastqFreeQ.try_push(batch)) delete batch;
+        }
     }
 
     // Atomically claim the next unprocessed lane. Returns -1 if all lanes claimed.
