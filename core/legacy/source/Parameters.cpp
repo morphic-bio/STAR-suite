@@ -664,6 +664,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleProbes", &pSolo.sampleProbesPath));
     parArray.push_back(new ParameterInfoScalar <uint32>   (-1, -1, "soloSampleProbeOffset", &pSolo.sampleProbeOffset));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleSearchNearby", &pSolo.sampleSearchNearbyStr));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "soloSampleTagMismatch", &pSolo.sampleTagMismatch));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleStrictMatch", &pSolo.sampleStrictMatchStr));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "soloMapqThreshold", &pSolo.mapqThreshold));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloMapqMode", &pSolo.mapqModeStr));
@@ -4231,7 +4232,10 @@ void Parameters::applyDefaultGroups() {
         setStringIfDefault("soloRunFlexFilter", "yes");
         setStringIfDefault("soloRemoveDeprecated", "Yes");
         setStringIfDefault("removeDeprecated", "Yes");
-        setStringIfDefault("soloSampleSearchNearby", "no");
+        // Accept exact or uniquely owned one-mismatch sample tags, while also
+        // resolving the configured nearby positions.
+        setStringIfDefault("soloSampleSearchNearby", "yes");
+        setIntIfDefault("soloSampleTagMismatch", 1);
         setStringIfDefault("soloCBmatchWLtype", "1MM_multi_Nbase_pseudocounts");
         setStringIfDefault("soloUMIdedup", "1MM_CR");
         setStringIfDefault("soloUMIfiltering", "MultiGeneUMI_CR");

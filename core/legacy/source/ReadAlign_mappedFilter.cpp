@@ -7,13 +7,17 @@
 static atomic<uint64_t> g_mapDebugCount(0);
 static atomic<int64_t> g_mapDebugMax(-1);  // -1 means not initialized
 
-void ReadAlign::mappedFilter() {//filter mapped read, add to stats
+void ReadAlign::mappedFilter(bool applyReadLengthFraction) {//filter mapped read, add to stats
+    const double scoreMinOverLread = applyReadLengthFraction
+        ? P.outFilterScoreMinOverLread : 0.0;
+    const double matchMinOverLread = applyReadLengthFraction
+        ? P.outFilterMatchNminOverLread : 0.0;
     unmapType=-1;//mark as mapped
     if ( nW==0 ) {//no good windows
         statsRA.unmappedOther++;
         unmapType=0;
-    } else if ( (trBest->maxScore < P.outFilterScoreMin) || (trBest->maxScore < (intScore) (P.outFilterScoreMinOverLread*(Lread-1))) \
-              || (trBest->nMatch < P.outFilterMatchNmin)  || (trBest->nMatch < (uint) (P.outFilterMatchNminOverLread*(Lread-1))) ) {//too short
+    } else if ( (trBest->maxScore < P.outFilterScoreMin) || (trBest->maxScore < (intScore) (scoreMinOverLread*(Lread-1))) \
+              || (trBest->nMatch < P.outFilterMatchNmin)  || (trBest->nMatch < (uint) (matchMinOverLread*(Lread-1))) ) {//too short
         statsRA.unmappedShort++;
         unmapType=1;
         
@@ -40,7 +44,7 @@ void ReadAlign::mappedFilter() {//filter mapped read, add to stats
                              << " readLenPairOriginal=" << readLengthPairOriginal
                              << " maxScore=" << trBest->maxScore
                              << " outFilterScoreMin=" << P.outFilterScoreMin
-                             << " outFilterMatchNminOverLread=" << P.outFilterMatchNminOverLread
+                             << " outFilterMatchNminOverLread=" << matchMinOverLread
                              << endl;
             g_mapDebugCount++;
         }

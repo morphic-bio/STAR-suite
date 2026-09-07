@@ -12,6 +12,9 @@
 #include <cstdlib>
 
 #include "OrdMagStage.h"
+#include "AdaptiveAmbientWindow.h"
+#include "EmptyDropsMultinomial.h"
+#include "FlexTagGroup.h"
 
 using namespace std;
 
@@ -91,5 +94,41 @@ int main() {
     cout << "PASS: Simple filter: " << result.nCellsSimple << " cells, "
          << "threshold=" << result.retainThreshold << ", "
          << "candidates=" << result.candidateIndices.size() << endl;
+
+    if (!meetsEmptyDropsCandidateFloor(500, 500) ||
+        meetsEmptyDropsCandidateFloor(499, 500)) {
+        cerr << "FAIL: the EmptyDrops candidate floor is not inclusive" << endl;
+        return 1;
+    }
+
+    vector<pair<uint32_t, uint32_t>> ranked = {
+        {100, 0}, {90, 1}, {40, 2}, {30, 3}, {20, 4}, {10, 5}
+    };
+    AdaptiveAmbientWindow fixed = selectAdaptiveAmbientWindow(ranked, 2, 4, 60);
+    if (fixed.start != 2 || fixed.end != 4 || fixed.umiMass != 70) {
+        cerr << "FAIL: established ambient window was not preserved" << endl;
+        return 1;
+    }
+    AdaptiveAmbientWindow extended = selectAdaptiveAmbientWindow(ranked, 2, 4, 95);
+    if (extended.start != 2 || extended.end != 6 || extended.umiMass != 100) {
+        cerr << "FAIL: ambient endpoint did not extend to the requested mass" << endl;
+        return 1;
+    }
+    AdaptiveAmbientWindow exhausted = selectAdaptiveAmbientWindow(ranked, 2, 4, 1000);
+    if (exhausted.end != ranked.size() || exhausted.umiMass != 100) {
+        cerr << "FAIL: ambient endpoint did not stop at the available droplets" << endl;
+        return 1;
+    }
+
+    cout << "PASS: inclusive UMI floor and adaptive ambient window" << endl;
+
+    const vector<string> fusedTags = {"ACTTTAGG", "AACGGGAA"};
+    if (!barcodeHasAnyFlexTag("AAAAAAAAAAAAAAAAACTTTAGG", fusedTags) ||
+        !barcodeHasAnyFlexTag("CCCCCCCCCCCCCCCCAACGGGAA-1", fusedTags) ||
+        barcodeHasAnyFlexTag("GGGGGGGGGGGGGGGGAGTAGGCT", fusedTags)) {
+        cerr << "FAIL: fused TAG8 membership did not preserve composite cell identity" << endl;
+        return 1;
+    }
+    cout << "PASS: one- and two-tag composite barcode selection" << endl;
     return 0;
 }

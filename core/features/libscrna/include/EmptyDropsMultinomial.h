@@ -37,7 +37,7 @@ struct AmbientProfile {
 struct EmptyDropsParams {
     uint32 indMin = 0;           // Min index for empty cells
     uint32 indMax = 0;           // Max index for empty cells
-    uint32 umiMin = 0;           // Minimum UMI threshold
+    uint32 umiMin = 0;           // Inclusive minimum UMI threshold
     double umiMinFracMedian = 0.0;   // Minimum UMI as fraction of median
     uint32 candMaxN = 0;         // Maximum number of candidates
     double FDR = 0.0;                // FDR threshold (for FDR-based filtering)
@@ -46,11 +46,15 @@ struct EmptyDropsParams {
     bool applyBHCorrection = false;  // If true, apply Benjamini-Hochberg correction to compute pAdjusted
     uint32 simN = 0;             // Number of Monte Carlo simulations
     uint64 seed = 0;             // Random seed (default: 19760110LLU)
-    uint32 lowerTestingBound = 0;  // Lower UMI bound for testing: cells with UMI <= this are excluded from testing (default: 500, R's umi.min)
+    uint32 lowerTestingBound = 0;  // Inclusive lower UMI bound: cells below this are excluded (default: 500)
     uint32 ambientUmiMax = 0;      // Max UMI for ambient cells: cells with UMI <= this used for ambient profile (default: 100, R's lower)
     uint32 maxTotalBuckets = 0;    // Max buckets for total binning (0 = disabled, use exact totals)
     uint32 mcThreads = 0;        // Threads for Monte Carlo simulation (0 = single-threaded)
 };
+
+inline bool meetsEmptyDropsCandidateFloor(uint32 umiCount, uint32 floor) {
+    return umiCount >= floor;
+}
 
 // Main class for EmptyDrops multinomial computations
 class EmptyDropsMultinomial {

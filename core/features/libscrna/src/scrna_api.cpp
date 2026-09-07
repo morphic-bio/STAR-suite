@@ -82,7 +82,7 @@ extern "C" scrna_ed_config* scrna_ed_config_create(void) {
     config->fdr = 0.01;
     config->raw_pvalue_threshold = 0.05;
     config->seed = 1;                    // Default seed=1 per emptydrops_refactor_plan.md
-    config->lower_testing_bound = 500;   // R's umi.min: cells with UMI <= 500 excluded from testing
+    config->lower_testing_bound = 500;   // Inclusive floor: cells with UMI < 500 excluded from testing
     config->ambient_umi_max = 100;       // R's lower: cells with UMI <= 100 used for ambient
     config->mc_threads = 0;              // Single-threaded by default
     

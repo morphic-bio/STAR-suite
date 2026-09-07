@@ -145,7 +145,7 @@ EmptyDropsParams FlexFilter::getExternalEmptyDropsDefaults() {
     params.useFDRGate = true;            // Use FDR gate by default (matches CR/R)
     params.simN = 10000;                 // Monte Carlo iterations (CR/R default)
     params.seed = 19760110LLU;          // Seed used in test harness (matches golden generation)
-    params.lowerTestingBound = 500;     // R's emptyDropsCellRanger umi.min parameter: cells with UMI <= 500 excluded from candidates
+    params.lowerTestingBound = 500;     // Inclusive candidate floor: cells with UMI < 500 are excluded
     params.ambientUmiMax = 100;         // R's emptyDropsCellRanger lower parameter: cells with UMI <= 100 used for ambient
     return params;
 }
@@ -835,19 +835,19 @@ int FlexFilter::runInternal(
         
         // Step 1: Count ambient cells and candidates to check pre-conditions
         uint32_t nAmbientCells = 0;
-        uint32_t nCandidatesAboveLower = 0;
+        uint32_t nCandidatesAtOrAboveLower = 0;
         for (size_t ci = 0; ci < nUMIperCB_compact.size(); ci++) {
             uint32_t umi = nUMIperCB_compact[ci];
             if (umi <= ambientUmiMax) {
                 nAmbientCells++;
             }
-            if (umi > lowerTestingBound) {
-                nCandidatesAboveLower++;
+            if (meetsEmptyDropsCandidateFloor(umi, lowerTestingBound)) {
+                nCandidatesAtOrAboveLower++;
             }
         }
         
         debugOut("  [Pre-check] Ambient cells (UMI <= " + to_string(ambientUmiMax) + "): " + to_string(nAmbientCells) + "\n");
-        debugOut("  [Pre-check] Candidates above lower bound (UMI > " + to_string(lowerTestingBound) + "): " + to_string(nCandidatesAboveLower) + "\n");
+        debugOut("  [Pre-check] Candidates at or above lower bound (UMI >= " + to_string(lowerTestingBound) + "): " + to_string(nCandidatesAtOrAboveLower) + "\n");
         
         // Check fallback conditions based on pre-conditions
         bool needsFallback = false;
@@ -857,9 +857,9 @@ int FlexFilter::runInternal(
             needsFallback = true;
             fallbackReasons.push_back("too few ambient cells (" + to_string(nAmbientCells) + " < " + to_string(config.simpleEDMinAmbient) + ")");
         }
-        if (nCandidatesAboveLower < config.simpleEDMinCandidates) {
+        if (nCandidatesAtOrAboveLower < config.simpleEDMinCandidates) {
             needsFallback = true;
-            fallbackReasons.push_back("too few candidates (" + to_string(nCandidatesAboveLower) + " < " + to_string(config.simpleEDMinCandidates) + ")");
+            fallbackReasons.push_back("too few candidates (" + to_string(nCandidatesAtOrAboveLower) + " < " + to_string(config.simpleEDMinCandidates) + ")");
         }
         
         // Step 2: Build candidate indices for EmptyDrops (ALL candidates above lower bound, no simple cells)
@@ -869,7 +869,7 @@ int FlexFilter::runInternal(
         
         for (size_t ci = 0; ci < retainIndices.size(); ci++) {
             uint32_t umi = nUMIperCB_compact[ci];
-            if (umi > lowerTestingBound) {
+            if (meetsEmptyDropsCandidateFloor(umi, lowerTestingBound)) {
                 edCandidateIndices.push_back(static_cast<uint32_t>(ci));
                 edCandidateCounts.push_back(umi);
             } else {
@@ -889,7 +889,7 @@ int FlexFilter::runInternal(
         tagResult.nTailTested = static_cast<uint32_t>(edCandidateIndices.size());
         
         debugOut("  [EmptyDrops] Lower testing bound: " + to_string(lowerTestingBound) + " UMI\n");
-        debugOut("  [EmptyDrops] Candidates: " + to_string(edCandidateIndices.size()) + " (excluded " + to_string(nExcluded) + " cells with UMI <= " + to_string(lowerTestingBound) + ")\n");
+        debugOut("  [EmptyDrops] Candidates: " + to_string(edCandidateIndices.size()) + " (excluded " + to_string(nExcluded) + " cells with UMI < " + to_string(lowerTestingBound) + ")\n");
         
         // Store mapping from compact index back to raw barcode for output
         vector<string> retainBarcodes;
@@ -1029,14 +1029,21 @@ int FlexFilter::runInternal(
             cerr << "  [Simple EmptyDrops] Estimated recovered_cells: " << simpleParams.nExpectedCells << endl;
             cerr << "  [Simple EmptyDrops] Retain threshold: " << retainThreshold << " UMI" << endl;
             
-            // Collect simple cell indices (cells with UMI >= retainThreshold)
+            // The OrdMag threshold has no floor of its own. Apply the same
+            // inclusive UMI floor used for EmptyDrops candidates so an unused
+            // tag cannot promote one-UMI ambient barcodes into the occupancy
+            // surface.
+            const uint32_t simpleFloor = max(retainThreshold, simpleParams.umiMin);
             for (size_t ci = 0; ci < nUMIperCB_compact.size(); ci++) {
-                if (nUMIperCB_compact[ci] >= retainThreshold) {
+                if (nUMIperCB_compact[ci] >= simpleFloor) {
                     simplePasserIndices.insert(static_cast<uint32_t>(ci));
                 }
             }
             
-            cerr << "  [Simple EmptyDrops] Found " << simplePasserIndices.size() << " cells with UMI >= " << retainThreshold << endl;
+            cerr << "  [Simple EmptyDrops] Found " << simplePasserIndices.size()
+                 << " cells with UMI >= " << simpleFloor
+                 << " (retain threshold " << retainThreshold
+                 << ", floor " << simpleParams.umiMin << ")" << endl;
             
             tagResult.nSimpleCells = static_cast<uint32_t>(simplePasserIndices.size());
         } else {

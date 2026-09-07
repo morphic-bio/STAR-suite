@@ -1962,6 +1962,11 @@ soloSampleProbeOffset       68
 soloSampleSearchNearby      yes
     string:                 allow nearby matches during sample detection (yes|no)
 
+soloSampleTagMismatch       1
+    int:                    mismatches tolerated when matching the 8-base sample tag: 0 or 1.
+                            A tag within one mismatch is assigned only when exactly one sample
+                            is that close; ties are rejected. soloSampleStrictMatch yes forces 0.
+
 soloSampleStrictMatch       no
     string:                 require strict match during sample detection (yes|no)
 
@@ -2079,7 +2084,8 @@ flex                         no
                                             soloRunFlexFilter=yes, soloInlineCBCorrection=yes,
                                             soloInlineHashMode=yes, soloFlexMinimalMemory=yes (unless explicitly overridden),
                                             soloMapqMode=off, soloMMrateMax=0.1,
-                                            soloBarcodesObservedOnly=yes, soloUMICorrection=clique
+                                            soloBarcodesObservedOnly=yes, soloUMICorrection=clique,
+                                            outFilterScoreMinOverLread=0, outFilterMatchNminOverLread=0
                             no          ... use individual flag settings (default, inline hash mode disabled)
                             NOTE: Flex mode requires a probe list. Provide --soloProbeList <path> OR
                             rebuild index with --flexGeneProbeSet <probe CSV>. Probe sets are not

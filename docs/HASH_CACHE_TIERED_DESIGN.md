@@ -18,6 +18,10 @@ probe sequences.
   sample tag, enabling sample-specific fast-accept.
 - **Generation**: No alignment validation needed — records are stamped directly
   from the probe list and sample whitelist.
+- **Resolution policy**: An unambiguous H0 hit is final. The included 10x probe
+  set defines the assay target and is assumed not to contain an equivalent
+  genomic target. Sequence after the 50-base probe is assay payload and is not
+  allowed to overturn the exact probe identity.
 
 ### H1 — Single Mismatch (Hamming 1)
 
@@ -58,6 +62,14 @@ probe sequences.
 
 ## Recipe Policy and Assay Context
 
+The production policy is fixed rather than selected by a command-line option.
+An unambiguous exact H0 match is final, generated H1 KEEP and certified H1 DENY
+records retain their verified verdicts, and only an unencodable probe window or
+an absent H0/H1 key passes to live STAR alignment. This makes the probe set,
+rather than whole-read competition from post-probe assay sequence, the
+authority for exact matches while keeping the cache and live resolver in
+agreement for single substitutions.
+
 For routine scRNA-seq Flex processing, recipes should explicitly request
 `--hashCacheTiers H0,H1`. In the JAX scRNA-seq benchmark, H2 recovered
 measurable read-level signal (about 604 additional KEEP reads per 100K reads),
@@ -78,24 +90,28 @@ an H2 cache does not by itself enable H2 in the fused path; an H2 experiment
 must use an H2-aware runtime path or first add and validate H2 lookup in fused
 triage.
 
-## Runtime Lookup (Full Classifier)
+## Runtime Lookup
 
-In the full classifier, each read's 50bp probe window is looked up in two
-stages:
+Sample-tag eligibility is resolved first with the configured loose matcher and
+nearby-offset behavior. A tag outside that accepted universe is denied before
+the probe cache is consulted. Eligible reads then follow this routing:
 
 ```
-1.  H0 cache lookup (exact match, sample-aware)
-       → match found  →  KEEP  (immediate return, resolve to cached gene + sample)
+1.  Encode the 50-base offset-0 probe window
+       → contains N / cannot encode  → PASS
 
-2.  H1/H2 combined cache lookup (sequence match)
-       → H1 DENY match      →  DENY  (early return, fast-reject)
-       → H1 KEEP match      →  KEEP  (resolve to cached gene)
-       → H2 KEEP match      →  KEEP  (resolve to cached gene)
-       → no match            →  PASS  (fall through to full STAR alignment)
+2.  H0 cache lookup
+       → unambiguous included probe  → KEEP (final)
+
+3.  H1 cache lookup
+       → verified positive           → KEEP
+       → certified negative/ambiguous → DENY
+       → no record                   → PASS
 ```
 
-The H0 check is separate because H0 records carry a sample index; H1/H2
-records are global (`sampleIdx=0`).
+`--flexNoAlign` affects only `PASS`: `0` sends it to the normal Flex alignment
+and resolver, while `1` discards it. It never changes H0/H1 decisions or sample
+tag rejection. H2 is not consulted by the fused production path.
 
 ## Cache File Format
 
