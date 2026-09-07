@@ -7,6 +7,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <string>
 #include <vector>
 #include <zlib.h>
@@ -201,8 +202,33 @@ struct FlexBgzfRangeTask {
 // strings are stored NUL-terminated so the consumer can hand plain char* to the
 // existing barcode and screen code without copying again.
 struct FlexFastqRecordRef {
+    // offName/offSeq0/offQual0 index the mate-0 arena, offSeq1/offQual1 the
+    // mate-1 arena: the two mates are read by different threads.
     uint32_t offName = 0, offSeq0 = 0, offQual0 = 0, offSeq1 = 0, offQual1 = 0;
     uint32_t nameLen = 0, len0 = 0, len1 = 0;
+};
+
+// One mate-1 record as read by the barcode-mate reader.
+struct FlexFastqMateRecordRef {
+    uint32_t offSeq = 0, offQual = 0, len = 0;
+};
+
+// A run of mate-1 records. The barcode mate is read on its own thread and
+// handed over in chunks of the same size as the mate-0 batches, so chunk k
+// covers the same record range as batch k: counting records is the whole
+// contract between the two readers, no offsets are exchanged.
+struct FlexFastqMateChunk {
+    std::vector<FlexFastqMateRecordRef> recs;
+    std::vector<char> data;
+    bool eof = false;
+
+    void reset() { recs.clear(); data.clear(); eof = false; }
+    uint32_t append(const char *text, uint32_t length) {
+        const uint32_t at = static_cast<uint32_t>(data.size());
+        data.insert(data.end(), text, text + length);
+        data.push_back('\0');
+        return at;
+    }
 };
 
 // A batch of FASTQ records read from one lane. The lane reader fills these and
@@ -214,13 +240,15 @@ struct FlexFastqBatch {
     int laneId = -1;
     uint64_t globalFirst = 0;
     std::vector<FlexFastqRecordRef> recs;
-    std::vector<char> data;
+    std::vector<char> data;    // mate 0: names, sequences, qualities
+    std::vector<char> data1;   // mate 1: sequences and qualities
 
     void reset(int lane) {
         laneId = lane;
         globalFirst = 0;
         recs.clear();
         data.clear();
+        data1.clear();
     }
     // Appends a NUL-terminated copy and returns its offset in the arena.
     uint32_t append(const char *text, uint32_t length) {
@@ -231,10 +259,13 @@ struct FlexFastqBatch {
     }
     const char *at(uint32_t offset) const { return data.data() + offset; }
     char *at(uint32_t offset) { return data.data() + offset; }
+    char *at1(uint32_t offset) { return data1.data() + offset; }
 };
 
 static constexpr uint32_t kFlexFastqBatchRecords = 2048;
 static constexpr size_t kFlexFastqBatchPool = 64;
+// Barcode-mate chunks in flight per lane reader.
+static constexpr size_t kFlexFastqMateChunks = 8;
 
 struct FlexPipelineState {
     BoundedQueue<ReadPacket> readerQ;
