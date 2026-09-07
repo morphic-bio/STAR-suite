@@ -2079,7 +2079,8 @@ flex                         no
                                             soloRunFlexFilter=yes, soloInlineCBCorrection=yes,
                                             soloInlineHashMode=yes, soloFlexMinimalMemory=yes (unless explicitly overridden),
                                             soloMapqMode=off, soloMMrateMax=0.1,
-                                            soloBarcodesObservedOnly=yes, soloUMICorrection=clique
+                                            soloBarcodesObservedOnly=yes, soloUMICorrection=clique,
+                                            outFilterScoreMinOverLread=0, outFilterMatchNminOverLread=0
                             no          ... use individual flag settings (default, inline hash mode disabled)
                             NOTE: Flex mode requires a probe list. Provide --soloProbeList <path> OR
                             rebuild index with --flexGeneProbeSet <probe CSV>. Probe sets are not

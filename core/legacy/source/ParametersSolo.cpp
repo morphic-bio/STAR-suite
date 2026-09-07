@@ -516,6 +516,28 @@ void ParametersSolo::initialize(Parameters *pPin)
                 }
                 return nullptr;
             };
+
+            // Flex aligns the probe-bearing prefix of R2; the remainder of
+            // the read normally contains assay sequence and is soft-clipped.
+            // Therefore the generic whole-read fractional length gates are
+            // not valid Flex defaults. Preserve either option when the user
+            // supplied it explicitly (or a default group already set it).
+            auto applyFlexLengthGateDefault = [&](const string& name,
+                                                  double& value) -> const char* {
+                ParameterInfoBase *param = findParam(name);
+                if (param != nullptr && param->inputLevel == 0) {
+                    value = 0.0;
+                    return "Flex default";
+                }
+                if (param != nullptr && param->inputLevel == 3) {
+                    return "default group";
+                }
+                return "explicit";
+            };
+            const char *scoreLengthGateSource = applyFlexLengthGateDefault(
+                "outFilterScoreMinOverLread", pP->outFilterScoreMinOverLread);
+            const char *matchLengthGateSource = applyFlexLengthGateDefault(
+                "outFilterMatchNminOverLread", pP->outFilterMatchNminOverLread);
             
             // Enable FlexFilter only when the option was not supplied. The
             // string default is "no", so checking the value alone cannot
@@ -604,6 +626,12 @@ void ParametersSolo::initialize(Parameters *pPin)
             pP->inOut->logMain << "    soloMMrateMax=" << mmRateMax << "\n";
             pP->inOut->logMain << "    soloBarcodesObservedOnly=" << barcodesObservedOnlyStr << "\n";
             pP->inOut->logMain << "    soloUMICorrection=" << umiCorrectionModeStr << "\n";
+            pP->inOut->logMain << "    outFilterScoreMinOverLread="
+                               << pP->outFilterScoreMinOverLread << " ("
+                               << scoreLengthGateSource << ")\n";
+            pP->inOut->logMain << "    outFilterMatchNminOverLread="
+                               << pP->outFilterMatchNminOverLread << " ("
+                               << matchLengthGateSource << ")\n";
             
         } else if (flexModeStr != "no" && !flexModeStr.empty()) {
             ostringstream errOut;
