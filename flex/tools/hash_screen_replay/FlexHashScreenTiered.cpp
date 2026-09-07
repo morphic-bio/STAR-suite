@@ -4,9 +4,9 @@
 //   3 offsets. On hit with gene>0 → immediate KEEP. ~78% of reads resolved
 //   with a single binary search through 53K records (1.3 MB, L2-hot).
 //
-// Tier 2 (slow): everything else (H0 globals + H1 + deny) as a single flat
-//   array. Searched with full findRecord (sampleIdx=0 fallback) + classifyHits.
-//   Same cache locality as the pure flat implementation.
+// Tier 2 (slow): everything else (H0 globals + H1/H1X2/H2 + deny) as a
+//   single flat array. Searched with full findRecord (sampleIdx=0 fallback) +
+//   classifyHits. Same cache locality as the pure flat implementation.
 
 #include "FlexHashScreenTiered.h"
 #include <algorithm>
@@ -32,6 +32,7 @@ void TieredCache::init(const std::vector<Record>& allRecords) {
     rest_.clear();
     h0Count_ = 0;
     h1Count_ = 0;
+    h1x2Count_ = 0;
     h2Count_ = 0;
     denyCount_ = 0;
     dropped_ = 0;
@@ -51,6 +52,8 @@ void TieredCache::init(const std::vector<Record>& allRecords) {
                 ++h1Count_;
             else if (r.cacheClass == 3)
                 ++h2Count_;
+            else if (r.cacheClass == 4)
+                ++h1x2Count_;
             else
                 ++dropped_;
         }
@@ -175,7 +178,8 @@ FlexHashScreenDecision TieredCache::classifyHits(
             return out;
         }
 
-        if ((rec->cacheClass == 0 || rec->cacheClass == 1 || rec->cacheClass == 3) &&
+        if ((rec->cacheClass == 0 || rec->cacheClass == 1 || rec->cacheClass == 3 ||
+             rec->cacheClass == 4) &&
             sampleSpecifiedMismatch) {
             if (!sawSampleMismatch) {
                 sawSampleMismatch = true;
@@ -184,7 +188,8 @@ FlexHashScreenDecision TieredCache::classifyHits(
             continue;
         }
 
-        if (rec->cacheClass == 0 || rec->cacheClass == 1 || rec->cacheClass == 3) {
+        if (rec->cacheClass == 0 || rec->cacheClass == 1 || rec->cacheClass == 3 ||
+            rec->cacheClass == 4) {
             const uint16_t geneIdx15 = static_cast<uint16_t>(rec->resolvedGeneIdx15);
             const uint16_t sampleKey = sampleMatched ? runtimeSampleIdx : 0;
             if (!sawNonExactKeep) {

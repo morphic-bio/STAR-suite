@@ -352,7 +352,7 @@ public:
 
     // Internal hash cache generation (--runMode hashCacheGenerate)
     string hashCacheOutput;       // --hashCacheOutput path (FH01SEQ1 binary)
-    string hashCacheTiers = "H0,H1,H2"; // comma-separated: H0,H1,H2
+    string hashCacheTiers = "H0,H1,H2"; // comma-separated: H0,H1,H1X2,H2
     uint32_t hashCacheParentLimit = 0; // 0 = all probes; else cap probe count (testing)
 
     // ReadId tracking for sorted BAM CB/UB tag injection (Option C)

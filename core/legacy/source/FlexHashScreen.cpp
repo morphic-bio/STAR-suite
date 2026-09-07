@@ -238,7 +238,8 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
             return out;
         }
 
-        if ((rec->cacheClass == 0 || rec->cacheClass == 1 || rec->cacheClass == 3) &&
+        if ((rec->cacheClass == FlexHashCacheH0 || rec->cacheClass == FlexHashCacheH1 ||
+             rec->cacheClass == FlexHashCacheH2 || rec->cacheClass == FlexHashCacheH1X2) &&
             sampleSpecifiedMismatch) {
             if (!sawSampleMismatch) {
                 sawSampleMismatch = true;
@@ -247,7 +248,8 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
             continue;
         }
 
-        if (rec->cacheClass == 0 || rec->cacheClass == 1 || rec->cacheClass == 3) {
+        if (rec->cacheClass == FlexHashCacheH0 || rec->cacheClass == FlexHashCacheH1 ||
+            rec->cacheClass == FlexHashCacheH2 || rec->cacheClass == FlexHashCacheH1X2) {
             const uint16_t geneIdx15 = static_cast<uint16_t>(rec->resolvedGeneIdx15);
             const uint16_t sampleKey = sampleMatched ? runtimeSampleIdx : 0;
             if (!sawNonExactKeep) {
@@ -305,9 +307,11 @@ void FlexHashScreenCache::buildTieredVectors() {
     h0Records_.clear();
     h1DenyRecords_.clear();
     for (const Record& rec : records_) {
-        if (rec.cacheClass == 0 && rec.resolvedGeneIdx15 > 0) {
+        if (rec.cacheClass == FlexHashCacheH0 && rec.resolvedGeneIdx15 > 0) {
             h0Records_.push_back(rec);
-        } else if ((rec.cacheClass == 1 && rec.resolvedGeneIdx15 > 0) ||
+        } else if (((rec.cacheClass == FlexHashCacheH1 ||
+                     rec.cacheClass == FlexHashCacheH1X2) &&
+                    rec.resolvedGeneIdx15 > 0) ||
                    rec.resolvedGeneIdx15 == 0) {
             h1DenyRecords_.push_back(rec);
         }
