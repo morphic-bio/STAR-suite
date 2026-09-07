@@ -396,6 +396,12 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
             std::memcpy(var, pr.seq, 51);
 
             if (wantH0) {
+                // An unambiguous exact match to an included probe is
+                // authoritative under the canonical Flex policy.  Do not run
+                // H0 through whole-read alignment: bases beyond the 50-base
+                // probe window are assay payload and can create unrelated
+                // genomic alignments.  H1/H2 decisions below remain verified
+                // with the normal alignment/resolution path.
                 for (uint32_t s = 1u; s <= nSamplesSeq; ++s) {
                     const uint16_t rowS = h0RowSampleIdx[s];
                     if (rowS == 0u) {

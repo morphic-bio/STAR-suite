@@ -2,6 +2,13 @@
 
 This document tracks changes specific to the STAR-Flex fork. For upstream STAR changes, see [CHANGES.md](CHANGES.md).
 
+## Unreleased
+
+- Define one Flex probe-resolution policy: authoritative exact H0 matches,
+  verified H1 KEEP and certified H1 DENY decisions, and residual alignment only
+  for unencodable probe windows or absent cache keys. No H0 policy selector is
+  exposed.
+
 ## 2025-12-18: Y-Chromosome BAM Split (Morphic/KOLF)
 
 **Feature**: Y-chromosome BAM splitting for **Morphic requirements for KOLF cell lines**. This is a general-purpose feature **not connected to the Flex pipeline**, usable with any STAR workflow.

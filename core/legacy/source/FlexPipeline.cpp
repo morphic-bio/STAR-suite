@@ -1483,7 +1483,7 @@ void *flexTriageThread(void *arg) {
     ReadPacket rpkt;
     while (st->readerQ.pop(rpkt)) {
 
-        FlexHashScreenDecision decision = cache.classifyReadH0Offset0(
+        FlexHashScreenDecision decision = cache.classifyReadH0H1Offset0(
             rpkt.seq[0], rpkt.readLen[0]);
 
         if (decision.action == FlexHashScreenDecision::Keep ||
