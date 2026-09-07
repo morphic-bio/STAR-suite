@@ -93,7 +93,7 @@ extern "C" uint64_t solo_genomic_only_probe_gene_count() { return 0; }
 
 // Global ProbeListIndex loader for inline path (independent of SoloFeature owner)
 static ProbeListIndex* gProbeIndex = nullptr;
-static bool gProbeIndexLoaded = false;
+static std::once_flag gProbeIndexInitOnce;
 
 // Reject logging infrastructure for trace-drops debugging
 static FILE* g_rejectLogFile = nullptr;
@@ -287,22 +287,22 @@ static void logRejectReason(const SoloReadBarcode& soloBar, uint64_t iRead, int3
 }
 
 const ProbeListIndex* getGlobalProbeIndex(const SoloReadFeature* rf) {
-    if (gProbeIndexLoaded) return gProbeIndex;
-    gProbeIndexLoaded = true;
     if (rf == nullptr) return nullptr;
-    const std::string& path = rf->pSolo.probeListPath;
-    if (path.empty() || path == "-") return nullptr;
-    ProbeListIndex* idx = new ProbeListIndex();
-    uint32_t deprecatedCount = 0;
-    if (!idx->load(path, rf->pSolo.removeDeprecated, &deprecatedCount)) {
-        delete idx;
-        return nullptr;
-    }
-    if (rf->pSolo.removeDeprecated && deprecatedCount > 0) {
-        // Note: Cannot log here as we don't have access to logMain in this context
-        // Logging will happen in STAR.cpp initialization
-    }
-    gProbeIndex = idx;
+    std::call_once(gProbeIndexInitOnce, [rf]() {
+        const std::string& path = rf->pSolo.probeListPath;
+        if (path.empty() || path == "-") return;
+        ProbeListIndex* idx = new ProbeListIndex();
+        uint32_t deprecatedCount = 0;
+        if (!idx->load(path, rf->pSolo.removeDeprecated, &deprecatedCount)) {
+            delete idx;
+            return;
+        }
+        if (rf->pSolo.removeDeprecated && deprecatedCount > 0) {
+            // Note: Cannot log here as we don't have access to logMain in this context
+            // Logging will happen in STAR.cpp initialization
+        }
+        gProbeIndex = idx;
+    });
     return gProbeIndex;
 }
 

@@ -1,6 +1,7 @@
 STAR-suite Flex alignment length-gate fix --- 2026/09/07
 ========================================================
 * Disabled the generic whole-read score and match fraction gates by default in `--flex yes`, because Flex normally aligns the probe-bearing prefix and soft-clips the assay remainder.
+* Made parallel H1/H2 synthetic verification bypass those fractional gates without mutating shared alignment parameters, and made its lazy probe-index initialization thread-safe. Both races could reject valid cache variants.
 * Preserved explicit `--outFilterScoreMinOverLread` and `--outFilterMatchNminOverLread` values, and left all non-Flex behavior unchanged.
 
 STAR-suite Flex BGZF sorted-BAM bridge --- 2026/09/05
