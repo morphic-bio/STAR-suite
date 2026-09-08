@@ -14,6 +14,7 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include "FlexDecisionSidecar.h"
 
 // --- Hash screen dump (env-gated: STAR_DUMP_HASH_SCREEN=<path>) ---
 // Binary format: 8-byte magic "HSCRN001", 8-byte nReads placeholder,
@@ -424,14 +425,24 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
         const bool spatialFlex = P.soloSpatialFlexIntegratedEnabled;
         bool hashScreenSampleOK = true;
         uint16_t hashScreenSampleIdx = 0;
+        const auto classifyFlexOffset0 = [&]() {
+            FlexHashScreenDecision decision =
+                FlexHashScreenCache::instance().classifyReadH0H1Offset0(
+                    Read0[0], readLengthOriginal[0]);
+            if (decision.action == FlexHashScreenDecision::Pass
+                && P.pSolo.probeMismatch >= 1) {
+                decision = FlexHashScreenCache::instance()
+                    .classifyReadH0H1Offset0SingleN(
+                        Read0[0], readLengthOriginal[0]);
+            }
+            return decision;
+        };
         // Read0[0] is still ASCII-encoded at this point (numeric conversion
         // happens later at complementSeqNumbers). The hash screen encodes
         // A/C/G/T characters; moving this call after convertNucleotidesToNumbers
         // would silently break classification.
         if (spatialFlex) {
-            hashScreenDecision_ =
-                FlexHashScreenCache::instance().classifyReadH0H1Offset0(
-                    Read0[0], readLengthOriginal[0]);
+            hashScreenDecision_ = classifyFlexOffset0();
         } else {
             soloRead->readBar->getCBandUMI(
                 Read0, Qual0, readLengthOriginal, readNameExtra[0],
@@ -449,10 +460,9 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             hashScreenSampleOK = !sampleDetReady_ || detectedSampleByte_ != 0xFF;
             if (hashScreenSampleOK) {
                 // Keep ordinary/BAM-producing Flex on the same cache policy
-                // as fused ingest: H0 first, then H1/deny, at offset 0 only.
-                hashScreenDecision_ =
-                    FlexHashScreenCache::instance().classifyReadH0H1Offset0(
-                        Read0[0], readLengthOriginal[0]);
+                // as fused ingest: H0 first, then H1/deny, followed by the
+                // conservative exactly-one-N retry, all at offset 0.
+                hashScreenDecision_ = classifyFlexOffset0();
             } else {
                 // An unmatched configured sample tag is terminal in fused
                 // ingest because residual alignment cannot make it eligible
@@ -461,6 +471,28 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             }
         }
         hashScreenDumpWrite(Read0[0], readLengthOriginal[0], hashScreenSampleIdx, hashScreenDecision_);
+        if (P.pSolo.flexDecisionSidecarWriter != nullptr) {
+            if (iReadAll == 0) {
+                exitWithError(
+                    "EXITING because the Flex decision sidecar received STAR read ordinal zero\n",
+                    std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+            }
+            const uint64_t sidecarOrdinal = iReadAll - 1;
+            soloRead->readBar->flexDecisionSidecarOrdinal = sidecarOrdinal;
+            std::string sidecarError;
+            if (!P.pSolo.flexDecisionSidecarWriter->recordTriage(
+                    sidecarOrdinal, readFilesIndex,
+                    flex_decision_sidecar::kMissingLaneOrdinal,
+                    readName, std::strlen(readName), hashScreenDecision_,
+                    sampleDetReady_, hashScreenSampleOK, detectedSampleByte_,
+                    hashScreenDecision_.action == FlexHashScreenDecision::Pass,
+                    false, sidecarError)) {
+                exitWithError(
+                    "EXITING because the Flex decision sidecar write failed: "
+                        + sidecarError + "\n",
+                    std::cerr, P.inOut->logMain, EXIT_CODE_FILE_WRITE, P);
+            }
+        }
         if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
             if (spatialFlex) {
                 if (iReadAll == 0 || hashScreenDecision_.geneIdx15 == 0
@@ -651,6 +683,7 @@ int ReadAlign::oneReadFromPacket(EnrichedPacket &pkt) {
             soloRead->readBar->cbMatchInd[i] = pkt.cbMatchInd[i];
         soloRead->readBar->umiB = pkt.umiB;
         soloRead->readBar->detectedSampleToken = pkt.detectedSampleToken;
+        soloRead->readBar->flexDecisionSidecarOrdinal = pkt.iReadAll;
     }
 
     // Convert ASCII sequences to numeric encoding (must happen before hash screen

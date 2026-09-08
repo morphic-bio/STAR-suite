@@ -27,6 +27,7 @@
 #include "SamtoolsSorter.h"
 #include "Transcriptome.h"
 #include "SpatialFeatureSidecar.h"
+#include "FlexDecisionSidecar.h"
 #include "SpatialR1FastqTap.h"
 #include "SpatialGex.h"
 #include "CountingSinkStress.h"
@@ -661,11 +662,46 @@ int main(int argInN, char *argIn[])
     // transcriptome placeholder (loaded only if P.quant.yes)
     Transcriptome *transcriptomeMain = nullptr;
     std::unique_ptr<spatial_feature_sidecar::Writer> spatialFeatureWriter;
+    std::unique_ptr<flex_decision_sidecar::Writer> flexDecisionWriter;
     std::unique_ptr<spatial_r1_fastq_tap::Writer> spatialR1FastqTapWriter;
     std::unique_ptr<spatial_gex::Pipeline> spatialGexPipeline;
     std::vector<std::string> spatialFlexFeatureIds;
     std::vector<double> vbGenePosterior;
     bool vbGenePosteriorReady = false;
+
+    if (P.pSolo.flexDecisionSidecarEnabled) {
+        flex_decision_sidecar::WriterConfig decisionConfig;
+        decisionConfig.path = P.pSolo.flexDecisionSidecarPath;
+        decisionConfig.starSuiteVersion = STAR_SUITE_VERSION;
+        decisionConfig.sourceRevision = STAR_SUITE_SOURCE_REVISION;
+        decisionConfig.cachePath = P.pSolo.hashScreenFile;
+        flexDecisionWriter.reset(new flex_decision_sidecar::Writer());
+        std::string sidecarError;
+        if (!flexDecisionWriter->open(decisionConfig, sidecarError)) {
+            exitWithError(
+                "EXITING because the Flex decision sidecar could not be opened: "
+                    + sidecarError + "\n",
+                std::cerr, P.inOut->logMain, EXIT_CODE_FILE_OPEN, P);
+        }
+        P.pSolo.flexDecisionSidecarWriter = flexDecisionWriter.get();
+        P.inOut->logMain << "Flex decision sidecar output: "
+                         << P.pSolo.flexDecisionSidecarPath << "\n" << flush;
+    }
+
+    const auto finalizeFlexDecisionSidecar = [&](std::uint64_t totalReads) {
+        if (!flexDecisionWriter) return;
+        std::string sidecarError;
+        if (!flexDecisionWriter->finalize(totalReads, sidecarError)) {
+            exitWithError(
+                "EXITING because the Flex decision sidecar could not be finalized: "
+                    + sidecarError + "\n",
+                std::cerr, P.inOut->logMain, EXIT_CODE_FILE_WRITE, P);
+        }
+        P.pSolo.flexDecisionSidecarWriter = nullptr;
+        P.inOut->logMain << timeMonthDayTime()
+                         << " ..... finalized Flex decision sidecar (reads="
+                         << totalReads << ")\n" << flush;
+    };
 
     // --runMode soloCellFiltering executes and exits before genome/mapping
     if (P.runMode == "soloCellFiltering") {
@@ -683,6 +719,7 @@ int main(int argInN, char *argIn[])
     if (flexNoGenomeCountOnlyActivationGuard(P, &flexNoGenomeReason)) {
         P.inOut->logMain << "Flex count-only no-genome: active\n" << flush;
         runFlexNoGenomeCountOnly(P);
+        finalizeFlexDecisionSidecar(g_statsAll.readN);
 
         g_statsAll.progressReport(P.inOut->logProgress);
         P.inOut->logProgress << "ALL DONE!\n" << flush;
@@ -2339,6 +2376,8 @@ int main(int argInN, char *argIn[])
                          << " ..... finalized spatial GeneFull sidecar (reads="
                          << P.iReadAll << ")\n" << flush;
     }
+
+    finalizeFlexDecisionSidecar(g_statsAll.readN);
 
     if (spatialGexPipeline) {
         const std::vector<std::string> &geneIds =

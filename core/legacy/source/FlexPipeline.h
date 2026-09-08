@@ -24,12 +24,13 @@ struct ReadPacket {
     char qual[2][kFlexPipeSeqMax];
     uint32_t readLen[2];
     uint64_t iReadAll;
+    uint64_t laneOrdinal;
     uint8_t  laneId;
     uint32_t readFilesIndex;
     char     readFilter;
     bool     eof;
 
-    ReadPacket() : readLen{0,0}, iReadAll(0), laneId(0), readFilesIndex(0), readFilter('Y'), eof(false) {
+    ReadPacket() : readLen{0,0}, iReadAll(0), laneOrdinal(UINT64_MAX), laneId(0), readFilesIndex(0), readFilter('Y'), eof(false) {
         name[0] = '\0';
         seq[0][0] = '\0'; seq[1][0] = '\0';
         qual[0][0] = '\0'; qual[1][0] = '\0';
@@ -239,6 +240,7 @@ struct FlexFastqMateChunk {
 struct FlexFastqBatch {
     int laneId = -1;
     uint64_t globalFirst = 0;
+    uint64_t laneFirst = 0;
     std::vector<FlexFastqRecordRef> recs;
     std::vector<char> data;    // mate 0: names, sequences, qualities
     std::vector<char> data1;   // mate 1: sequences and qualities
@@ -246,6 +248,7 @@ struct FlexFastqBatch {
     void reset(int lane) {
         laneId = lane;
         globalFirst = 0;
+        laneFirst = 0;
         recs.clear();
         data.clear();
         data1.clear();

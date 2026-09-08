@@ -1,5 +1,6 @@
 #include "FlexPipeline.h"
 #include "FlexHashScreen.h"
+#include "FlexDecisionSidecar.h"
 #include "SoloReadBarcode.h"
 #include "SoloReadFeature.h"
 #include "SoloRead.h"
@@ -10,6 +11,7 @@
 #include "ReadAlign.h"
 #include "Stats.h"
 #include "GlobalVariables.h"
+#include "ErrorWarning.h"
 #include "input/CbqInputModule.h"
 #include "input/BgzfStarAdapter.h"
 
@@ -30,6 +32,25 @@ namespace {
 
 static constexpr int kGzBufSize = 1 << 20;
 static constexpr size_t kFlexAlignPermitBatch = 64;
+
+void recordFlexDecisionTriage(
+    Parameters &P, std::uint64_t ordinal, std::uint32_t lane,
+    std::uint64_t laneOrdinal, const char *qname, std::size_t qnameLength,
+    const FlexHashScreenDecision &decision, bool sampleChecked,
+    bool sampleMatched, std::uint8_t sampleToken, bool alignmentHandoff,
+    bool noAlignDropped)
+{
+    if (P.pSolo.flexDecisionSidecarWriter == nullptr) return;
+    std::string error;
+    if (!P.pSolo.flexDecisionSidecarWriter->recordTriage(
+            ordinal, lane, laneOrdinal, qname, qnameLength, decision,
+            sampleChecked, sampleMatched, sampleToken, alignmentHandoff,
+            noAlignDropped, error)) {
+        exitWithError("EXITING because the Flex decision sidecar write failed: "
+                          + error + "\n",
+                      std::cerr, P.inOut->logMain, EXIT_CODE_FILE_WRITE, P);
+    }
+}
 
 ThreadControl::PermitHookContext kFlexBgzfPermitContext{
     ThreadControl::PermitDomain::FEATURE};
@@ -159,8 +180,8 @@ void *flexLaneReaderThread(void *arg) {
         if (!gzReadLine(gzR1, pkt.qual[1], kFlexPipeSeqMax)) break;
 
         pkt.iReadAll = st->iReadAllGlobal.fetch_add(1);
-
-        st->counters.perLaneReads[laneId]++;
+        pkt.laneOrdinal = st->counters.perLaneReads[laneId].fetch_add(
+            1, std::memory_order_relaxed);
         st->readerQ.push(std::move(pkt));
     }
 
@@ -217,9 +238,14 @@ void *flexLaneReaderRouterThread(void *arg) {
         if (!gzReadLine(gzR1, qual1, kFlexPipeSeqMax)) break;
 
         uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
-        st->counters.perLaneReads[laneId]++;
+        const uint64_t laneOrdinal = st->counters.perLaneReads[laneId].fetch_add(
+            1, std::memory_order_relaxed);
 
         FlexHashScreenDecision decision = cache.classifyReadH0Offset0(seq0, readLen0);
+        recordFlexDecisionTriage(
+            P, iReadAll, static_cast<std::uint32_t>(laneId), laneOrdinal,
+            name, std::strlen(name), decision, false, true, 0xFF,
+            decision.action == FlexHashScreenDecision::Pass, false);
 
         if (decision.action == FlexHashScreenDecision::Keep ||
             decision.action == FlexHashScreenDecision::Deny) {
@@ -626,6 +652,12 @@ static void processFastqBatch(
             // for a per-sample output, so reject it before residual alignment.
             decision.action = FlexHashScreenDecision::Deny;
         }
+        recordFlexDecisionTriage(
+            P, iReadAll, static_cast<std::uint32_t>(batch.laneId),
+            batch.laneFirst + i, name, rec.nameLen, decision,
+            sampleDetReady, sampleOK, detectedSampleToken,
+            decision.action == FlexHashScreenDecision::Pass && !noAlign,
+            decision.action == FlexHashScreenDecision::Pass && noAlign);
 
         if (decision.action == FlexHashScreenDecision::Keep ||
             decision.action == FlexHashScreenDecision::Deny) {
@@ -668,6 +700,7 @@ static void processFastqBatch(
                 ep.readLen[0] = readLen0;
                 ep.readLen[1] = readLen1;
                 ep.iReadAll = iReadAll;
+                ep.laneOrdinal = batch.laneFirst + i;
                 ep.laneId = static_cast<uint8_t>(batch.laneId);
                 ep.readFilesIndex = static_cast<uint32_t>(batch.laneId);
                 ep.readFilter = 'Y';
@@ -787,6 +820,7 @@ static uint64_t processOneLane(
         if (!mateFree.try_push(chunk)) delete chunk;
 
         if (!batch->recs.empty()) {
+            batch->laneFirst = nReads - batch->recs.size();
             batch->globalFirst = st->iReadAllGlobal.fetch_add(
                 batch->recs.size(), std::memory_order_relaxed);
             FlexFastqBatch *full = batch;
@@ -945,6 +979,12 @@ static uint64_t processOneBgzfRange(
         } else {
             decision.action = FlexHashScreenDecision::Deny;
         }
+        recordFlexDecisionTriage(
+            P, iReadAll, static_cast<std::uint32_t>(task.laneId),
+            record.read_ordinal, name, nameLength, decision,
+            sampleDetReady, sampleOK, detectedSampleToken,
+            decision.action == FlexHashScreenDecision::Pass && !noAlign,
+            decision.action == FlexHashScreenDecision::Pass && noAlign);
 
         if (decision.action == FlexHashScreenDecision::Keep ||
             decision.action == FlexHashScreenDecision::Deny) {
@@ -997,6 +1037,7 @@ static uint64_t processOneBgzfRange(
                 packet.readLen[0] = readLen0;
                 packet.readLen[1] = readLen1;
                 packet.iReadAll = iReadAll;
+                packet.laneOrdinal = record.read_ordinal;
                 packet.laneId = static_cast<uint8_t>(task.laneId);
                 packet.readFilesIndex = static_cast<uint32_t>(task.laneId);
                 packet.readFilter = record.read_filter;
@@ -1024,6 +1065,7 @@ static uint64_t processCbqModuleRecords(
     SoloReadBarcode &localBar, bool noAlign,
     bool deterministicReadIds,
     uint64_t globalFirst,
+    uint64_t laneFirst,
     ReadAlign *RA)
 {
     auto &cache = FlexHashScreenCache::instance();
@@ -1113,6 +1155,12 @@ static uint64_t processCbqModuleRecords(
             } else {
                 decision.action = FlexHashScreenDecision::Deny;
             }
+            recordFlexDecisionTriage(
+                P, iReadAll, static_cast<std::uint32_t>(laneId),
+                laneFirst + localOrdinal, name, nameLength, decision,
+                sampleDetReady, sampleOK, detectedSampleToken,
+                decision.action == FlexHashScreenDecision::Pass && !noAlign,
+                decision.action == FlexHashScreenDecision::Pass && noAlign);
 
             if (decision.action == FlexHashScreenDecision::Keep ||
                 decision.action == FlexHashScreenDecision::Deny) {
@@ -1210,6 +1258,7 @@ static uint64_t processCbqModuleRecords(
                     ep.readLen[0] = readLen0;
                     ep.readLen[1] = readLen1;
                     ep.iReadAll = iReadAll;
+                    ep.laneOrdinal = laneFirst + localOrdinal;
                     ep.laneId = static_cast<uint8_t>(laneId);
                     ep.readFilesIndex = static_cast<uint32_t>(laneId);
                     ep.readFilter = record.read_filter;
@@ -1254,7 +1303,7 @@ static uint64_t processOneCbqLane(
     }
     const uint64_t nReads = processCbqModuleRecords(
         st, P, laneId, cbqPath, module, readFeat, stats,
-        sampleDet, sampleDetReady, localBar, noAlign, false, 0, RA);
+        sampleDet, sampleDetReady, localBar, noAlign, false, 0, 0, RA);
     module.close();
     return nReads;
 }
@@ -1281,7 +1330,8 @@ static uint64_t processOneCbqRange(
     }
     const uint64_t nReads = processCbqModuleRecords(
         st, P, task.laneId, cbqPath, module, readFeat, stats,
-        sampleDet, sampleDetReady, localBar, noAlign, true, task.globalFirst, RA);
+        sampleDet, sampleDetReady, localBar, noAlign, true, task.globalFirst,
+        task.firstRecord, RA);
     module.close();
     return nReads;
 }
@@ -1739,6 +1789,13 @@ void *flexTriageThread(void *arg) {
 
         FlexHashScreenDecision decision = cache.classifyReadH0H1Offset0(
             rpkt.seq[0], rpkt.readLen[0]);
+        recordFlexDecisionTriage(
+            P, rpkt.iReadAll, rpkt.readFilesIndex, rpkt.laneOrdinal,
+            rpkt.name, std::strlen(rpkt.name), decision, false, true, 0xFF,
+            decision.action == FlexHashScreenDecision::Pass
+                && P.pSolo.flexNoAlign == 0,
+            decision.action == FlexHashScreenDecision::Pass
+                && P.pSolo.flexNoAlign != 0);
 
         if (decision.action == FlexHashScreenDecision::Keep ||
             decision.action == FlexHashScreenDecision::Deny) {
