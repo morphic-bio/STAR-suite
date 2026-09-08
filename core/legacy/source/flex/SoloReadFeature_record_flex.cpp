@@ -157,7 +157,7 @@ static void flexDecisionLedgerInit() {
         "\tcb_raw\tcb_corrected\tcb_match\tcb_candidate_indices"
         "\tumi_raw\tumi_corrected\tumi_packed\tumi_valid\tchosen_source"
         "\tchosen_gene_idx\tfinal_state\tfinal_reason\tmolecule_key_hex"
-        "\tambiguous_key_hex\tdetail\n");
+        "\tambiguous_key_hex\tdetail\tprobe_hamming_distance\n");
     std::atexit([]() {
         std::lock_guard<std::mutex> lock(g_flexDecisionLedger.mutex);
         if (g_flexDecisionLedger.fp != nullptr) {
@@ -230,7 +230,8 @@ static void flexDecisionLedgerEvent(const char *event,
                                     const char *finalReason,
                                     uint64_t moleculeKey,
                                     uint64_t ambiguousKey,
-                                    const std::string &detail) {
+                                    const std::string &detail,
+                                    int probeHammingDistance = -1) {
     if (!flexDecisionLedgerEnabled()) return;
 
     const std::string cbRaw = soloBar == nullptr ? std::string() : soloBar->cbSeq;
@@ -253,11 +254,13 @@ static void flexDecisionLedgerEvent(const char *event,
     const std::string umiPackedText = umiPacked == UINT64_MAX ? "." : std::to_string(umiPacked);
     const std::string moleculeText = ledgerHex(moleculeKey);
     const std::string ambiguousText = ledgerHex(ambiguousKey);
+    const std::string probeHammingText = probeHammingDistance < 0
+        ? "." : std::to_string(probeHammingDistance);
 
     std::lock_guard<std::mutex> lock(g_flexDecisionLedger.mutex);
     std::fprintf(g_flexDecisionLedger.fp,
         "%s\t%llu\t%s\t%lld\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d"
-        "\t%s\t%s\t%s\t%s\t%s\t.\t%s\t%d\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
+        "\t%s\t%s\t%s\t%s\t%s\t.\t%s\t%d\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
         event,
         static_cast<unsigned long long>(iRead),
         cleanQname.c_str(),
@@ -283,18 +286,24 @@ static void flexDecisionLedgerEvent(const char *event,
         finalReason == nullptr ? "." : finalReason,
         moleculeText.c_str(),
         ambiguousText.c_str(),
-        cleanDetail.c_str());
+        cleanDetail.c_str(),
+        probeHammingText.c_str());
 }
 
 void flexDecisionLedgerTriage(uint64_t iRead, const char *qname,
-                              uint32_t lane, uint64_t laneOrdinal,
+                              size_t qnameLength, uint32_t lane,
+                              uint64_t laneOrdinal,
                               const FlexHashScreenDecision &decision,
                               bool sampleOk, uint8_t detectedSampleToken) {
-    flexDecisionLedgerEvent("TRIAGE", iRead, qname, lane, laneOrdinal,
+    const std::string boundedName = qname == nullptr
+        ? std::string() : std::string(qname, qnameLength);
+    flexDecisionLedgerEvent("TRIAGE", iRead, boundedName.c_str(), lane, laneOrdinal,
                             ledgerActionName(decision.action), decision.cacheClass,
                             decision.geneIdx15, decision.negativeCode, decision.offset,
                             sampleOk ? 1 : 0, detectedSampleToken, nullptr, nullptr, 0,
-                            "INTERMEDIATE", ".", UINT64_MAX, UINT64_MAX, std::string());
+                            "INTERMEDIATE", ".", UINT64_MAX, UINT64_MAX, std::string(),
+                            decision.probeHammingDistance == 0xFF
+                                ? -1 : decision.probeHammingDistance);
 }
 
 void flexDecisionLedgerNoAlign(uint64_t iRead, const char *reason) {
@@ -644,6 +653,17 @@ static void trackReadIdForTagsFlex(SoloReadFeature *soloReadFeat, SoloReadBarcod
     kh_val(soloReadFeat->readIdTracker_, iter) = val;
 }
 
+static const char *flexCacheSourceName(uint8_t cacheClass)
+{
+    switch (cacheClass) {
+        case FlexHashCacheH0: return "H0";
+        case FlexHashCacheH1: return "H1";
+        case FlexHashCacheH2: return "H2";
+        case FlexHashCacheH1X2: return "H1X2";
+        default: return "CACHE";
+    }
+}
+
 bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead,
                                   uint16_t geneIdx15, uint8_t cacheClass,
                                   FlexGdnaRegion probeRegion)
@@ -653,7 +673,7 @@ bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode
     }
     if (soloBar.cbMatch < 0) {
         flexDecisionLedgerRecord(soloBar, iRead, "FINAL",
-                                 cacheClass == 0 ? "H0" : "H1", geneIdx15,
+                                 flexCacheSourceName(cacheClass), geneIdx15,
                                  "REJECT", "NO_CB_MATCH");
         if (soloBar.pSolo.inlineHashMode) {
             char extraBuf[96];
@@ -671,7 +691,7 @@ bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode
     const uint8_t tagIdx = extractTagIdxForFlex(soloBar);
     if (dropUnmatchedTagForFlex(soloBar, tagIdx)) {
         flexDecisionLedgerRecord(soloBar, iRead, "FINAL",
-                                 cacheClass == 0 ? "H0" : "H1", geneIdx15,
+                                 flexCacheSourceName(cacheClass), geneIdx15,
                                  "REJECT", "UNMATCHED_TAG");
         if (soloBar.pSolo.inlineHashMode) {
             logRejectReason(soloBar, iRead, soloReadFeat->featureType, 0, 0, "UNMATCHED_TAG", "", soloBar.pSolo);
@@ -689,7 +709,7 @@ bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode
         accumulateAmbiguousCBForFlex(soloReadFeat, soloBar, geneIdx15, tagIdx, probeRegion);
         const uint64_t ambiguousKey = ReadAlign::hashCbSeq(soloBar.cbMatchString);
         flexDecisionLedgerRecord(soloBar, iRead, "FINAL",
-                                 cacheClass == 0 ? "H0" : "H1", geneIdx15,
+                                 flexCacheSourceName(cacheClass), geneIdx15,
                                  "PENDING", "AMBIG_CB", UINT64_MAX, ambiguousKey,
                                  "tag_index=" + std::to_string(tagIdx));
     } else if ((soloReadFeat->inlineHash_ != nullptr || soloReadFeat->bucketStorageEnabled())
@@ -700,7 +720,7 @@ bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode
         soloReadFeat->appendInlineObservation(
             key, flexGdnaPackValue(1, probeRegion));
         flexDecisionLedgerRecord(soloBar, iRead, "FINAL",
-                                 cacheClass == 0 ? "H0" : "H1", geneIdx15,
+                                 flexCacheSourceName(cacheClass), geneIdx15,
                                  "KEEP", "COUNT_RECORD_CREATED", key,
                                  UINT64_MAX,
                                  "tag_index=" + std::to_string(tagIdx));

@@ -12,6 +12,7 @@
 #include "Stats.h"
 #include "GlobalVariables.h"
 #include "ErrorWarning.h"
+#include "SoloReadFeature_record_shared.h"
 #include "input/CbqInputModule.h"
 #include "input/BgzfStarAdapter.h"
 
@@ -40,6 +41,9 @@ void recordFlexDecisionTriage(
     bool sampleMatched, std::uint8_t sampleToken, bool alignmentHandoff,
     bool noAlignDropped)
 {
+    flexDecisionLedgerTriage(
+        ordinal, qname, qnameLength, lane, laneOrdinal, decision,
+        sampleMatched, sampleToken);
     if (P.pSolo.flexDecisionSidecarWriter == nullptr) return;
     std::string error;
     if (!P.pSolo.flexDecisionSidecarWriter->recordTriage(
@@ -598,8 +602,8 @@ static void processFastqBatch(
                 decision = cache.classifyReadH0H1Offset0SingleN(seq0, readLen0);   // one N in the probe window
             }
             if (decision.action == FlexHashScreenDecision::Pass &&
-                cache.h1x2ResidualAnchorReady()) {
-                decision = cache.classifyReadH1X2ResidualAnchor(seq0, readLen0);
+                cache.h1x2ProbeIndexReady()) {
+                decision = cache.classifyReadH1X2SeedExtend(seq0, readLen0);
             }
         } else {
             // The tag is outside the configured sample universe, including
@@ -935,8 +939,8 @@ static uint64_t processOneBgzfRange(
                 decision = cache.classifyReadH0H1Offset0SingleN(seq0, readLen0);   // one N in the probe window
             }
             if (decision.action == FlexHashScreenDecision::Pass &&
-                cache.h1x2ResidualAnchorReady()) {
-                decision = cache.classifyReadH1X2ResidualAnchor(seq0, readLen0);
+                cache.h1x2ProbeIndexReady()) {
+                decision = cache.classifyReadH1X2SeedExtend(seq0, readLen0);
             }
         } else {
             decision.action = FlexHashScreenDecision::Deny;
@@ -1120,8 +1124,8 @@ static uint64_t processCbqModuleRecords(
                     decision.action = FlexHashScreenDecision::Pass;
                 }
                 if (decision.action == FlexHashScreenDecision::Pass &&
-                    probeWindowPacked && cache.h1x2ResidualAnchorReady()) {
-                    decision = cache.classifyCbqH1X2ResidualAnchor(
+                    probeWindowPacked && cache.h1x2ProbeIndexReady()) {
+                    decision = cache.classifyCbqH1X2SeedExtend(
                         seqLo, seqHi, nMask);
                 }
             } else {
@@ -1765,8 +1769,8 @@ void *flexTriageThread(void *arg) {
         FlexHashScreenDecision decision = cache.classifyReadH0H1Offset0(
             rpkt.seq[0], rpkt.readLen[0]);
         if (decision.action == FlexHashScreenDecision::Pass &&
-            cache.h1x2ResidualAnchorReady()) {
-            decision = cache.classifyReadH1X2ResidualAnchor(
+            cache.h1x2ProbeIndexReady()) {
+            decision = cache.classifyReadH1X2SeedExtend(
                 rpkt.seq[0], rpkt.readLen[0]);
         }
         recordFlexDecisionTriage(

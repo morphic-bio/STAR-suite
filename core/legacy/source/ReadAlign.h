@@ -140,8 +140,8 @@ class ReadAlign {
         bool extractedUmiValid_;      // True if UMI extraction succeeded (umiCheck >= 0), false if invalid
         std::string extractedCbSeq_;   // CB sequence (for Phase 2: lookup resolved CB if cbIdxPlus1==0)
         FlexHashScreenDecision hashScreenDecision_;
-        // Set only for an H1X2 full-key miss with one unique split-half gene.
-        // The downstream Flex resolver must select this same gene.
+        // Legacy H1X2 residual-alignment field. New seed-and-extend decisions
+        // are terminal and leave it zero.
         uint16_t residualAnchorGeneIdx15_ = 0;
         /** Per-thread: when true, outputAlignments skips soloRead->record (hash cache synthetic validation). */
         bool hashCacheSynthProbe_ = false;

@@ -152,7 +152,19 @@ int main()
         assert(writer.recordTriage(3, 0, 3, "anchor-ambiguous", 16, ambiguous,
                                    true, true, 1, false, false, error));
 
-        assert(writer.finalize(4, error));
+        FlexHashScreenDecision scoreFail;
+        scoreFail.action = FlexHashScreenDecision::Deny;
+        scoreFail.negativeCode = FlexHashNegHalfScoreFail;
+        assert(writer.recordTriage(4, 0, 4, "probe-score-fail", 16, scoreFail,
+                                   true, true, 1, false, false, error));
+
+        FlexHashScreenDecision splitProbe;
+        splitProbe.action = FlexHashScreenDecision::Deny;
+        splitProbe.negativeCode = FlexHashNegHalfSplitProbe;
+        assert(writer.recordTriage(5, 0, 5, "probe-split", 11, splitProbe,
+                                   true, true, 1, false, false, error));
+
+        assert(writer.finalize(6, error));
         fds::Reader audit;
         assert(audit.open(anchors, error));
         assert(audit.validateAll(error));
@@ -177,6 +189,12 @@ int main()
         assert(!(record.statusFlags & fds::kCacheTerminal));
         assert(record.cacheClass == 0xFF);
         assert(record.finalReason == fds::kReasonResidualAnchorAmbiguous);
+        assert(audit.read(4, record, error));
+        assert(record.statusFlags & fds::kProbeScoreFailed);
+        assert(record.finalReason == fds::kReasonProbeScoreFail);
+        assert(audit.read(5, record, error));
+        assert(record.statusFlags & fds::kProbeSplit);
+        assert(record.finalReason == fds::kReasonProbeSplit);
     }
 
     const std::string singleN = std::string(directory) + "/single-n.bin";

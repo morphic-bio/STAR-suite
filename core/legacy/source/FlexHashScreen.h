@@ -10,7 +10,6 @@
 #include "FlexProbeHalfIndex.h"
 
 class ParametersSolo;
-class Genome;
 
 struct FlexHashScreenDecision {
     enum Action : uint8_t {
@@ -31,8 +30,11 @@ struct FlexHashScreenDecision {
     // identifies the underlying cache tier that supplied the unique gene.
     bool singleN = false;
     uint8_t singleNCacheClass = 0xFF;
-    // Nonzero only for an H1X2 cache miss that has one uniquely anchored
-    // 25-base probe-half gene. Residual alignment must agree with this gene.
+    // Total fixed-position 50-base probe distance for an H1X2
+    // seed-and-extend decision; 0xFF for other tiers or no scored probe.
+    uint8_t probeHammingDistance = 0xFF;
+    // Legacy diagnostic field for the former residual-alignment gate. New
+    // H1X2 seed-and-extend decisions are terminal and leave this field zero.
     uint16_t residualAnchorGeneIdx15 = 0;
 };
 
@@ -73,20 +75,16 @@ public:
      *  else is a miss (Pass), never a certified negative. Two or more Ns -> Pass. */
     FlexHashScreenDecision classifyCbqH0H1Offset0SingleN(uint64_t seqLo, uint64_t seqHi, uint64_t nMask) const;
     FlexHashScreenDecision classifyReadH0H1Offset0SingleN(const char* readSeq, uint32_t readLen) const;
-    FlexHashScreenDecision classifyReadH1X2ResidualAnchor(const char* readSeq,
-                                                          uint32_t readLen) const;
-    FlexHashScreenDecision classifyCbqH1X2ResidualAnchor(uint64_t seqLo,
-                                                         uint64_t seqHi,
-                                                         uint64_t nMask) const;
-    bool ensureH1X2ResidualAnchorIndex(const ParametersSolo& pSolo,
-                                      const Genome& genome,
-                                      std::string* errorOut = nullptr,
-                                      bool* builtNow = nullptr);
+    FlexHashScreenDecision classifyReadH1X2SeedExtend(const char* readSeq,
+                                                      uint32_t readLen) const;
+    FlexHashScreenDecision classifyCbqH1X2SeedExtend(uint64_t seqLo,
+                                                     uint64_t seqHi,
+                                                     uint64_t nMask) const;
     bool hasH1X2() const { return hasH1X2_; }
-    bool h1x2ResidualAnchorReady() const { return halfAnchorIndex_.ready(); }
-    size_t h1x2ResidualAnchorProbeCount() const { return halfAnchorIndex_.probeCount(); }
-    size_t h1x2ResidualAnchorKeyCount() const {
-        return halfAnchorIndex_.leftKeyCount() + halfAnchorIndex_.rightKeyCount();
+    bool h1x2ProbeIndexReady() const { return probeSeedIndex_.ready(); }
+    size_t h1x2ProbeCount() const { return probeSeedIndex_.probeCount(); }
+    size_t h1x2ProbeKeyCount() const {
+        return probeSeedIndex_.leftKeyCount() + probeSeedIndex_.rightKeyCount();
     }
     static uint32_t probeWindowLength();
     size_t recordCount() const { return records_.size(); }
@@ -131,6 +129,8 @@ private:
     FlexHashScreenDecision classifyH0H1Offset0MapKey(const SeqKeyNoSample& key) const;
     void buildH0NoSampleMap();
     void buildH1DenyNoSampleMap();
+    bool buildH1X2ProbeIndex(std::string* errorOut);
+    static std::string decodeCacheSequence(uint64_t seqLo, uint64_t seqHi);
 
     bool initialized_ = false;
     bool enabled_ = false;
@@ -144,8 +144,7 @@ private:
     H0NoSampleMap h1DenyNoSampleMap_;
     bool offset0MapsUseCbqOrder_ = false;
     bool hasH1X2_ = false;
-    bool halfAnchorBuildAttempted_ = false;
-    FlexProbeHalfIndex halfAnchorIndex_;
+    FlexProbeHalfIndex probeSeedIndex_;
     static uint8_t baseLUT_[256];
     static bool lutInitialized_;
 };
@@ -155,7 +154,9 @@ enum FlexHashScreenNegativeCode : uint8_t {
     FlexHashNegNone = 0,
     FlexHashNegProbeAmbig = 1,
     FlexHashNegHalfNoAnchor = 2,
-    FlexHashNegHalfGeneAmbig = 3
+    FlexHashNegHalfGeneAmbig = 3,
+    FlexHashNegHalfScoreFail = 4,
+    FlexHashNegHalfSplitProbe = 5
 };
 
 const char* flexHashScreenDenyReason(uint8_t negativeCode);

@@ -465,9 +465,9 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
                 // conservative exactly-one-N retry, all at offset 0.
                 hashScreenDecision_ = classifyFlexOffset0();
                 if (hashScreenDecision_.action == FlexHashScreenDecision::Pass &&
-                    FlexHashScreenCache::instance().h1x2ResidualAnchorReady()) {
+                    FlexHashScreenCache::instance().h1x2ProbeIndexReady()) {
                     hashScreenDecision_ = FlexHashScreenCache::instance()
-                        .classifyReadH1X2ResidualAnchor(
+                        .classifyReadH1X2SeedExtend(
                             Read0[0], readLengthOriginal[0]);
                 }
             } else {
@@ -480,6 +480,12 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
         residualAnchorGeneIdx15_ =
             hashScreenDecision_.residualAnchorGeneIdx15;
         hashScreenDumpWrite(Read0[0], readLengthOriginal[0], hashScreenSampleIdx, hashScreenDecision_);
+        if (iReadAll != 0) {
+            flexDecisionLedgerTriage(
+                iReadAll - 1, readName, std::strlen(readName), readFilesIndex,
+                flex_decision_sidecar::kMissingLaneOrdinal, hashScreenDecision_,
+                hashScreenSampleOK, detectedSampleByte_);
+        }
         if (P.pSolo.flexDecisionSidecarWriter != nullptr) {
             if (iReadAll == 0) {
                 exitWithError(

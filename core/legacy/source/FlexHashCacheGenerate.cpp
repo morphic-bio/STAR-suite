@@ -343,6 +343,12 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
 
     bool wantH0 = false, wantH1 = false, wantH1X2 = false, wantH2 = false;
     parseTiers(P.pSolo.hashCacheTiers, wantH0, wantH1, wantH1X2, wantH2);
+    if (wantH1X2 && !wantH0) {
+        exitWithError(
+            "EXITING: experimental H1X2 requires H0 in --hashCacheTiers so "
+            "the cache carries its authoritative parent probes.\n",
+            std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
 
     std::vector<std::unique_ptr<ReadAlignChunk>> chunks;
     chunks.reserve(P.runThreadN);
