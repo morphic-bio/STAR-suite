@@ -4,6 +4,10 @@ This document tracks changes specific to the STAR-Flex fork. For upstream STAR c
 
 ## Unreleased
 
+- Resolve Flex sample tags only at the configured offset with two separate
+  direct-address caches: the supplied table as H0, then constructed Hamming-1
+  variants on H0 miss. Cross-owner H1 collisions are rejected as ambiguous;
+  neighboring-offset search is no longer supported.
 - Add an experimental `H1X2` cache-generation tier, enabled only when named in
   `--hashCacheTiers`, for at most one mismatch in each 25-base probe half.
   Duplicate full keys are denied as ambiguous; the default tiers are unchanged.

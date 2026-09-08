@@ -1,3 +1,8 @@
+STAR-suite Flex fixed-offset sample-tag cache --- 2026/09/08
+============================================================
+* Replaced runtime sample-tag distance checks with separate direct-address H0 and constructed H1 caches.
+* Made exact supplied-table entries authoritative, rejected cross-owner H1 keys as ambiguous, and removed neighboring-offset lookup.
+
 STAR-suite Flex BAM single-N parity --- 2026/09/07
 ==================================================
 * Applied the fused path's conservative exactly-one-N H0/H1/H1X2 retry to the ordinary Flex mapping/BAM path.

@@ -1959,13 +1959,16 @@ soloSampleProbes            -
 soloSampleProbeOffset       68
     int:                    sample probe offset in read (bases)
 
-soloSampleSearchNearby      yes
-    string:                 allow nearby matches during sample detection (yes|no)
+soloSampleSearchNearby      no
+    string:                 compatibility flag. no is required; yes is rejected.
+                            Sample tags are never searched at neighboring offsets.
 
 soloSampleTagMismatch       1
-    int:                    mismatches tolerated when matching the 8-base sample tag: 0 or 1.
-                            A tag within one mismatch is assigned only when exactly one sample
-                            is that close; ties are rejected. soloSampleStrictMatch yes forces 0.
+    int:                    0 or 1. STAR first queries the supplied 8-base tag table (H0)
+                            at soloSampleProbeOffset. On an H0 miss, 1 queries a separate H1
+                            cache constructed from all single substitutions. A key is assigned
+                            only when it has one owner; cross-owner keys are rejected as ambiguous.
+                            soloSampleStrictMatch yes forces 0.
 
 soloProbeMismatch           1
     int:                    0 or 1. With 1, a probe window that carries a single N is resolved through
