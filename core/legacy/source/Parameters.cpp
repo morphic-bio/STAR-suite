@@ -4234,9 +4234,9 @@ void Parameters::applyDefaultGroups() {
         setStringIfDefault("soloRunFlexFilter", "yes");
         setStringIfDefault("soloRemoveDeprecated", "Yes");
         setStringIfDefault("removeDeprecated", "Yes");
-        // Accept exact or uniquely owned one-mismatch sample tags, while also
-        // resolving the configured nearby positions.
-        setStringIfDefault("soloSampleSearchNearby", "yes");
+        // Query the supplied sample-tag table at the configured offset only:
+        // exact H0 first, then the separately constructed unique-owner H1.
+        setStringIfDefault("soloSampleSearchNearby", "no");
         setIntIfDefault("soloSampleTagMismatch", 1);
         setStringIfDefault("soloCBmatchWLtype", "1MM_multi_Nbase_pseudocounts");
         setStringIfDefault("soloUMIdedup", "1MM_CR");

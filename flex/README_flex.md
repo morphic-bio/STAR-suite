@@ -191,9 +191,13 @@ STAR \
 | `--soloSampleWhitelist` | - | Path to sample tag whitelist TSV |
 | `--soloProbeList` | auto | Path to probe gene list (auto-detects from genome index if not specified) |
 | `--soloSampleProbes` | - | Path to 10x sample probe barcodes |
-| `--soloSampleProbeOffset` | 0 | Offset in read for sample probe sequence |
-| `--soloSampleSearchNearby` | `yes` | Search nearby positions for sample tag |
-| `--soloSampleStrictMatch` | `no` | Require strict match for sample tag |
+| `--soloSampleProbeOffset` | 68 | The one fixed offset used for the 8-base sample tag |
+| `--soloSampleTagMismatch` | 1 | After an exact-table miss, query a separately constructed Hamming-1 cache; accept only unique-owner keys |
+| `--soloSampleSearchNearby` | `no` | Compatibility flag; `yes` is rejected because neighboring offsets are not searched |
+| `--soloSampleStrictMatch` | `no` | Set `yes` to disable the H1 tier and require an exact table entry |
+
+See [the fixed sample-tag policy](../docs/FLEX_SAMPLE_TAG_POLICY.md) for the
+lookup order and ambiguity rules.
 
 ### FlexFilter (Cell Calling)
 
@@ -685,4 +689,3 @@ tools/remove_y_reads/           # Standalone FASTQ Y-splitter CLI
 - Baseline: STAR 2.7.11b
 - When `--flex no` (default), behavior is identical to upstream STAR
 - Upstream `README.md` and `CHANGES.md` are not modified
-

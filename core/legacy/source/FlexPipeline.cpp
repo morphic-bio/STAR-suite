@@ -339,41 +339,17 @@ static bool detectConfiguredSampleTag(const char *readSeq, uint32_t readLen,
     if (!sampleDetReady || sampleDet == nullptr) {
         return true;
     }
-    bool primaryAmbiguous = false;
-    auto detectAt = [&](int64_t offset, bool exactOnly) -> bool {
-        if (offset < 0 || static_cast<uint64_t>(offset) + 8 > readLen) {
-            return false;
-        }
-        uint8_t packedTag[4];
-        nuclPackBAM(const_cast<char *>(readSeq + offset),
-                    reinterpret_cast<char *>(packedTag), 8);
-        const uint32_t sampleIdx = sampleDet->detectSampleFromPackedTag(
-            packedTag, exactOnly, exactOnly ? nullptr : &primaryAmbiguous);
-        if (sampleIdx == 0) {
-            return false;
-        }
-        detectedSampleToken = static_cast<uint8_t>(sampleIdx & 0x1Fu);
-        return true;
-    };
-
     const int64_t primary = static_cast<int64_t>(pSolo.sampleProbeOffset);
-    if (detectAt(primary, false)) {
-        return true;
-    }
-    // A tie between samples at the tag position is final: searching neighbouring
-    // offsets from there could only assign the read by coincidence.
-    if (primaryAmbiguous) {
+    if (primary < 0 || static_cast<uint64_t>(primary) + 8 > readLen) {
         return false;
     }
-    if (!pSolo.sampleStrictMatch && pSolo.sampleSearchNearby) {
-        static const int deltas[] = {-1, 1, -2, 2};
-        for (int delta : deltas) {
-            if (detectAt(primary + delta, true)) {   // a shifted tag must hit the listed table exactly
-                return true;
-            }
-        }
-    }
-    return false;
+    uint8_t packedTag[4];
+    nuclPackBAM(const_cast<char *>(readSeq + primary),
+                reinterpret_cast<char *>(packedTag), 8);
+    const uint32_t sampleIdx = sampleDet->detectSampleFromPackedTag(packedTag);
+    if (sampleIdx == 0) return false;
+    detectedSampleToken = static_cast<uint8_t>(sampleIdx & 0x1Fu);
+    return true;
 }
 
 static bool detectConfiguredSampleTag(const star::input::CbqSegmentView &segment,
@@ -385,45 +361,20 @@ static bool detectConfiguredSampleTag(const star::input::CbqSegmentView &segment
     if (!sampleDetReady || sampleDet == nullptr) {
         return true;
     }
-    bool primaryAmbiguous = false;
-    auto detectAt = [&](int64_t offset, bool exactOnly) -> bool {
-        if (offset < 0) {
-            return false;
-        }
-        uint64_t packed = 0;
-        uint32_t nMask = 0;
-        if (!star::input::cbq_pack_segment_window_lsb(
-                segment, static_cast<size_t>(offset), 8, &packed, &nMask) ||
-            nMask != 0) {
-            return false;
-        }
-        const uint32_t sampleIdx = sampleDet->detectSampleFromTwoBitTag(
-            static_cast<uint16_t>(packed), exactOnly, exactOnly ? nullptr : &primaryAmbiguous);
-        if (sampleIdx == 0) {
-            return false;
-        }
-        detectedSampleToken = static_cast<uint8_t>(sampleIdx & 0x1Fu);
-        return true;
-    };
-
     const int64_t primary = static_cast<int64_t>(pSolo.sampleProbeOffset);
-    if (detectAt(primary, false)) {
-        return true;
-    }
-    // A tie between samples at the tag position is final: searching neighbouring
-    // offsets from there could only assign the read by coincidence.
-    if (primaryAmbiguous) {
+    if (primary < 0) return false;
+    uint64_t packed = 0;
+    uint32_t nMask = 0;
+    if (!star::input::cbq_pack_segment_window_lsb(
+            segment, static_cast<size_t>(primary), 8, &packed, &nMask) ||
+        nMask != 0) {
         return false;
     }
-    if (!pSolo.sampleStrictMatch && pSolo.sampleSearchNearby) {
-        static const int deltas[] = {-1, 1, -2, 2};
-        for (int delta : deltas) {
-            if (detectAt(primary + delta, true)) {   // a shifted tag must hit the listed table exactly
-                return true;
-            }
-        }
-    }
-    return false;
+    const uint32_t sampleIdx = sampleDet->detectSampleFromTwoBitTag(
+        static_cast<uint16_t>(packed));
+    if (sampleIdx == 0) return false;
+    detectedSampleToken = static_cast<uint8_t>(sampleIdx & 0x1Fu);
+    return true;
 }
 
 // Process one lane: read all FASTQ records, hash screen, inline Solo for hits, push misses to alignQ.
@@ -1692,12 +1643,12 @@ void *flexLaneReaderFullThread(void *arg) {
                 sampleDet->loadProbes(P.pSolo.sampleProbesPath)) {
                 uint32_t tagExact = 0, tagMm1 = 0, tagAmb = 0;
                 sampleDet->tagTableStats(tagExact, tagMm1, tagAmb);
-                P.inOut->logMain << "Flex sample tag detection: mismatch="
-                                 << (P.pSolo.sampleStrictMatch ? 0 : P.pSolo.sampleTagMismatch)
-                                 << " nearby=" << (P.pSolo.sampleSearchNearby ? "yes" : "no")
+                P.inOut->logMain << "Flex sample tag detection: offset="
+                                 << P.pSolo.sampleProbeOffset
+                                 << " tiers=H0"
+                                 << ((P.pSolo.sampleStrictMatch || P.pSolo.sampleTagMismatch == 0) ? "" : ",H1")
                                  << " table: exact=" << tagExact << " mismatch1=" << tagMm1
                                  << " ambiguous=" << tagAmb
-                                 << " maxBucket=" << sampleDet->tagTableMaxOccupancy()
                                  << "\n" << std::flush;
                 sampleDetReady = true;
             } else {

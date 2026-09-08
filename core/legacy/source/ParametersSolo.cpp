@@ -204,12 +204,18 @@ void ParametersSolo::initialize(Parameters *pPin)
             }
         };
         parseYesNo(sampleSearchNearbyStr, sampleSearchNearby);
+        if (sampleSearchNearby) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --soloSampleSearchNearby yes is no longer supported.\n"
+                   << "SOLUTION: use the fixed --soloSampleProbeOffset; STAR queries H0 and then unique-owner H1 at that position only.\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
         parseYesNo(sampleStrictMatchStr, sampleStrictMatch);
         if (sampleTagMismatch < 0 || sampleTagMismatch > 1) {
             ostringstream errOut; errOut << "EXITING because of fatal PARAMETERS error: --soloSampleTagMismatch must be 0 or 1, got " << sampleTagMismatch << "\n";
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
-        if (sampleStrictMatch) { sampleTagMismatch = 0; sampleSearchNearby = false; }
+        if (sampleStrictMatch) sampleTagMismatch = 0;
         if (probeMismatch < 0 || probeMismatch > 1) {
             ostringstream errOut; errOut << "EXITING because of fatal PARAMETERS error: --soloProbeMismatch must be 0 or 1, got " << probeMismatch << "\n";
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
