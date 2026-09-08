@@ -254,6 +254,37 @@ STAR \
 | Probe list | Gene list from probe set |
 | Sample probe barcodes | 10x probe barcode sequences file |
 
+## Reading FASTQ input
+
+Flex reads each lane with one thread per mate, and the per-read work (sample tag, probe
+lookup, barcode extraction) runs on the shared worker pool rather than on the reader. A run
+therefore scales with the number of lanes: with eight lane pairs the readers keep the pool fed,
+and decompression is not the limit.
+
+A single large gzip pair is the exception. There is one lane, so there are two reader threads,
+and the run is bounded by inflating the larger mate on one core. Two options:
+
+- **Use `--readFilesCommand` with a parallel decompressor.** This is the standard STAR
+  mechanism and needs nothing linked into STAR:
+
+  ```bash
+  --readFilesCommand "rapidgzip -d -c -P 8"
+  ```
+
+  On a 51 GiB pair (1.12 billion read pairs) this took a no-alignment run from 9:35 to 4:44.
+  Eight decompression threads were enough; sixteen were no faster, because the limit moves to
+  the reader consuming the pipe. Note that the decompressor's threads are outside STAR's thread
+  budget, so size them with the rest of the machine in mind. Plain `zcat` is *slower* than
+  letting STAR read the file itself (1:45 against 1:15 on a two-lane set): a pipe costs more
+  than inflating directly into STAR's buffer, so only a genuinely parallel decompressor helps.
+
+- **Convert to CBQ once** if the same reads will be processed more than once. The same 51 GiB
+  pair runs in 2:26 from CBQ.
+
+`--readFilesCommand` applies to FASTQ lanes only. With CBQ input STAR exits with an error
+rather than ignoring it, and BGZF range reading stands down when a command is set, since the
+bytes then arrive through a pipe rather than from a file that can be range-read.
+
 ## Parameters
 
 ### Master Switch
