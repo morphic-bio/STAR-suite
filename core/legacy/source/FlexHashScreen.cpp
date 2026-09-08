@@ -524,18 +524,27 @@ namespace {
 struct SingleNMerge {
     FlexHashScreenDecision keep;
     bool haveKeep = false, ambiguous = false, sawDeny = false;
+    uint8_t matchedClass = 0xFF;
     void add(const FlexHashScreenDecision& d) {
         if (d.action == FlexHashScreenDecision::Deny) { sawDeny = true; return; }
         if (d.action != FlexHashScreenDecision::Keep) return;
-        if (!haveKeep) { keep = d; haveKeep = true; }
+        if (!haveKeep) { keep = d; haveKeep = true; matchedClass = d.cacheClass; }
         else if (d.geneIdx15 != keep.geneIdx15) ambiguous = true;
+        else if (d.cacheClass != matchedClass) matchedClass = 0xFE;
     }
     FlexHashScreenDecision result() const {
         FlexHashScreenDecision out;
         // The true base is unknown, so a disagreement between the substitutions (or a
         // DENY record among them) is not resolved evidence: report a miss, which keeps
         // the read eligible for residual alignment, rather than a certified negative.
-        if (haveKeep && !ambiguous && !sawDeny) { out = keep; out.cacheClass = 1; return out; }
+        if (haveKeep && !ambiguous && !sawDeny) {
+            out = keep;
+            out.singleN = true;
+            out.singleNCacheClass = matchedClass;
+            out.cacheClass = FlexHashCacheH1;
+            return out;
+        }
+        out.singleN = true;
         out.action = FlexHashScreenDecision::Pass; return out;
     }
 };

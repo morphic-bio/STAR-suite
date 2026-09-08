@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include "FlexDebugCounters.h"
+#include "FlexDecisionSidecar.h"
 #include "SoloReadFeature_record_shared.h"
 
 #ifdef DEBUG_CB_UB_PARITY
@@ -103,6 +104,21 @@ static bool g_rejectLogEnabled = false;
 static bool g_rejectLogTraceQname = false;
 static std::unordered_map<uint64_t, std::string> g_iReadToQname;
 static std::mutex g_qnameMapMutex;
+
+static void recordFlexAlignmentDecision(
+    SoloReadBarcode &soloBar, bool resolved, bool genomic,
+    uint16_t geneIdx15, flex_decision_sidecar::FinalReason reason)
+{
+    if (soloBar.pSolo.flexDecisionSidecarWriter == nullptr
+        || soloBar.flexDecisionSidecarOrdinal == UINT64_MAX) {
+        return;
+    }
+    std::string error;
+    // Writer failures are retained and reported fail-closed at finalization.
+    soloBar.pSolo.flexDecisionSidecarWriter->recordAlignment(
+        soloBar.flexDecisionSidecarOrdinal, resolved, genomic,
+        geneIdx15, reason, error);
+}
 
 // Initialize reject logging from environment variable
 static void initRejectLogging() {
@@ -979,6 +995,9 @@ FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
         if (soloBar.pSolo.inlineHashMode) {
             logRejectReason(soloBar, iRead, featureType, 0, 0, "RESOLVER_DROP", "reason=NO_CANDIDATES", soloBar.pSolo);
         }
+        recordFlexAlignmentDecision(
+            soloBar, false, false, 0,
+            flex_decision_sidecar::kReasonAlignmentNoCandidates);
         return out;
     }
 
@@ -1035,6 +1054,9 @@ FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
 
             logRejectReason(soloBar, iRead, featureType, isProbeDrop, 0, "RESOLVER_DROP", extraStr.c_str(), soloBar.pSolo);
         }
+        recordFlexAlignmentDecision(
+            soloBar, false, false, 0,
+            flex_decision_sidecar::kReasonAlignmentConflict);
         return out;
     }
 
@@ -1119,6 +1141,10 @@ FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
     out.hasWinningCandidate = (winningCandidate != nullptr);
     out.winningIsGenomic = resolvedGenomic;
     out.probeRegion = resolvedProbeRegion;
+    recordFlexAlignmentDecision(
+        soloBar, true, resolvedGenomic, resolvedGeneIdx,
+        resolvedGenomic ? flex_decision_sidecar::kReasonAlignmentGenomic
+                        : flex_decision_sidecar::kReasonAlignmentProbe);
     return out;
 }
 

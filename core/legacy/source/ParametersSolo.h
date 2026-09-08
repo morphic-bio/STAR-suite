@@ -16,6 +16,7 @@ KHASH_MAP_INIT_INT(cbH0, uint32_t)
 
 class Parameters;
 class ParametersSolo;
+namespace flex_decision_sidecar { class Writer; }
 namespace star { namespace solo { class CbBucketStore; } }
 
 class UMIdedup {
@@ -349,6 +350,9 @@ public:
     string hashScreenDisableStr = "no";
     bool hashScreenEnabled = false;
     string hashScreenFile;
+    string flexDecisionSidecarPath = "-";
+    bool flexDecisionSidecarEnabled = false;
+    flex_decision_sidecar::Writer *flexDecisionSidecarWriter = nullptr;
 
     // Internal hash cache generation (--runMode hashCacheGenerate)
     string hashCacheOutput;       // --hashCacheOutput path (FH01SEQ1 binary)

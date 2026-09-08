@@ -37,6 +37,9 @@ public:
 
     // Sample/tag detection token (5-bit, 0xFF = not detected)
     uint8_t detectedSampleToken; // Set by ReadAlign::outputAlignments before record()
+    // Zero-based slot in the optional Flex decision sidecar. It is set by
+    // the ordinary reader or fused alignment handoff before the resolver.
+    uint64_t flexDecisionSidecarOrdinal = UINT64_MAX;
 
     array<uint64,256> qualHist;
     SoloReadBarcodeStats stats;
