@@ -12,7 +12,7 @@
 
 namespace flex_decision_sidecar {
 
-static const std::uint16_t kSchemaVersion = 1;
+static const std::uint16_t kSchemaVersion = 2;
 static const std::uint16_t kHeaderBytes = 512;
 static const std::uint16_t kRecordBytes = 48;
 static const std::uint64_t kMissingLaneOrdinal = UINT64_MAX;
@@ -33,7 +33,12 @@ enum StatusFlag : std::uint32_t {
     kAlignmentProbe      = 1u << 11,
     kAlignmentGenomic    = 1u << 12,
     kNoAlignDropped      = 1u << 13,
-    kCacheTerminal       = 1u << 14
+    kCacheTerminal       = 1u << 14,
+    kResidualAnchorUnique = 1u << 15,
+    kResidualAnchorAbsent = 1u << 16,
+    kResidualAnchorAmbiguous = 1u << 17,
+    kAlignmentAnchorAgreed = 1u << 18,
+    kAlignmentAnchorDisagreed = 1u << 19
 };
 
 enum FinalReason : std::uint8_t {
@@ -45,7 +50,10 @@ enum FinalReason : std::uint8_t {
     kReasonAlignmentNoCandidates = 5,
     kReasonAlignmentConflict = 6,
     kReasonAlignmentProbe = 7,
-    kReasonAlignmentGenomic = 8
+    kReasonAlignmentGenomic = 8,
+    kReasonResidualNoAnchor = 9,
+    kReasonResidualAnchorAmbiguous = 10,
+    kReasonAlignmentAnchorDisagree = 11
 };
 
 struct Record {
@@ -53,7 +61,8 @@ struct Record {
     std::uint64_t laneOrdinal = kMissingLaneOrdinal;
     std::uint32_t laneIndex = kMissingLane;
     std::uint32_t statusFlags = 0;
-    std::uint32_t reserved32 = 0;
+    std::uint16_t residualAnchorGeneIdx15 = 0;
+    std::uint16_t alignmentGeneIdx15 = 0;
     std::uint16_t geneIdx15 = 0;
     std::uint8_t cacheAction = FlexHashScreenDecision::Disabled;
     std::uint8_t cacheClass = 0xFF;

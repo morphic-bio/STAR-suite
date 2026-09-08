@@ -78,9 +78,11 @@ struct EnrichedPacket : ReadPacket {
     uint32_t umiB;
     uint8_t  detectedSampleToken;
     uint16_t hashScreenSampleIdx;
+    uint16_t residualAnchorGeneIdx15;
 
     EnrichedPacket() : ReadPacket(), cbMatch(-1), cbMatchIndN(0),
-                       umiB(0), detectedSampleToken(0), hashScreenSampleIdx(0) {
+                       umiB(0), detectedSampleToken(0), hashScreenSampleIdx(0),
+                       residualAnchorGeneIdx15(0) {
         std::memset(cbMatchInd, 0, sizeof(cbMatchInd));
     }
 };

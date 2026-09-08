@@ -5,7 +5,7 @@ sidecar for the fused Flex inline-hash classifier and the ordinary
 BAM-producing Flex path. It is disabled by default (`-`). It does not change
 classification or counting policy.
 
-The file uses schema `FLXDEC1`, version 1: a 512-byte little-endian header and
+The file uses schema `FLXDEC2`, version 2: a 512-byte little-endian header and
 one 48-byte record at `512 + 48 * global_ordinal`. The final file is published
 only after every input pair has a record and the header is marked complete.
 Interrupted runs retain only `FILE.tmp`.
@@ -21,6 +21,8 @@ Each record contains:
   the underlying matching tier before its runtime H1 normalization;
 - sample-tag checked/matched/rejected state and token;
 - residual-alignment handoff and its resolved/rejected probe/genomic result.
+- residual half-anchor state (absent, ambiguous, or unique), its gene, the
+  independently resolved alignment gene, and anchor agreement/disagreement.
 
 Fused lane work stealing can assign global ordinals in a different interleaving
 when the thread count changes. `lane + lane_ordinal` and the normalized-name

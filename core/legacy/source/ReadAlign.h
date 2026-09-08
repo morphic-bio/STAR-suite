@@ -57,7 +57,8 @@ class ReadAlign {
         int oneReadFromPacket(struct EnrichedPacket &pkt);
 
         /** Synthetic Flex PE read (mate0=R2, mate1=R1) for --runMode hashCacheGenerate.
-         *  Returns: 1=KEEP (correct gene), 0=DENY (mapped but wrong/ambiguous gene), -1=DEAD (unmapped). */
+         *  Returns: 1=KEEP (correct gene), 0=DENY (mapped but wrong/ambiguous gene),
+         *  -1=DENY (tested but unmapped/unannotated). */
         int flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t lenR2, const char* r1seq, uint32_t lenR1, uint16_t expectedGeneIdx15);
 
         Genome &mapGen, &genOut; //mapped-to-genome structure
@@ -139,6 +140,9 @@ class ReadAlign {
         bool extractedUmiValid_;      // True if UMI extraction succeeded (umiCheck >= 0), false if invalid
         std::string extractedCbSeq_;   // CB sequence (for Phase 2: lookup resolved CB if cbIdxPlus1==0)
         FlexHashScreenDecision hashScreenDecision_;
+        // Set only for an H1X2 full-key miss with one unique split-half gene.
+        // The downstream Flex resolver must select this same gene.
+        uint16_t residualAnchorGeneIdx15_ = 0;
         /** Per-thread: when true, outputAlignments skips soloRead->record (hash cache synthetic validation). */
         bool hashCacheSynthProbe_ = false;
 

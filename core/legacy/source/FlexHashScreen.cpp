@@ -1,6 +1,8 @@
 #include "FlexHashScreen.h"
 #include "Parameters.h"
 #include "ParametersSolo.h"
+#include "Genome.h"
+#include "ProbeListIndex.h"
 
 #include <algorithm>
 #include <cstring>
@@ -62,6 +64,8 @@ bool FlexHashScreenCache::ensureLoaded(const ParametersSolo& pSolo, std::string*
     records_.clear();
     cacheVersion_ = 0;
     regionMetadataComplete_ = false;
+    hasH1X2_ = false;
+    halfAnchorBuildAttempted_ = false;
     offset0MapsUseCbqOrder_ = pSolo.pP != nullptr && pSolo.pP->readFilesTypeN == 20;
 
     if (!pSolo.hashScreenEnabled || pSolo.hashScreenFile.empty()) {
@@ -306,7 +310,10 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
 void FlexHashScreenCache::buildTieredVectors() {
     h0Records_.clear();
     h1DenyRecords_.clear();
+    hasH1X2_ = false;
     for (const Record& rec : records_) {
+        if (rec.cacheClass == FlexHashCacheH1X2)
+            hasH1X2_ = true;
         if (rec.cacheClass == FlexHashCacheH0 && rec.resolvedGeneIdx15 > 0) {
             h0Records_.push_back(rec);
         } else if (((rec.cacheClass == FlexHashCacheH1 ||
@@ -320,6 +327,113 @@ void FlexHashScreenCache::buildTieredVectors() {
     std::sort(h1DenyRecords_.begin(), h1DenyRecords_.end(), recordLess);
     buildH0NoSampleMap();
     buildH1DenyNoSampleMap();
+}
+
+bool FlexHashScreenCache::ensureH1X2ResidualAnchorIndex(
+    const ParametersSolo& pSolo, const Genome& genome, std::string* errorOut,
+    bool* builtNow)
+{
+    if (builtNow != nullptr)
+        *builtNow = false;
+    if (!hasH1X2_ || halfAnchorIndex_.ready())
+        return true;
+    if (halfAnchorBuildAttempted_) {
+        if (errorOut != nullptr)
+            *errorOut = "the H1X2 residual half-anchor index could not be built";
+        return false;
+    }
+    halfAnchorBuildAttempted_ = true;
+
+    ProbeListIndex probeList;
+    uint32_t deprecatedCount = 0;
+    if (!probeList.load(pSolo.probeListPath, pSolo.removeDeprecated,
+                        &deprecatedCount)) {
+        if (errorOut != nullptr)
+            *errorOut = "cannot load the active Flex probe-list gene axis";
+        return false;
+    }
+
+    std::vector<FlexProbeHalfIndex::Probe> probes;
+    for (uint32_t chromosome = 0; chromosome < genome.nChrReal; ++chromosome) {
+        const std::string& name = genome.chrName[chromosome];
+        if (name.size() < 4 || name.compare(0, 4, "ENSG") != 0 ||
+            genome.chrLength[chromosome] != 50) {
+            continue;
+        }
+        const size_t pipe = name.find('|');
+        const std::string geneId = pipe == std::string::npos
+            ? name : name.substr(0, pipe);
+        const uint16_t geneIdx15 = probeList.geneIndex15(geneId);
+        if (geneIdx15 == 0)
+            continue;
+
+        std::string sequence(50, 'N');
+        const uint64_t start = genome.chrStart[chromosome];
+        static const char bases[] = {'A', 'C', 'G', 'T'};
+        bool valid = true;
+        for (unsigned position = 0; position < 50; ++position) {
+            const unsigned char code = static_cast<unsigned char>(
+                genome.G[start + position]);
+            if (code > 3) {
+                valid = false;
+                break;
+            }
+            sequence[position] = bases[code];
+        }
+        if (valid)
+            probes.push_back(FlexProbeHalfIndex::Probe(sequence, geneIdx15));
+    }
+
+    if (!halfAnchorIndex_.build(probes, errorOut))
+        return false;
+    if (builtNow != nullptr)
+        *builtNow = true;
+    return true;
+}
+
+namespace {
+
+FlexHashScreenDecision halfAnchorDecision(
+    const FlexProbeHalfIndex::Result& anchor)
+{
+    FlexHashScreenDecision decision;
+    if (anchor.status == FlexProbeHalfIndex::Unique) {
+        decision.action = FlexHashScreenDecision::Pass;
+        decision.geneIdx15 = anchor.geneIdx15;
+        decision.cacheClass = FlexHashCacheH1X2;
+        decision.residualAnchorGeneIdx15 = anchor.geneIdx15;
+    } else {
+        decision.action = FlexHashScreenDecision::Deny;
+        decision.negativeCode = anchor.status == FlexProbeHalfIndex::Ambiguous
+            ? FlexHashNegHalfGeneAmbig : FlexHashNegHalfNoAnchor;
+    }
+    return decision;
+}
+
+} // namespace
+
+FlexHashScreenDecision FlexHashScreenCache::classifyReadH1X2ResidualAnchor(
+    const char* readSeq, uint32_t readLen) const
+{
+    if (!hasH1X2_ || !halfAnchorIndex_.ready()) {
+        FlexHashScreenDecision decision;
+        decision.action = FlexHashScreenDecision::Pass;
+        return decision;
+    }
+    return halfAnchorDecision(halfAnchorIndex_.classify(readSeq, readLen));
+}
+
+FlexHashScreenDecision FlexHashScreenCache::classifyCbqH1X2ResidualAnchor(
+    uint64_t seqLo, uint64_t seqHi, uint64_t nMask) const
+{
+    if (!hasH1X2_ || !halfAnchorIndex_.ready()) {
+        FlexHashScreenDecision decision;
+        decision.action = FlexHashScreenDecision::Pass;
+        return decision;
+    }
+    const SeqKeyNoSample cacheKey = cbqKeyToCacheKey(seqLo, seqHi);
+    return halfAnchorDecision(halfAnchorIndex_.classifyCachePacked(
+        cacheKey.lo, cacheKey.hi, nMask));
 }
 
 // ── LUT for branchless base-to-2bit conversion ──────────────────────────────
@@ -654,6 +768,18 @@ FlexHashScreenDecision FlexHashScreenCache::classifyH0H1Offset0MapKey(
 
 uint32_t FlexHashScreenCache::probeWindowLength() {
     return kCacheKmerLength;
+}
+
+const char* flexHashScreenDenyReason(uint8_t negativeCode)
+{
+    switch (negativeCode) {
+        case FlexHashNegHalfNoAnchor:
+            return "H1X2_HALF_NO_ANCHOR";
+        case FlexHashNegHalfGeneAmbig:
+            return "H1X2_HALF_GENE_AMBIG";
+        default:
+            return "NEG_PROBE_AMBIG";
+    }
 }
 
 bool FlexHashScreenCache::findRecordInVec(const std::vector<Record>& vec, uint64_t seqLo, uint64_t seqHi, uint16_t sampleIdx, Record& out) const {

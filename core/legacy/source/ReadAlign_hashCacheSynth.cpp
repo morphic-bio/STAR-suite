@@ -88,7 +88,7 @@ int ReadAlign::flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t le
     // unmapType=4 because the barcode mate (R1) never maps to the genome.
     if (unmapType >= 0 || nTr == 0) {
         hashCacheSynthProbe_ = savedSynth;
-        return -1; // DEAD: variant doesn't map
+        return -1; // Known negative: the tested variant does not map.
     }
 
     transformGenome();
@@ -120,7 +120,7 @@ int ReadAlign::flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t le
 
     const auto &readGe = readAnnot.annotFeatures[geneFeatureType].fSet;
     if (readGe.size() == 0) {
-        return -1; // DEAD: mapped but no gene annotation
+        return -1; // Known negative: mapped but has no usable gene annotation.
     }
     if (readGe.size() > 1 && !P.pSolo.multiMap.yes.multi) {
         return 0; // DENY: multi-gene hit, ambiguous

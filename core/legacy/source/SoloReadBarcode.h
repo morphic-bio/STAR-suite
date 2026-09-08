@@ -41,6 +41,10 @@ public:
     // the ordinary reader or fused alignment handoff before the resolver.
     uint64_t flexDecisionSidecarOrdinal = UINT64_MAX;
 
+    // Per-read H1X2 residual-alignment contract. Zero disables the check;
+    // otherwise the alignment resolver must return this gene.
+    uint16_t residualAnchorGeneIdx15;
+
     array<uint64,256> qualHist;
     SoloReadBarcodeStats stats;
 

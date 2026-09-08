@@ -113,8 +113,70 @@ int main()
         } else {
             assert(record.statusFlags & fds::kAlignmentRan);
             assert(record.statusFlags & fds::kAlignmentResolved);
-            assert(record.geneIdx15 == 20 + ordinal);
+            assert(record.geneIdx15 == 0);
+            assert(record.alignmentGeneIdx15 == 20 + ordinal);
         }
+    }
+
+    const std::string anchors = std::string(directory) + "/anchors.bin";
+    {
+        fds::Writer writer;
+        assert(writer.open(config(anchors), error));
+
+        FlexHashScreenDecision agreed;
+        agreed.action = FlexHashScreenDecision::Pass;
+        agreed.residualAnchorGeneIdx15 = 42;
+        assert(writer.recordTriage(0, 0, 0, "anchor-agree", 12, agreed,
+                                   true, true, 1, true, false, error));
+        assert(writer.recordAlignment(0, true, false, 42,
+                                      fds::kReasonAlignmentProbe, error));
+
+        FlexHashScreenDecision disagreed;
+        disagreed.action = FlexHashScreenDecision::Pass;
+        disagreed.residualAnchorGeneIdx15 = 43;
+        assert(writer.recordTriage(1, 0, 1, "anchor-disagree", 15, disagreed,
+                                   true, true, 1, true, false, error));
+        assert(writer.recordAlignment(1, false, false, 99,
+                                      fds::kReasonAlignmentAnchorDisagree,
+                                      error));
+
+        FlexHashScreenDecision absent;
+        absent.action = FlexHashScreenDecision::Deny;
+        absent.negativeCode = FlexHashNegHalfNoAnchor;
+        assert(writer.recordTriage(2, 0, 2, "anchor-absent", 13, absent,
+                                   true, true, 1, false, false, error));
+
+        FlexHashScreenDecision ambiguous;
+        ambiguous.action = FlexHashScreenDecision::Deny;
+        ambiguous.negativeCode = FlexHashNegHalfGeneAmbig;
+        assert(writer.recordTriage(3, 0, 3, "anchor-ambiguous", 16, ambiguous,
+                                   true, true, 1, false, false, error));
+
+        assert(writer.finalize(4, error));
+        fds::Reader audit;
+        assert(audit.open(anchors, error));
+        assert(audit.validateAll(error));
+        fds::Record record;
+        assert(audit.read(0, record, error));
+        assert(record.statusFlags & fds::kResidualAnchorUnique);
+        assert(record.statusFlags & fds::kAlignmentAnchorAgreed);
+        assert(record.residualAnchorGeneIdx15 == 42);
+        assert(record.alignmentGeneIdx15 == 42);
+        assert(audit.read(1, record, error));
+        assert(record.statusFlags & fds::kAlignmentAnchorDisagreed);
+        assert(record.residualAnchorGeneIdx15 == 43);
+        assert(record.alignmentGeneIdx15 == 99);
+        assert(record.finalReason == fds::kReasonAlignmentAnchorDisagree);
+        assert(audit.read(2, record, error));
+        assert(record.statusFlags & fds::kResidualAnchorAbsent);
+        assert(!(record.statusFlags & fds::kCacheTerminal));
+        assert(record.cacheClass == 0xFF);
+        assert(record.finalReason == fds::kReasonResidualNoAnchor);
+        assert(audit.read(3, record, error));
+        assert(record.statusFlags & fds::kResidualAnchorAmbiguous);
+        assert(!(record.statusFlags & fds::kCacheTerminal));
+        assert(record.cacheClass == 0xFF);
+        assert(record.finalReason == fds::kReasonResidualAnchorAmbiguous);
     }
 
     const std::string singleN = std::string(directory) + "/single-n.bin";
@@ -164,7 +226,7 @@ int main()
         assert(!writer.finalize(2, error));
     }
 
-    for (const std::string &path : {serial, threaded, singleN, missing,
+    for (const std::string &path : {serial, threaded, singleN, anchors, missing,
                                     missing + ".tmp", outOfRange,
                                     outOfRange + ".tmp"}) {
         std::remove(path.c_str());

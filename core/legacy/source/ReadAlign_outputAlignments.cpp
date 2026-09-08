@@ -918,6 +918,8 @@ void ReadAlign::outputAlignments() {
         // Flex-specific side effects stay off for standard non-Flex STARsolo.
         if (P.pSolo.flexMode && !spatialFlex && soloRead && soloRead->readBar) {
             soloRead->readBar->detectedSampleToken = detectedSampleByte_;
+            soloRead->readBar->residualAnchorGeneIdx15 =
+                residualAnchorGeneIdx15_;
         }
 
         // Populate optional MAPQ/CIGAR/score on transcripts for downstream consumers (Flex resolver)

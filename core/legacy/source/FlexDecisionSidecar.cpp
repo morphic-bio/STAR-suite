@@ -13,7 +13,7 @@
 namespace flex_decision_sidecar {
 namespace {
 
-const unsigned char kMagic[8] = {'F', 'L', 'X', 'D', 'E', 'C', '1', 0};
+const unsigned char kMagic[8] = {'F', 'L', 'X', 'D', 'E', 'C', '2', 0};
 const std::uint32_t kEndianMarker = 0x01020304u;
 
 void put16(unsigned char *p, std::uint16_t value)
@@ -181,7 +181,8 @@ std::vector<unsigned char> encodeRecord(const Record &record)
     put64(bytes.data() + 8, record.laneOrdinal);
     put32(bytes.data() + 16, record.laneIndex);
     put32(bytes.data() + 20, record.statusFlags);
-    put32(bytes.data() + 24, record.reserved32);
+    put16(bytes.data() + 24, record.residualAnchorGeneIdx15);
+    put16(bytes.data() + 26, record.alignmentGeneIdx15);
     put16(bytes.data() + 28, record.geneIdx15);
     bytes[30] = record.cacheAction;
     bytes[31] = record.cacheClass;
@@ -205,7 +206,8 @@ bool decodeRecord(const unsigned char *bytes, std::size_t size,
     record.laneOrdinal = get64(bytes + 8);
     record.laneIndex = get32(bytes + 16);
     record.statusFlags = get32(bytes + 20);
-    record.reserved32 = get32(bytes + 24);
+    record.residualAnchorGeneIdx15 = get16(bytes + 24);
+    record.alignmentGeneIdx15 = get16(bytes + 26);
     record.geneIdx15 = get16(bytes + 28);
     record.cacheAction = bytes[30];
     record.cacheClass = bytes[31];
@@ -230,10 +232,6 @@ bool validateRecord(const Record &record, std::string &error)
         error = "Flex decision sidecar record is missing";
         return false;
     }
-    if (record.reserved32 != 0) {
-        error = "Flex decision sidecar record has nonzero reserved field";
-        return false;
-    }
     if (((record.statusFlags & kNameHashPresent) != 0) != (record.qnameHash != 0)) {
         error = "Flex decision sidecar name-hash flag is inconsistent";
         return false;
@@ -256,6 +254,22 @@ bool validateRecord(const Record &record, std::string &error)
     if ((record.statusFlags & kAlignmentRejected)
         && !(record.statusFlags & kAlignmentRan)) {
         error = "Flex decision sidecar alignment rejection lacks alignment run";
+        return false;
+    }
+    if ((record.statusFlags & (kAlignmentAnchorAgreed
+                               | kAlignmentAnchorDisagreed))
+        && !(record.statusFlags & kResidualAnchorUnique)) {
+        error = "Flex decision sidecar anchor result lacks a unique anchor";
+        return false;
+    }
+    if ((record.statusFlags & kAlignmentAnchorAgreed)
+        && !(record.statusFlags & kAlignmentResolved)) {
+        error = "Flex decision sidecar anchor agreement lacks a resolved alignment";
+        return false;
+    }
+    if ((record.statusFlags & kAlignmentAnchorDisagreed)
+        && !(record.statusFlags & kAlignmentRejected)) {
+        error = "Flex decision sidecar anchor disagreement lacks a rejected alignment";
         return false;
     }
     return true;
@@ -369,6 +383,12 @@ bool Writer::recordTriage(std::uint64_t ordinal, std::uint32_t laneIndex,
     if (decision.singleN) record.statusFlags |= kSingleNAttempted;
     if (decision.singleN && decision.action == FlexHashScreenDecision::Keep)
         record.statusFlags |= kSingleNResolved;
+    if (decision.residualAnchorGeneIdx15 != 0)
+        record.statusFlags |= kResidualAnchorUnique;
+    if (decision.negativeCode == FlexHashNegHalfNoAnchor)
+        record.statusFlags |= kResidualAnchorAbsent;
+    if (decision.negativeCode == FlexHashNegHalfGeneAmbig)
+        record.statusFlags |= kResidualAnchorAmbiguous;
     if (sampleChecked) {
         record.statusFlags |= kSampleChecked;
         record.statusFlags |= sampleMatched ? kSampleMatched : kSampleRejected;
@@ -376,13 +396,21 @@ bool Writer::recordTriage(std::uint64_t ordinal, std::uint32_t laneIndex,
     if (alignmentHandoff) record.statusFlags |= kAlignmentHandoff;
     if (noAlignDropped) record.statusFlags |= kNoAlignDropped;
     const bool sampleRejected = sampleChecked && !sampleMatched;
-    if (!sampleRejected && (decision.action == FlexHashScreenDecision::Keep
-                            || decision.action == FlexHashScreenDecision::Deny)) {
+    const bool residualGateReject =
+        decision.negativeCode == FlexHashNegHalfNoAnchor
+        || decision.negativeCode == FlexHashNegHalfGeneAmbig;
+    if (!sampleRejected && !residualGateReject
+        && (decision.action == FlexHashScreenDecision::Keep
+            || decision.action == FlexHashScreenDecision::Deny)) {
         record.statusFlags |= kCacheTerminal;
     }
-    record.geneIdx15 = sampleRejected ? 0 : decision.geneIdx15;
+    record.geneIdx15 = sampleRejected || decision.residualAnchorGeneIdx15 != 0
+        ? 0 : decision.geneIdx15;
+    record.residualAnchorGeneIdx15 = sampleRejected
+        ? 0 : decision.residualAnchorGeneIdx15;
+    record.alignmentGeneIdx15 = 0;
     record.cacheAction = decision.action;
-    const bool cacheRecord = !sampleRejected
+    const bool cacheRecord = !sampleRejected && !residualGateReject
         && (decision.action == FlexHashScreenDecision::Keep
             || decision.action == FlexHashScreenDecision::Deny);
     record.cacheClass = cacheRecord ? decision.cacheClass : 0xFF;
@@ -393,6 +421,10 @@ bool Writer::recordTriage(std::uint64_t ordinal, std::uint32_t laneIndex,
     record.hashOffset = decision.offset;
     record.probeRegion = static_cast<std::uint8_t>(decision.probeRegion);
     if (sampleChecked && !sampleMatched) record.finalReason = kReasonSampleTagReject;
+    else if (decision.negativeCode == FlexHashNegHalfNoAnchor)
+        record.finalReason = kReasonResidualNoAnchor;
+    else if (decision.negativeCode == FlexHashNegHalfGeneAmbig)
+        record.finalReason = kReasonResidualAnchorAmbiguous;
     else if (noAlignDropped) record.finalReason = kReasonCacheMissNoAlign;
     else if (decision.action == FlexHashScreenDecision::Keep) record.finalReason = kReasonCacheKeep;
     else if (decision.action == FlexHashScreenDecision::Deny) record.finalReason = kReasonCacheDeny;
@@ -418,14 +450,21 @@ bool Writer::recordAlignment(std::uint64_t ordinal, bool resolved,
     if (!wasPresent) return fail("alignment update has no triage record", error);
     record.statusFlags |= kAlignmentRan;
     record.statusFlags &= ~(kAlignmentResolved | kAlignmentRejected
-                            | kAlignmentProbe | kAlignmentGenomic);
+                            | kAlignmentProbe | kAlignmentGenomic
+                            | kAlignmentAnchorAgreed
+                            | kAlignmentAnchorDisagreed);
+    record.alignmentGeneIdx15 = geneIdx15;
     if (resolved) {
         record.statusFlags |= kAlignmentResolved;
         record.statusFlags |= genomic ? kAlignmentGenomic : kAlignmentProbe;
-        record.geneIdx15 = geneIdx15;
+        if (record.residualAnchorGeneIdx15 != 0
+            && record.residualAnchorGeneIdx15 == geneIdx15) {
+            record.statusFlags |= kAlignmentAnchorAgreed;
+        }
     } else {
         record.statusFlags |= kAlignmentRejected;
-        record.geneIdx15 = 0;
+        if (reason == kReasonAlignmentAnchorDisagree)
+            record.statusFlags |= kAlignmentAnchorDisagreed;
     }
     record.finalReason = reason;
     if (!validateRecord(record, error)) return fail(error, error);
@@ -558,6 +597,9 @@ const char *finalReasonName(std::uint8_t reason)
         case kReasonAlignmentConflict: return "ALIGN_CONFLICT";
         case kReasonAlignmentProbe: return "ALIGN_PROBE";
         case kReasonAlignmentGenomic: return "ALIGN_GENOMIC";
+        case kReasonResidualNoAnchor: return "RESIDUAL_NO_ANCHOR";
+        case kReasonResidualAnchorAmbiguous: return "RESIDUAL_ANCHOR_AMBIGUOUS";
+        case kReasonAlignmentAnchorDisagree: return "ALIGN_ANCHOR_DISAGREE";
         default: return "UNKNOWN";
     }
 }

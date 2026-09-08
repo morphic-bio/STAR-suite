@@ -22,11 +22,14 @@ int main(int argc, char **argv)
         std::cout
             << "global_ordinal\tlane\tlane_ordinal\tqname_fnv1a64"
                "\tcache_action\tcache_class\tmatched_cache_class"
-               "\tsingle_n_attempted\tsingle_n_resolved\tgene_idx15"
+               "\tsingle_n_attempted\tsingle_n_resolved\tcache_gene_idx15"
                "\tnegative_code\thash_offset\tsample_checked\tsample_matched"
                "\tsample_rejected\tsample_token\talignment_handoff"
                "\talignment_ran\talignment_resolved\talignment_rejected"
-               "\talignment_source\tno_align_dropped\tfinal_reason\n";
+               "\talignment_source\tresidual_anchor_state"
+               "\tresidual_anchor_gene_idx15\talignment_gene_idx15"
+               "\talignment_anchor_agreed\talignment_anchor_disagreed"
+               "\tno_align_dropped\tfinal_reason\n";
         for (std::uint64_t ordinal = 0; ordinal < reader.header().totalReads;
              ++ordinal) {
             fds::Record record;
@@ -58,11 +61,20 @@ int main(int argc, char **argv)
             const char *alignmentSource = ".";
             if (record.statusFlags & fds::kAlignmentProbe) alignmentSource = "PROBE";
             else if (record.statusFlags & fds::kAlignmentGenomic) alignmentSource = "GENOMIC";
+            const char *anchorState = ".";
+            if (record.statusFlags & fds::kResidualAnchorUnique) anchorState = "UNIQUE";
+            else if (record.statusFlags & fds::kResidualAnchorAbsent) anchorState = "ABSENT";
+            else if (record.statusFlags & fds::kResidualAnchorAmbiguous) anchorState = "AMBIGUOUS";
             std::cout << '\t' << ((record.statusFlags & fds::kAlignmentHandoff) != 0)
                       << '\t' << ((record.statusFlags & fds::kAlignmentRan) != 0)
                       << '\t' << ((record.statusFlags & fds::kAlignmentResolved) != 0)
                       << '\t' << ((record.statusFlags & fds::kAlignmentRejected) != 0)
                       << '\t' << alignmentSource
+                      << '\t' << anchorState
+                      << '\t' << record.residualAnchorGeneIdx15
+                      << '\t' << record.alignmentGeneIdx15
+                      << '\t' << ((record.statusFlags & fds::kAlignmentAnchorAgreed) != 0)
+                      << '\t' << ((record.statusFlags & fds::kAlignmentAnchorDisagreed) != 0)
                       << '\t' << ((record.statusFlags & fds::kNoAlignDropped) != 0)
                       << '\t' << fds::finalReasonName(record.finalReason) << '\n';
         }
