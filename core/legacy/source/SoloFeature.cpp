@@ -1,5 +1,6 @@
 #include "SoloFeature.h"
 #include "SoloReadFeature.h"
+#include "SoloReadFeature_record_shared.h"
 #include "ProbeListIndex.h"
 #include "ReadAlignChunk.h"
 #include "Genome.h"
@@ -404,6 +405,7 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
         SoloReadFeature::ExtendedAmbiguousEntry &entry = kv.second;
 
         if (entry.candidateIdx.empty()) {
+            flexDecisionLedgerAmbiguousResolution(kv.first, false, 0, nullptr);
             stillAmbiguous++;
             continue;
         }
@@ -455,6 +457,7 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
                 }
             }
             if (candidates.empty()) {
+                flexDecisionLedgerAmbiguousResolution(kv.first, false, 0, nullptr);
                 stillAmbiguous++;
                 continue;
             }
@@ -462,6 +465,12 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
         }
         const bool bayesResolved = (result.status == BayesianResult::Resolved && result.bestIdx != 0);
         const uint32_t resolvedCbIdx = bayesResolved ? (result.bestIdx - 1u) : 0u;
+        flexDecisionLedgerAmbiguousResolution(
+            kv.first,
+            bayesResolved,
+            resolvedCbIdx,
+            bayesResolved && resolvedCbIdx < whitelistSeqs.size()
+                ? whitelistSeqs[resolvedCbIdx].c_str() : nullptr);
 
         if (useBridgeCompactMapping) {
             readFeatSum->applyBridgeAmbiguousAggregatedReadAccounting(

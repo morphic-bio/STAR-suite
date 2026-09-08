@@ -10,7 +10,10 @@ This document tracks changes specific to the STAR-Flex fork. For upstream STAR c
   neighboring-offset search is no longer supported.
 - Add an experimental `H1X2` cache-generation tier, enabled only when named in
   `--hashCacheTiers`, for at most one mismatch in each 25-base probe half.
-  Duplicate full keys are denied as ambiguous; the default tiers are unchanged.
+  Duplicate full keys are denied as ambiguous. On a full-key miss, a unique
+  H0/H1 half-probe seed is extended against its own 50-base probe with the
+  documented 40/50 match floor; this probe-only rescue bypasses genomic
+  alignment. The default tiers are unchanged.
 - Define one Flex probe-resolution policy: authoritative exact H0 matches,
   verified H1 KEEP and certified H1 DENY decisions, and residual alignment only
   for unencodable probe windows or absent cache keys. No H0 policy selector is

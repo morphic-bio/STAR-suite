@@ -1,6 +1,8 @@
 #ifndef H_SoloReadFeature_record_shared
 #define H_SoloReadFeature_record_shared
 
+#include <cstddef>
+
 #include "IncludeDefine.h"
 #include "SoloReadBarcode.h"
 #include "ReadAnnotations.h"
@@ -17,7 +19,8 @@ struct FlexHashScreenDecision;
 // feature decision with external BAM evidence. These functions are no-ops
 // unless STAR_FLEX_DECISION_LEDGER names an output TSV.
 void flexDecisionLedgerTriage(uint64_t iRead, const char *qname,
-                              uint32_t lane, uint64_t laneOrdinal,
+                              size_t qnameLength, uint32_t lane,
+                              uint64_t laneOrdinal,
                               const FlexHashScreenDecision &decision,
                               bool sampleOk, uint8_t detectedSampleToken);
 void flexDecisionLedgerNoAlign(uint64_t iRead, const char *reason);
