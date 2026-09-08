@@ -1,3 +1,10 @@
+STAR-suite experimental Flex probe seed-and-extend --- 2026/09/08
+================================================================
+* Kept exact H0 and direct H1X2 keys as the primary experimental screen, then replaced the residual genomic-alignment gate with fixed-position probe seed-and-extend on a true cache miss.
+* Required one unique 25-base Hamming-1 seed and at least 40 of 50 matching probe bases, using the packed XOR/byte-LUT Hamming counter; different probe IDs, ambiguous seeds, and lower scores are denied.
+* Reconstructed active parent probes from authoritative H0 cache records so FASTQ, packed CBQ, no-genome, and BAM-producing modes use one classifier without loading the genome for probe assignment.
+* Added the probe distance to the optional BAM-independent Flex decision ledger.
+
 STAR-suite Flex fixed-offset sample-tag cache --- 2026/09/08
 ============================================================
 * Replaced runtime sample-tag distance checks with separate direct-address H0 and constructed H1 caches.

@@ -21,8 +21,9 @@ Each record contains:
   the underlying matching tier before its runtime H1 normalization;
 - sample-tag checked/matched/rejected state and token;
 - residual-alignment handoff and its resolved/rejected probe/genomic result.
-- residual half-anchor state (absent, ambiguous, or unique), its gene, the
-  independently resolved alignment gene, and anchor agreement/disagreement.
+- H1X2 probe seed outcome (absent, ambiguous, split-probe, or score failure);
+- legacy residual half-anchor/alignment fields retained for sidecars written by
+  the earlier experimental alignment-gated implementation.
 
 Fused lane work stealing can assign global ordinals in a different interleaving
 when the thread count changes. `lane + lane_ordinal` and the normalized-name
@@ -46,3 +47,9 @@ flex/tools/molecule_first_resolver/flex_decision_sidecar_dump FILE
 
 The dump is a global-ordinal-ordered TSV suitable for joining to BAM ledgers or
 cache-replay output.
+
+For a BAM-independent read/molecule audit, set `STAR_FLEX_DECISION_LEDGER` to an
+output TSV path. Its TRIAGE and FINAL events contain the bounded read name,
+lane/local ordinal, sample tag, corrected cell barcode, UMI, chosen gene,
+cache tier, final molecule key, rejection reason, and (for seed-and-extend)
+the full-probe Hamming distance. It is diagnostic and disabled by default.

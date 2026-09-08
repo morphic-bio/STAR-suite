@@ -804,6 +804,14 @@ void ParametersSolo::initialize(Parameters *pPin)
                                        << " records, format v"
                                        << FlexHashScreenCache::instance().cacheVersion() << ")\n";
                     pP->inOut->logMain << "H0/H1 hash screen: single N in the probe window " << (probeMismatch >= 1 ? "resolved through the cache" : "not resolved (soloProbeMismatch 0)") << "\n";
+                    if (FlexHashScreenCache::instance().hasH1X2()) {
+                        pP->inOut->logMain
+                            << "H1X2 probe seed-extension index: active probes="
+                            << FlexHashScreenCache::instance().h1x2ProbeCount()
+                            << " half-Hamming-1 keys="
+                            << FlexHashScreenCache::instance().h1x2ProbeKeyCount()
+                            << "\n";
+                    }
                     if (flexGdnaMode != FlexGdnaOff
                         && !FlexHashScreenCache::instance().hasRegionMetadata()) {
                         if (flexGdnaMode == FlexGdnaRequired) {

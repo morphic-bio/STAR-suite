@@ -2082,7 +2082,8 @@ soloFlexDecisionSidecar     -
                             -            ... disabled (default; no file and no diagnostic I/O)
                             FILE         ... record one slot per input pair, keyed by the run's zero-based global ordinal
                             Records include lane/local ordinal, normalized read-name hash, sample-tag decision,
-                            H0/H1/H1X2/deny/miss and single-N provenance, plus residual-alignment result.
+                            H0/H1/H1X2/deny/miss and single-N provenance, probe seed-extension outcome,
+                            plus residual-alignment result when alignment is used.
                             Global ordinals match STAR/BAM state in that run; lane/local ordinal and name hash
                             are the stable cross-thread-count join keys. Diagnostic mode adds random-access I/O.
 
@@ -2094,9 +2095,12 @@ hashCacheTiers              H0,H1,H2
     string:                 comma-separated subset: H0, H1, H1X2, H2 (default: H0,H1,H2)
                             H1X2       ... experimental compatibility tier: at most one mismatch in each
                                            25-base half; duplicate full 50-base keys are marked ambiguous
-                            When an H1X2 cache is loaded, residual alignment requires at least one
-                            uniquely gene-resolving 25-base half within Hamming distance one, and the
-                            alignment result must agree with that gene.
+                            When an H1X2 cache is loaded, cache misses use a probe-only seed-and-extend
+                            rescue: one uniquely resolving 25-base half must be within Hamming distance
+                            one, and the full fixed-position 50-base sequence must have at most ten total
+                            mismatches to that same probe. Halves resolving to different probes are denied.
+                            The rescue is terminal and does not run genomic alignment.
+                            H1X2 requires H0 in the generated cache; H0 supplies the authoritative parent probes.
                             H1X2 is generated only when named explicitly; it is not part of the default.
 
 hashCacheParentLimit        0

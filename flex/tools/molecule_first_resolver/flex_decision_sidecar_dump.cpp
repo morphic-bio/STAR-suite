@@ -65,6 +65,8 @@ int main(int argc, char **argv)
             if (record.statusFlags & fds::kResidualAnchorUnique) anchorState = "UNIQUE";
             else if (record.statusFlags & fds::kResidualAnchorAbsent) anchorState = "ABSENT";
             else if (record.statusFlags & fds::kResidualAnchorAmbiguous) anchorState = "AMBIGUOUS";
+            else if (record.statusFlags & fds::kProbeScoreFailed) anchorState = "SCORE_FAIL";
+            else if (record.statusFlags & fds::kProbeSplit) anchorState = "SPLIT_PROBE";
             std::cout << '\t' << ((record.statusFlags & fds::kAlignmentHandoff) != 0)
                       << '\t' << ((record.statusFlags & fds::kAlignmentRan) != 0)
                       << '\t' << ((record.statusFlags & fds::kAlignmentResolved) != 0)

@@ -389,6 +389,10 @@ bool Writer::recordTriage(std::uint64_t ordinal, std::uint32_t laneIndex,
         record.statusFlags |= kResidualAnchorAbsent;
     if (decision.negativeCode == FlexHashNegHalfGeneAmbig)
         record.statusFlags |= kResidualAnchorAmbiguous;
+    if (decision.negativeCode == FlexHashNegHalfScoreFail)
+        record.statusFlags |= kProbeScoreFailed;
+    if (decision.negativeCode == FlexHashNegHalfSplitProbe)
+        record.statusFlags |= kProbeSplit;
     if (sampleChecked) {
         record.statusFlags |= kSampleChecked;
         record.statusFlags |= sampleMatched ? kSampleMatched : kSampleRejected;
@@ -398,7 +402,9 @@ bool Writer::recordTriage(std::uint64_t ordinal, std::uint32_t laneIndex,
     const bool sampleRejected = sampleChecked && !sampleMatched;
     const bool residualGateReject =
         decision.negativeCode == FlexHashNegHalfNoAnchor
-        || decision.negativeCode == FlexHashNegHalfGeneAmbig;
+        || decision.negativeCode == FlexHashNegHalfGeneAmbig
+        || decision.negativeCode == FlexHashNegHalfScoreFail
+        || decision.negativeCode == FlexHashNegHalfSplitProbe;
     if (!sampleRejected && !residualGateReject
         && (decision.action == FlexHashScreenDecision::Keep
             || decision.action == FlexHashScreenDecision::Deny)) {
@@ -425,6 +431,10 @@ bool Writer::recordTriage(std::uint64_t ordinal, std::uint32_t laneIndex,
         record.finalReason = kReasonResidualNoAnchor;
     else if (decision.negativeCode == FlexHashNegHalfGeneAmbig)
         record.finalReason = kReasonResidualAnchorAmbiguous;
+    else if (decision.negativeCode == FlexHashNegHalfScoreFail)
+        record.finalReason = kReasonProbeScoreFail;
+    else if (decision.negativeCode == FlexHashNegHalfSplitProbe)
+        record.finalReason = kReasonProbeSplit;
     else if (noAlignDropped) record.finalReason = kReasonCacheMissNoAlign;
     else if (decision.action == FlexHashScreenDecision::Keep) record.finalReason = kReasonCacheKeep;
     else if (decision.action == FlexHashScreenDecision::Deny) record.finalReason = kReasonCacheDeny;
@@ -600,6 +610,8 @@ const char *finalReasonName(std::uint8_t reason)
         case kReasonResidualNoAnchor: return "RESIDUAL_NO_ANCHOR";
         case kReasonResidualAnchorAmbiguous: return "RESIDUAL_ANCHOR_AMBIGUOUS";
         case kReasonAlignmentAnchorDisagree: return "ALIGN_ANCHOR_DISAGREE";
+        case kReasonProbeScoreFail: return "PROBE_SCORE_FAIL";
+        case kReasonProbeSplit: return "PROBE_SPLIT";
         default: return "UNKNOWN";
     }
 }
