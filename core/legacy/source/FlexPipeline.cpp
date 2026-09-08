@@ -21,6 +21,8 @@
 #include <sstream>
 #include <sys/stat.h>
 #include <thread>
+#include <cstdio>
+#include <unistd.h>
 #include <unistd.h>
 #include <chrono>
 
@@ -527,59 +529,83 @@ static void alignAvailableBatch(FlexPipelineState *st,
         waitNs, aligned, workBytes, workNs);
 }
 
-static uint64_t processOneLane(
-    FlexPipelineState *st, Parameters &P, int laneId,
-    gzFile gzR2, gzFile gzR1,
+// One lane mate, opened either directly or through --readFilesCommand. STAR's
+// classic reader pipes each file through that command; the Flex reader used to
+// ignore it and gzopen the path, so a command that was not a decompressor was
+// silently dropped. zlib reads the pipe transparently whether the command emits
+// plain text or gzip, which also lets a user plug in a parallel decompressor
+// without STAR linking one.
+struct FlexLaneStream {
+    gzFile gz = nullptr;
+    FILE *pipe = nullptr;
+};
+
+// True only when the user supplied --readFilesCommand. STAR sets
+// readFilesCommandString to the sentinel "INTERNAL_GZIP" when it is reading
+// gzip itself, so that string is never empty and cannot be used as the test.
+static bool flexUserReadCommand(const Parameters &P) {
+    return !P.readFilesCommand.empty() && P.readFilesCommand.at(0) != "-";
+}
+
+static FlexLaneStream flexOpenLaneMate(const Parameters &P, const std::string &path) {
+    FlexLaneStream stream;
+    if (!flexUserReadCommand(P)) {
+        stream.gz = gzopen(path.c_str(), "rb");
+        if (stream.gz != nullptr) gzbuffer(stream.gz, kGzBufSize);
+        return stream;
+    }
+    const std::string command = P.readFilesCommandString + " \"" + path + "\"";
+    stream.pipe = popen(command.c_str(), "r");
+    if (stream.pipe == nullptr) return stream;
+    const int fd = dup(fileno(stream.pipe));
+    if (fd < 0) {
+        pclose(stream.pipe);
+        stream.pipe = nullptr;
+        return stream;
+    }
+    stream.gz = gzdopen(fd, "rb");
+    if (stream.gz == nullptr) {
+        close(fd);
+        pclose(stream.pipe);
+        stream.pipe = nullptr;
+        return stream;
+    }
+    gzbuffer(stream.gz, kGzBufSize);
+    return stream;
+}
+
+static void flexCloseLaneMate(FlexLaneStream &stream) {
+    if (stream.gz != nullptr) gzclose(stream.gz);
+    if (stream.pipe != nullptr) pclose(stream.pipe);
+    stream.gz = nullptr;
+    stream.pipe = nullptr;
+}
+
+// Per-read work for one batch of FASTQ records. This is the body the lane loop
+// used to run inline; it is now callable by any fused thread so that reading and
+// screening do not compete for the same core.
+static void processFastqBatch(
+    FlexPipelineState *st, Parameters &P, FlexFastqBatch &batch,
     SoloReadFeature *readFeat, Stats *stats,
     SampleDetector *sampleDet, bool sampleDetReady,
-    SoloReadBarcode &localBar, bool noAlign = false,
-    ReadAlign *RA = nullptr)
+    SoloReadBarcode &localBar, bool noAlign, ReadAlign *RA)
 {
     auto &cache = FlexHashScreenCache::instance();
-    FlexLocalCounters tally(st->counters, laneId);
+    FlexLocalCounters tally(st->counters, batch.laneId);
     char dummySeq[4] = {'\0'};
     char dummyQual[4] = {'\0'};
-
-    char lineBuf[kFlexPipeSeqMax + 256];
-    char seq0[kFlexPipeSeqMax], seq1[kFlexPipeSeqMax];
-    char qual0[kFlexPipeSeqMax], qual1[kFlexPipeSeqMax];
-    char name[kFlexPipeNameMax];
     const std::string readNameExtra;
-    uint64_t nReads = 0;
 
-    while (true) {
-        uint32_t headerLength = 0;
-        if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf), &headerLength)) break;
-        {
-            const char *src = lineBuf;
-            size_t available = headerLength;
-            if (available > 0 && *src == '@') {
-                ++src;
-                --available;
-            }
-            size_t nameLen = fastqReadNameLength(src, available);
-            if (nameLen >= kFlexPipeNameMax) nameLen = kFlexPipeNameMax - 1;
-            std::memcpy(name, src, nameLen);
-            name[nameLen] = '\0';
-        }
-        uint32_t readLen0 = 0;
-        if (!gzReadLine(gzR2, seq0, kFlexPipeSeqMax, &readLen0)) break;
-        if (!gzConsumeLine(gzR2, lineBuf, sizeof(lineBuf))) break;
-        if (noAlign) {
-            if (!gzConsumeLine(gzR2, lineBuf, kFlexPipeSeqMax)) break;
-        } else if (!gzReadQualityLine(gzR2, qual0, kFlexPipeSeqMax, readLen0)) {
-            break;
-        }
-
-        if (!gzConsumeLine(gzR1, lineBuf, sizeof(lineBuf))) break;
-        uint32_t readLen1 = 0;
-        if (!gzReadLine(gzR1, seq1, kFlexPipeSeqMax, &readLen1)) break;
-        if (!gzConsumeLine(gzR1, lineBuf, sizeof(lineBuf))) break;
-        if (!gzReadQualityLine(gzR1, qual1, kFlexPipeSeqMax, readLen1)) break;
-
-        uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
+    for (size_t i = 0; i < batch.recs.size(); ++i) {
+        const FlexFastqRecordRef &rec = batch.recs[i];
+        char *name  = batch.at(rec.offName);
+        char *seq0  = batch.at(rec.offSeq0);
+        char *seq1  = batch.at1(rec.offSeq1);
+        char *qual1 = batch.at1(rec.offQual1);
+        const uint32_t readLen0 = rec.len0;
+        const uint32_t readLen1 = rec.len1;
+        const uint64_t iReadAll = batch.globalFirst + i;
         ++tally.lane;
-        nReads++;
 
         uint8_t detectedSampleToken = 0xFF;
         const bool sampleOK = detectConfiguredSampleTag(
@@ -608,7 +634,7 @@ static uint64_t processOneLane(
             char *readQualPtrs[2] = { dummyQual, qual1 };
             uint64 readLens[2]    = { 0, readLen1 };
             localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
-                                  static_cast<uint32_t>(laneId), name);
+                                  static_cast<uint32_t>(batch.laneId), name);
 
             localBar.detectedSampleToken = detectedSampleToken;
 
@@ -634,16 +660,16 @@ static uint64_t processOneLane(
             ++tally.miss;
             if (!noAlign) {
                 EnrichedPacket ep;
-                std::memcpy(ep.name, name, kFlexPipeNameMax);
+                std::memcpy(ep.name, name, rec.nameLen + 1);
                 std::memcpy(ep.seq[0], seq0, readLen0 + 1);
                 std::memcpy(ep.seq[1], seq1, readLen1 + 1);
-                std::memcpy(ep.qual[0], qual0, readLen0 + 1);
+                std::memcpy(ep.qual[0], batch.at(rec.offQual0), readLen0 + 1);
                 std::memcpy(ep.qual[1], qual1, readLen1 + 1);
                 ep.readLen[0] = readLen0;
                 ep.readLen[1] = readLen1;
                 ep.iReadAll = iReadAll;
-                ep.laneId = static_cast<uint8_t>(laneId);
-                ep.readFilesIndex = static_cast<uint32_t>(laneId);
+                ep.laneId = static_cast<uint8_t>(batch.laneId);
+                ep.readFilesIndex = static_cast<uint32_t>(batch.laneId);
                 ep.readFilter = 'Y';
                 ep.eof = false;
                 ep.cbMatch = -1;
@@ -657,9 +683,177 @@ static uint64_t processOneLane(
 
         tally.countRead();
     }
+}
 
-    gzclose(gzR2);
-    gzclose(gzR1);
+// Reads one lane and hands record batches to the fused workers. The barcode
+// mate is read on its own thread so a lane is bounded by its larger mate rather
+// than the sum of the two; the two readers agree only on the batch size, so
+// chunk k and batch k cover the same records. When the queue is full (no
+// consumer is free) the reader processes the batch itself, which is what the
+// lane loop did for every read before batching.
+static uint64_t processOneLane(
+    FlexPipelineState *st, Parameters &P, int laneId,
+    gzFile gzR2, gzFile gzR1,
+    SoloReadFeature *readFeat, Stats *stats,
+    SampleDetector *sampleDet, bool sampleDetReady,
+    SoloReadBarcode &localBar, bool noAlign = false,
+    ReadAlign *RA = nullptr)
+{
+    char lineBuf[kFlexPipeSeqMax + 256];
+    char seq0[kFlexPipeSeqMax];
+    char qual0[kFlexPipeSeqMax];
+    char name[kFlexPipeNameMax];
+    uint64_t nReads = 0;
+
+    BoundedQueue<FlexFastqMateChunk*> mateReady(kFlexFastqMateChunks);
+    BoundedQueue<FlexFastqMateChunk*> mateFree(kFlexFastqMateChunks);
+    for (size_t i = 0; i < kFlexFastqMateChunks; ++i) {
+        FlexFastqMateChunk *chunk = new FlexFastqMateChunk();
+        chunk->recs.reserve(kFlexFastqBatchRecords);
+        if (!mateFree.try_push(chunk)) delete chunk;
+    }
+
+    std::thread mateReader([&]() {
+        char mateLine[kFlexPipeSeqMax + 256];
+        char mateSeq[kFlexPipeSeqMax];
+        char mateQual[kFlexPipeSeqMax];
+        FlexFastqMateChunk *chunk = nullptr;
+        if (!mateFree.try_pop(chunk) || chunk == nullptr) {
+            chunk = new FlexFastqMateChunk();
+            chunk->recs.reserve(kFlexFastqBatchRecords);
+        }
+        chunk->reset();
+        for (;;) {
+            uint32_t length = 0;
+            bool ok = gzConsumeLine(gzR1, mateLine, sizeof(mateLine)) &&
+                      gzReadLine(gzR1, mateSeq, kFlexPipeSeqMax, &length) &&
+                      gzConsumeLine(gzR1, mateLine, sizeof(mateLine)) &&
+                      gzReadQualityLine(gzR1, mateQual, kFlexPipeSeqMax, length);
+            if (ok) {
+                FlexFastqMateRecordRef rec;
+                rec.len = length;
+                rec.offSeq = chunk->append(mateSeq, length);
+                rec.offQual = chunk->append(mateQual, length);
+                chunk->recs.push_back(rec);
+            }
+            const bool full = chunk->recs.size() >= kFlexFastqBatchRecords;
+            if (!ok || full) {
+                chunk->eof = !ok;
+                FlexFastqMateChunk *ready = chunk;
+                chunk = nullptr;
+                mateReady.push(std::move(ready));
+                if (!ok) break;
+                if (!mateFree.try_pop(chunk) || chunk == nullptr) {
+                    chunk = new FlexFastqMateChunk();
+                    chunk->recs.reserve(kFlexFastqBatchRecords);
+                }
+                chunk->reset();
+            }
+            if (st->inputFailed.load(std::memory_order_relaxed)) break;
+        }
+        if (chunk != nullptr && !mateFree.try_push(chunk)) delete chunk;
+        mateReady.close();
+    });
+
+    FlexFastqBatch *batch = nullptr;
+    if (!st->fastqFreeQ.try_pop(batch) || batch == nullptr) {
+        batch = new FlexFastqBatch();
+        batch->recs.reserve(kFlexFastqBatchRecords);
+    }
+    batch->reset(laneId);
+    bool mateExhausted = false;
+
+    // Attaches the matching barcode-mate chunk, then hands the batch off.
+    auto handOff = [&]() -> bool {
+        if (batch->recs.empty()) return !mateExhausted;
+        FlexFastqMateChunk *chunk = nullptr;
+        if (!mateReady.pop(chunk) || chunk == nullptr) {
+            mateExhausted = true;
+            batch->recs.clear();
+            return false;
+        }
+        const size_t paired = std::min(batch->recs.size(), chunk->recs.size());
+        if (chunk->eof || chunk->recs.size() < batch->recs.size()) {
+            mateExhausted = true;
+        }
+        batch->recs.resize(paired);
+        batch->data1.swap(chunk->data);
+        for (size_t i = 0; i < paired; ++i) {
+            batch->recs[i].offSeq1 = chunk->recs[i].offSeq;
+            batch->recs[i].offQual1 = chunk->recs[i].offQual;
+            batch->recs[i].len1 = chunk->recs[i].len;
+        }
+        chunk->reset();
+        if (!mateFree.try_push(chunk)) delete chunk;
+
+        if (!batch->recs.empty()) {
+            batch->globalFirst = st->iReadAllGlobal.fetch_add(
+                batch->recs.size(), std::memory_order_relaxed);
+            FlexFastqBatch *full = batch;
+            if (st->fastqReadyQ.try_push(full)) {
+                if (!st->fastqFreeQ.try_pop(batch) || batch == nullptr) {
+                    batch = new FlexFastqBatch();
+                    batch->recs.reserve(kFlexFastqBatchRecords);
+                }
+            } else {
+                // No consumer is free: do the work here rather than stall the read.
+                processFastqBatch(st, P, *full, readFeat, stats, sampleDet,
+                                  sampleDetReady, localBar, noAlign, RA);
+                batch = full;
+            }
+        }
+        batch->reset(laneId);
+        return !mateExhausted;
+    };
+
+    while (true) {
+        uint32_t headerLength = 0;
+        if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf), &headerLength)) break;
+        size_t nameLen = 0;
+        {
+            const char *src = lineBuf;
+            size_t available = headerLength;
+            if (available > 0 && *src == '@') {
+                ++src;
+                --available;
+            }
+            nameLen = fastqReadNameLength(src, available);
+            if (nameLen >= kFlexPipeNameMax) nameLen = kFlexPipeNameMax - 1;
+            std::memcpy(name, src, nameLen);
+            name[nameLen] = '\0';
+        }
+        uint32_t readLen0 = 0;
+        if (!gzReadLine(gzR2, seq0, kFlexPipeSeqMax, &readLen0)) break;
+        if (!gzConsumeLine(gzR2, lineBuf, sizeof(lineBuf))) break;
+        if (noAlign) {
+            // The mate-0 qualities are not used when residual alignment is off.
+            if (!gzConsumeLine(gzR2, lineBuf, kFlexPipeSeqMax)) break;
+        } else if (!gzReadQualityLine(gzR2, qual0, kFlexPipeSeqMax, readLen0)) {
+            break;
+        }
+
+        FlexFastqRecordRef rec;
+        rec.nameLen = static_cast<uint32_t>(nameLen);
+        rec.len0 = readLen0;
+        rec.offName  = batch->append(name, rec.nameLen);
+        rec.offSeq0  = batch->append(seq0, readLen0);
+        rec.offQual0 = noAlign ? rec.offSeq0 : batch->append(qual0, readLen0);
+        batch->recs.push_back(rec);
+        ++nReads;
+
+        if (batch->recs.size() >= kFlexFastqBatchRecords && !handOff()) break;
+        if (st->inputFailed.load(std::memory_order_relaxed)) break;
+    }
+    handOff();
+    if (!st->fastqFreeQ.try_push(batch)) delete batch;
+
+    // Drain anything the barcode reader still holds so it can finish.
+    mateReady.close();
+    FlexFastqMateChunk *drained = nullptr;
+    while (mateReady.try_pop(drained)) delete drained;
+    mateReader.join();
+    while (mateReady.try_pop(drained)) delete drained;
+    while (mateFree.try_pop(drained)) delete drained;
 
     return nReads;
 }
@@ -1172,6 +1366,19 @@ bool flexPrepareCbqRangeTasks(FlexPipelineState *state, Parameters &P,
 bool flexPrepareBgzfRangeTasks(FlexPipelineState *state, Parameters &P,
                                int nWorkers, std::string *reason,
                                bool *fatalError) {
+    // A user-supplied --readFilesCommand means the bytes reach us through that
+    // command, so there is no file to range-read: fall back to the lane reader,
+    // which pipes through the command.
+    if (flexUserReadCommand(P)) {
+        if (fatalError != nullptr) {
+            *fatalError = false;
+        }
+        if (reason != nullptr) {
+            *reason = "--readFilesCommand is set; lanes are piped through it";
+        }
+        return false;
+    }
+
     if (fatalError != nullptr) {
         *fatalError = false;
     }
@@ -1468,19 +1675,36 @@ void *flexLaneReaderFullThread(void *arg) {
                                   sampleDet, sampleDetReady, localBar, noAlign, RA);
             } else {
                 const std::string &r1path = st->laneFiles[lane].r1path;
-                gzFile gzR2 = gzopen(r2path.c_str(), "rb");
-                gzFile gzR1 = gzopen(r1path.c_str(), "rb");
-                if (!gzR2 || !gzR1) {
-                    if (gzR2) gzclose(gzR2);
-                    if (gzR1) gzclose(gzR1);
+                FlexLaneStream mate0 = flexOpenLaneMate(P, r2path);
+                FlexLaneStream mate1 = flexOpenLaneMate(P, r1path);
+                if (mate0.gz == nullptr || mate1.gz == nullptr) {
+                    flexCloseLaneMate(mate0);
+                    flexCloseLaneMate(mate1);
                     continue;
                 }
-                gzbuffer(gzR2, kGzBufSize);
-                gzbuffer(gzR1, kGzBufSize);
 
-                processOneLane(st, P, lane, gzR2, gzR1, readFeat, stats,
+                processOneLane(st, P, lane, mate0.gz, mate1.gz, readFeat, stats,
                                sampleDet, sampleDetReady, localBar, noAlign, RA);
+                flexCloseLaneMate(mate0);
+                flexCloseLaneMate(mate1);
             }
+        }
+
+        // Phase 1b: consume FASTQ batches. A thread that found no lane to claim
+        // (a single delivered file pair is one lane) does the per-read work for
+        // the lane readers instead of idling; the last thread out closes the
+        // queue so the others stop waiting.
+        if (st->fastqReadersDone.fetch_add(1, std::memory_order_acq_rel) + 1 ==
+            st->nFusedThreads) {
+            st->fastqReadyQ.close();
+        }
+        FlexFastqBatch *batch = nullptr;
+        while (st->fastqReadyQ.pop(batch)) {
+            if (batch == nullptr) continue;
+            ensureSampleDetector();
+            processFastqBatch(st, P, *batch, readFeat, stats, sampleDet,
+                              sampleDetReady, localBar, noAlign, RA);
+            if (!st->fastqFreeQ.try_push(batch)) delete batch;
         }
     }
 
