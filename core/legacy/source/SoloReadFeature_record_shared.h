@@ -13,6 +13,19 @@ class SoloReadFeature;
 class SoloReadFlagClass;
 struct FlexHashScreenDecision;
 
+// Environment-gated diagnostic ledger used to compare the authoritative Flex
+// feature decision with external BAM evidence. These functions are no-ops
+// unless STAR_FLEX_DECISION_LEDGER names an output TSV.
+void flexDecisionLedgerTriage(uint64_t iRead, const char *qname,
+                              uint32_t lane, uint64_t laneOrdinal,
+                              const FlexHashScreenDecision &decision,
+                              bool sampleOk, uint8_t detectedSampleToken);
+void flexDecisionLedgerNoAlign(uint64_t iRead, const char *reason);
+void flexDecisionLedgerAmbiguousResolution(uint64_t ambiguousKey,
+                                           bool resolved,
+                                           uint32_t correctedCbIndex,
+                                           const char *correctedCb);
+
 // Shared data structure used by both base and Flex implementations
 class ReadSoloFeatures {
 public:

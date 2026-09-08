@@ -5,6 +5,7 @@
 #include "SampleDetector.h"
 #include "GlobalVariables.h"
 #include "TranscriptQuantEC.h"
+#include "ErrorWarning.h"
 
 ReadAlign::ReadAlign (Parameters& Pin, Genome &genomeIn, Transcriptome *TrIn, int iChunk,
                       const libem::Transcriptome* libemTr)
@@ -64,6 +65,26 @@ ReadAlign::ReadAlign (Parameters& Pin, Genome &genomeIn, Transcriptome *TrIn, in
     chunkOutSJ1 = nullptr;
     readNmates=P.readNmates; //not readNends
     bamRecordIndexPtr = &g_bamRecordIndex;
+    if (P.pSolo.flexMode && P.pSolo.flexNoAlign == 0 &&
+        FlexHashScreenCache::instance().hasH1X2()) {
+        std::string halfAnchorError;
+        bool builtNow = false;
+        if (!FlexHashScreenCache::instance().ensureH1X2ResidualAnchorIndex(
+                P.pSolo, mapGen, &halfAnchorError, &builtNow)) {
+            exitWithError(
+                "EXITING because the H1X2 residual half-anchor index could not be initialized: "
+                    + halfAnchorError + "\n",
+                std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+        if (builtNow) {
+            P.inOut->logMain
+                << "H1X2 residual alignment gate: active probes="
+                << FlexHashScreenCache::instance().h1x2ResidualAnchorProbeCount()
+                << " half-Hamming-1 keys="
+                << FlexHashScreenCache::instance().h1x2ResidualAnchorKeyCount()
+                << "\n";
+        }
+    }
     if (P.trimQcEnabled) {
         trimQc.init(static_cast<uint32_t>(P.readNmates), P.trimQcMaxReads, P.readQualityScoreBase);
     }

@@ -208,7 +208,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	Transcriptome_classifyAlign.o Transcriptome_geneFullAlignOverlap_ExonOverIntron.o Transcriptome_alignExonOverlap.cpp \
 	SoloFeature_cellFiltering.o \
 	SoloFeature_statsOutput.o bamSortByCoordinate.o SamtoolsSorter.o SoloBarcode.o \
-	ParametersSolo.o FlexHashScreen.o FlexHashCacheGenerate.o FlexPipeline.o SoloRead.o SoloRead_record.o \
+	ParametersSolo.o FlexProbeHalfIndex.o FlexHashScreen.o FlexHashCacheGenerate.o FlexPipeline.o SoloRead.o SoloRead_record.o \
 	SoloReadBarcode.o SoloReadBarcode_getCBandUMI.o SoloBarcode_extractBarcode.o \
 	SoloReadFeature.o SoloReadFeature_record.o SoloReadFeature_record_base.o flex/SoloReadFeature_record_flex.o SoloReadFeature_inputRecords.o \
 	Solo.o SoloFeature.o SoloFeature_outputResults.o SoloFeature_processRecords.o SoloFeature_prepareReadInfoOnly.o SoloReadInfoLoader.o SoloReadInfoSink.o \
@@ -513,7 +513,13 @@ test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(filter-out STAR.o
 	../test/solo_readinfo_baseline
 
 .PHONY: test
-test: test_packed_readinfo test_FlexGdna test_FlexDecisionSidecar test_ProbeListIndex test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_SpatialGex test_SpatialGexSpill test_SpatialGexDownstreamSpool test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup
+test: test_packed_readinfo test_FlexGdna test_FlexDecisionSidecar test_FlexProbeHalfIndex test_ProbeListIndex test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_SpatialGex test_SpatialGexSpill test_SpatialGexDownstreamSpool test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup
+
+.PHONY: test_FlexProbeHalfIndex
+test_FlexProbeHalfIndex: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_FlexProbeHalfIndex: FlexProbeHalfIndex.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_flex_probe_half_index.cpp FlexProbeHalfIndex.o -o ../test/test_flex_probe_half_index
+	../test/test_flex_probe_half_index
 
 .PHONY: test_FlexGdna
 test_FlexGdna: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)

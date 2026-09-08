@@ -2091,6 +2091,9 @@ hashCacheTiers              H0,H1,H2
     string:                 comma-separated subset: H0, H1, H1X2, H2 (default: H0,H1,H2)
                             H1X2       ... experimental compatibility tier: at most one mismatch in each
                                            25-base half; duplicate full 50-base keys are marked ambiguous
+                            When an H1X2 cache is loaded, residual alignment requires at least one
+                            uniquely gene-resolving 25-base half within Hamming distance one, and the
+                            alignment result must agree with that gene.
                             H1X2 is generated only when named explicitly; it is not part of the default.
 
 hashCacheParentLimit        0

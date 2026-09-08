@@ -646,6 +646,10 @@ static void processFastqBatch(
             if (decision.action == FlexHashScreenDecision::Pass && !flexHashH0OnlyDiagnostic() && P.pSolo.probeMismatch >= 1) {
                 decision = cache.classifyReadH0H1Offset0SingleN(seq0, readLen0);   // one N in the probe window
             }
+            if (decision.action == FlexHashScreenDecision::Pass &&
+                cache.h1x2ResidualAnchorReady()) {
+                decision = cache.classifyReadH1X2ResidualAnchor(seq0, readLen0);
+            }
         } else {
             // The tag is outside the configured sample universe, including
             // all accepted variants. Alignment cannot make this read eligible
@@ -679,7 +683,9 @@ static void processFastqBatch(
                 ++tally.keep;
             } else {
                 record_flex_hash_screen_deny(readFeat, localBar, iReadAll,
-                                             sampleOK ? "NEG_PROBE_AMBIG" : "UNMATCHED_TAG");
+                                             sampleOK
+                                                 ? flexHashScreenDenyReason(decision.negativeCode)
+                                                 : "UNMATCHED_TAG");
                 if (sampleOK) {
                     stats->hashScreenDeny++;
                     ++tally.deny;
@@ -710,6 +716,7 @@ static void processFastqBatch(
                 ep.umiB = 0;
                 ep.detectedSampleToken = detectedSampleToken;
                 ep.hashScreenSampleIdx = 0;
+                ep.residualAnchorGeneIdx15 = decision.residualAnchorGeneIdx15;
                 enqueueForAlign(st, std::move(ep), RA);
             }
         }
@@ -976,6 +983,10 @@ static uint64_t processOneBgzfRange(
             if (decision.action == FlexHashScreenDecision::Pass && !flexHashH0OnlyDiagnostic() && P.pSolo.probeMismatch >= 1) {
                 decision = cache.classifyReadH0H1Offset0SingleN(seq0, readLen0);   // one N in the probe window
             }
+            if (decision.action == FlexHashScreenDecision::Pass &&
+                cache.h1x2ResidualAnchorReady()) {
+                decision = cache.classifyReadH1X2ResidualAnchor(seq0, readLen0);
+            }
         } else {
             decision.action = FlexHashScreenDecision::Deny;
         }
@@ -1011,7 +1022,9 @@ static uint64_t processOneBgzfRange(
                 ++tally.keep;
             } else {
                 record_flex_hash_screen_deny(readFeat, localBar, iReadAll,
-                                             sampleOK ? "NEG_PROBE_AMBIG" : "UNMATCHED_TAG");
+                                             sampleOK
+                                                 ? flexHashScreenDenyReason(decision.negativeCode)
+                                                 : "UNMATCHED_TAG");
                 if (sampleOK) {
                     stats->hashScreenDeny++;
                     ++tally.deny;
@@ -1047,6 +1060,7 @@ static uint64_t processOneBgzfRange(
                 packet.umiB = 0;
                 packet.detectedSampleToken = detectedSampleToken;
                 packet.hashScreenSampleIdx = 0;
+                packet.residualAnchorGeneIdx15 = decision.residualAnchorGeneIdx15;
                 enqueueForAlign(st, std::move(packet), RA);
             }
         }
@@ -1137,20 +1151,27 @@ static uint64_t processCbqModuleRecords(
                 detectedSampleToken);
 
             FlexHashScreenDecision decision;
+            uint64_t seqLo = 0;
+            uint64_t seqHi = 0;
+            uint64_t nMask = 0;
+            bool probeWindowPacked = false;
             if (sampleOK) {
-                uint64_t seqLo = 0;
-                uint64_t seqHi = 0;
-                uint64_t nMask = 0;
-                if (star::input::cbq_pack_segment_window_lsb_pair(
+                probeWindowPacked = star::input::cbq_pack_segment_window_lsb_pair(
                         record.segments[0], 0, cache.probeWindowLength(),
-                        &seqLo, &seqHi, &nMask) && nMask == 0) {
+                        &seqLo, &seqHi, &nMask);
+                if (probeWindowPacked && nMask == 0) {
                     decision = flexHashH0OnlyDiagnostic()
                         ? cache.classifyCbqH0Offset0(seqLo, seqHi)
                         : cache.classifyCbqH0H1Offset0(seqLo, seqHi);
-                } else if (nMask != 0 && !flexHashH0OnlyDiagnostic() && P.pSolo.probeMismatch >= 1) {
+                } else if (probeWindowPacked && nMask != 0 && !flexHashH0OnlyDiagnostic() && P.pSolo.probeMismatch >= 1) {
                     decision = cache.classifyCbqH0H1Offset0SingleN(seqLo, seqHi, nMask);   // one N in the probe window
                 } else {
                     decision.action = FlexHashScreenDecision::Pass;
+                }
+                if (decision.action == FlexHashScreenDecision::Pass &&
+                    probeWindowPacked && cache.h1x2ResidualAnchorReady()) {
+                    decision = cache.classifyCbqH1X2ResidualAnchor(
+                        seqLo, seqHi, nMask);
                 }
             } else {
                 decision.action = FlexHashScreenDecision::Deny;
@@ -1217,7 +1238,9 @@ static uint64_t processCbqModuleRecords(
                     ++tally.keep;
                 } else {
                     record_flex_hash_screen_deny(readFeat, localBar, iReadAll,
-                                                 sampleOK ? "NEG_PROBE_AMBIG" : "UNMATCHED_TAG");
+                                                 sampleOK
+                                                     ? flexHashScreenDenyReason(decision.negativeCode)
+                                                     : "UNMATCHED_TAG");
                     if (sampleOK) {
                         stats->hashScreenDeny++;
                         ++tally.deny;
@@ -1268,6 +1291,7 @@ static uint64_t processCbqModuleRecords(
                     ep.umiB = 0;
                     ep.detectedSampleToken = detectedSampleToken;
                     ep.hashScreenSampleIdx = 0;
+                    ep.residualAnchorGeneIdx15 = decision.residualAnchorGeneIdx15;
                     enqueueForAlign(st, std::move(ep), RA);
                 }
             }
@@ -1789,6 +1813,11 @@ void *flexTriageThread(void *arg) {
 
         FlexHashScreenDecision decision = cache.classifyReadH0H1Offset0(
             rpkt.seq[0], rpkt.readLen[0]);
+        if (decision.action == FlexHashScreenDecision::Pass &&
+            cache.h1x2ResidualAnchorReady()) {
+            decision = cache.classifyReadH1X2ResidualAnchor(
+                rpkt.seq[0], rpkt.readLen[0]);
+        }
         recordFlexDecisionTriage(
             P, rpkt.iReadAll, rpkt.readFilesIndex, rpkt.laneOrdinal,
             rpkt.name, std::strlen(rpkt.name), decision, false, true, 0xFF,
@@ -1832,7 +1861,7 @@ void *flexTriageThread(void *arg) {
                 dp.verdict = DecisionPacket::DENY;
                 dp.geneIdx15 = 0;
                 dp.cacheClass = 0;
-                dp.denyReason = "NEG_PROBE_AMBIG";
+                dp.denyReason = flexHashScreenDenyReason(decision.negativeCode);
                 st->counters.triageDeny.fetch_add(1);
             }
 
@@ -1859,6 +1888,7 @@ void *flexTriageThread(void *arg) {
             ep.umiB = 0;
             ep.detectedSampleToken = 0xFF;
             ep.hashScreenSampleIdx = 0;
+            ep.residualAnchorGeneIdx15 = decision.residualAnchorGeneIdx15;
 
             st->counters.triageMiss.fetch_add(1);
             st->alignQ.push(std::move(ep));

@@ -7,8 +7,10 @@
 #include <vector>
 
 #include "FlexGdna.h"
+#include "FlexProbeHalfIndex.h"
 
 class ParametersSolo;
+class Genome;
 
 struct FlexHashScreenDecision {
     enum Action : uint8_t {
@@ -29,6 +31,9 @@ struct FlexHashScreenDecision {
     // identifies the underlying cache tier that supplied the unique gene.
     bool singleN = false;
     uint8_t singleNCacheClass = 0xFF;
+    // Nonzero only for an H1X2 cache miss that has one uniquely anchored
+    // 25-base probe-half gene. Residual alignment must agree with this gene.
+    uint16_t residualAnchorGeneIdx15 = 0;
 };
 
 enum FlexHashScreenCacheClass : uint8_t {
@@ -68,6 +73,21 @@ public:
      *  else is a miss (Pass), never a certified negative. Two or more Ns -> Pass. */
     FlexHashScreenDecision classifyCbqH0H1Offset0SingleN(uint64_t seqLo, uint64_t seqHi, uint64_t nMask) const;
     FlexHashScreenDecision classifyReadH0H1Offset0SingleN(const char* readSeq, uint32_t readLen) const;
+    FlexHashScreenDecision classifyReadH1X2ResidualAnchor(const char* readSeq,
+                                                          uint32_t readLen) const;
+    FlexHashScreenDecision classifyCbqH1X2ResidualAnchor(uint64_t seqLo,
+                                                         uint64_t seqHi,
+                                                         uint64_t nMask) const;
+    bool ensureH1X2ResidualAnchorIndex(const ParametersSolo& pSolo,
+                                      const Genome& genome,
+                                      std::string* errorOut = nullptr,
+                                      bool* builtNow = nullptr);
+    bool hasH1X2() const { return hasH1X2_; }
+    bool h1x2ResidualAnchorReady() const { return halfAnchorIndex_.ready(); }
+    size_t h1x2ResidualAnchorProbeCount() const { return halfAnchorIndex_.probeCount(); }
+    size_t h1x2ResidualAnchorKeyCount() const {
+        return halfAnchorIndex_.leftKeyCount() + halfAnchorIndex_.rightKeyCount();
+    }
     static uint32_t probeWindowLength();
     size_t recordCount() const { return records_.size(); }
     size_t h0RecordCount() const { return h0Records_.size(); }
@@ -123,6 +143,9 @@ private:
     H0NoSampleMap h0NoSampleMap_;
     H0NoSampleMap h1DenyNoSampleMap_;
     bool offset0MapsUseCbqOrder_ = false;
+    bool hasH1X2_ = false;
+    bool halfAnchorBuildAttempted_ = false;
+    FlexProbeHalfIndex halfAnchorIndex_;
     static uint8_t baseLUT_[256];
     static bool lutInitialized_;
 };
@@ -130,7 +153,11 @@ private:
 // Binary negative class codes from scripts/flex_h01_pilot.py.
 enum FlexHashScreenNegativeCode : uint8_t {
     FlexHashNegNone = 0,
-    FlexHashNegProbeAmbig = 1
+    FlexHashNegProbeAmbig = 1,
+    FlexHashNegHalfNoAnchor = 2,
+    FlexHashNegHalfGeneAmbig = 3
 };
+
+const char* flexHashScreenDenyReason(uint8_t negativeCode);
 
 #endif

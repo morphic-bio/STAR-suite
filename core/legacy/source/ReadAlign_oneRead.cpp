@@ -119,6 +119,7 @@ int ReadAlign::oneRead() {//process one read: load, map, write
 
 int ReadAlign::oneReadLoaded(const int readStatus0) {
     hasYAlignment_ = false;
+    residualAnchorGeneIdx15_ = 0;
 
     // Increment read counters BEFORE trimming (so dropped reads are counted)
     statsRA.readN++;
@@ -463,6 +464,12 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
                 // as fused ingest: H0 first, then H1/deny, followed by the
                 // conservative exactly-one-N retry, all at offset 0.
                 hashScreenDecision_ = classifyFlexOffset0();
+                if (hashScreenDecision_.action == FlexHashScreenDecision::Pass &&
+                    FlexHashScreenCache::instance().h1x2ResidualAnchorReady()) {
+                    hashScreenDecision_ = FlexHashScreenCache::instance()
+                        .classifyReadH1X2ResidualAnchor(
+                            Read0[0], readLengthOriginal[0]);
+                }
             } else {
                 // An unmatched configured sample tag is terminal in fused
                 // ingest because residual alignment cannot make it eligible
@@ -470,6 +477,8 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
                 hashScreenDecision_.action = FlexHashScreenDecision::Deny;
             }
         }
+        residualAnchorGeneIdx15_ =
+            hashScreenDecision_.residualAnchorGeneIdx15;
         hashScreenDumpWrite(Read0[0], readLengthOriginal[0], hashScreenSampleIdx, hashScreenDecision_);
         if (P.pSolo.flexDecisionSidecarWriter != nullptr) {
             if (iReadAll == 0) {
@@ -567,7 +576,9 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
             record_flex_hash_screen_deny(
                 geneFeat, *soloRead->readBar, iReadAll,
-                hashScreenSampleOK ? "NEG_PROBE_AMBIG" : "UNMATCHED_TAG");
+                hashScreenSampleOK
+                    ? flexHashScreenDenyReason(hashScreenDecision_.negativeCode)
+                    : "UNMATCHED_TAG");
             return 0;
         } else {
             statsRA.hashScreenPass++;
@@ -645,6 +656,7 @@ int ReadAlign::oneReadFromCbqView(const star::input::CbqReadView& view) {
 }
 
 int ReadAlign::oneReadFromPacket(EnrichedPacket &pkt) {
+    residualAnchorGeneIdx15_ = pkt.residualAnchorGeneIdx15;
     // Copy read data from packet into ReadAlign buffers
     std::strncpy(readName, pkt.name, DEF_readNameLengthMax - 1);
     readName[DEF_readNameLengthMax - 1] = '\0';
@@ -684,6 +696,8 @@ int ReadAlign::oneReadFromPacket(EnrichedPacket &pkt) {
         soloRead->readBar->umiB = pkt.umiB;
         soloRead->readBar->detectedSampleToken = pkt.detectedSampleToken;
         soloRead->readBar->flexDecisionSidecarOrdinal = pkt.iReadAll;
+        soloRead->readBar->residualAnchorGeneIdx15 =
+            residualAnchorGeneIdx15_;
     }
 
     // Convert ASCII sequences to numeric encoding (must happen before hash screen

@@ -20,6 +20,8 @@
 #include <mutex>
 #include <cstdlib>
 #include <algorithm>
+#include <iomanip>
+#include <limits>
 #include "FlexDebugCounters.h"
 #include "FlexDecisionSidecar.h"
 #include "SoloReadFeature_record_shared.h"
@@ -118,6 +120,216 @@ static void recordFlexAlignmentDecision(
     soloBar.pSolo.flexDecisionSidecarWriter->recordAlignment(
         soloBar.flexDecisionSidecarOrdinal, resolved, genomic,
         geneIdx15, reason, error);
+}
+
+// Authoritative, event-oriented Flex decision ledger. It records the feature
+// decision where a Solo count observation is accepted or rejected. The raw
+// event stream is reduced deterministically by the standalone comparison tool.
+// The mutex is acceptable for this explicitly diagnostic path and imposes no
+// cost unless STAR_FLEX_DECISION_LEDGER is set.
+struct FlexDecisionLedgerState {
+    FILE *fp = nullptr;
+    std::mutex mutex;
+    std::once_flag initOnce;
+};
+static FlexDecisionLedgerState g_flexDecisionLedger;
+
+static std::string ledgerClean(const std::string &value) {
+    std::string out = value;
+    for (char &c : out) {
+        if (c == '\t' || c == '\n' || c == '\r') c = ' ';
+    }
+    return out.empty() ? "." : out;
+}
+
+static void flexDecisionLedgerInit() {
+    const char *path = std::getenv("STAR_FLEX_DECISION_LEDGER");
+    if (path == nullptr || path[0] == '\0') return;
+    g_flexDecisionLedger.fp = std::fopen(path, "w");
+    if (g_flexDecisionLedger.fp == nullptr) {
+        std::fprintf(stderr, "[WARNING] Failed to open Flex decision ledger: %s\n", path);
+        return;
+    }
+    std::setvbuf(g_flexDecisionLedger.fp, nullptr, _IOFBF, 4U << 20);
+    std::fprintf(g_flexDecisionLedger.fp,
+        "event\tiread\tqname\tlane\tlane_ordinal\ttriage_action\tcache_class"
+        "\tcache_gene_idx\tnegative_code\thash_offset\tsample_ok\ttag_token"
+        "\tcb_raw\tcb_corrected\tcb_match\tcb_candidate_indices"
+        "\tumi_raw\tumi_corrected\tumi_packed\tumi_valid\tchosen_source"
+        "\tchosen_gene_idx\tfinal_state\tfinal_reason\tmolecule_key_hex"
+        "\tambiguous_key_hex\tdetail\n");
+    std::atexit([]() {
+        std::lock_guard<std::mutex> lock(g_flexDecisionLedger.mutex);
+        if (g_flexDecisionLedger.fp != nullptr) {
+            std::fflush(g_flexDecisionLedger.fp);
+            std::fclose(g_flexDecisionLedger.fp);
+            g_flexDecisionLedger.fp = nullptr;
+        }
+    });
+}
+
+static bool flexDecisionLedgerEnabled() {
+    std::call_once(g_flexDecisionLedger.initOnce, flexDecisionLedgerInit);
+    return g_flexDecisionLedger.fp != nullptr;
+}
+
+static std::string ledgerHex(uint64_t value) {
+    if (value == UINT64_MAX) return ".";
+    std::ostringstream out;
+    out << "0x" << std::hex << std::setw(16) << std::setfill('0') << value;
+    return out.str();
+}
+
+static const char *ledgerActionName(FlexHashScreenDecision::Action action) {
+    switch (action) {
+        case FlexHashScreenDecision::Disabled: return "DISABLED";
+        case FlexHashScreenDecision::Pass: return "MISS";
+        case FlexHashScreenDecision::Keep: return "KEEP";
+        case FlexHashScreenDecision::Deny: return "DENY";
+    }
+    return "UNKNOWN";
+}
+
+static std::string ledgerCbCorrected(const SoloReadBarcode &soloBar) {
+    if (!soloBar.cbSeqCorrected.empty() && soloBar.cbSeqCorrected != "-") {
+        return soloBar.cbSeqCorrected;
+    }
+    if (soloBar.cbMatchInd.size() == 1) {
+        const uint64_t index = soloBar.cbMatchInd[0];
+        if (index < soloBar.pSolo.cbWLstrOut.size()) return soloBar.pSolo.cbWLstrOut[index];
+        if (index < soloBar.pSolo.cbWLstr.size()) return soloBar.pSolo.cbWLstr[index];
+    }
+    return std::string();
+}
+
+static std::string ledgerCbCandidates(const SoloReadBarcode &soloBar) {
+    std::ostringstream out;
+    for (size_t i = 0; i < soloBar.cbMatchInd.size(); ++i) {
+        if (i != 0) out << ',';
+        out << soloBar.cbMatchInd[i];
+    }
+    return out.str();
+}
+
+static void flexDecisionLedgerEvent(const char *event,
+                                    uint64_t iRead,
+                                    const char *qname,
+                                    int64_t lane,
+                                    uint64_t laneOrdinal,
+                                    const char *triageAction,
+                                    int cacheClass,
+                                    int cacheGene,
+                                    int negativeCode,
+                                    int hashOffset,
+                                    int sampleOk,
+                                    int tagToken,
+                                    const SoloReadBarcode *soloBar,
+                                    const char *chosenSource,
+                                    int chosenGene,
+                                    const char *finalState,
+                                    const char *finalReason,
+                                    uint64_t moleculeKey,
+                                    uint64_t ambiguousKey,
+                                    const std::string &detail) {
+    if (!flexDecisionLedgerEnabled()) return;
+
+    const std::string cbRaw = soloBar == nullptr ? std::string() : soloBar->cbSeq;
+    const std::string cbCorrected = soloBar == nullptr ? std::string() : ledgerCbCorrected(*soloBar);
+    const std::string candidates = soloBar == nullptr ? std::string() : ledgerCbCandidates(*soloBar);
+    const std::string umiRaw = soloBar == nullptr ? std::string() : soloBar->umiSeq;
+    const int cbMatch = soloBar == nullptr ? std::numeric_limits<int>::min() : soloBar->cbMatch;
+    const uint64_t umiPacked = soloBar == nullptr ? UINT64_MAX : (soloBar->umiB & 0xFFFFFFu);
+    const int umiValid = soloBar == nullptr ? -1 : (soloBar->umiCheck >= 0 ? 1 : 0);
+    const int finalTagToken = soloBar == nullptr ? tagToken : static_cast<int>(soloBar->detectedSampleToken);
+
+    const std::string cleanQname = ledgerClean(qname == nullptr ? std::string() : std::string(qname));
+    const std::string cleanCbRaw = ledgerClean(cbRaw);
+    const std::string cleanCbCorrected = ledgerClean(cbCorrected);
+    const std::string cleanCandidates = ledgerClean(candidates);
+    const std::string cleanUmiRaw = ledgerClean(umiRaw);
+    const std::string cleanDetail = ledgerClean(detail);
+    const std::string laneOrdinalText = laneOrdinal == UINT64_MAX ? "." : std::to_string(laneOrdinal);
+    const std::string cbMatchText = cbMatch == std::numeric_limits<int>::min() ? "." : std::to_string(cbMatch);
+    const std::string umiPackedText = umiPacked == UINT64_MAX ? "." : std::to_string(umiPacked);
+    const std::string moleculeText = ledgerHex(moleculeKey);
+    const std::string ambiguousText = ledgerHex(ambiguousKey);
+
+    std::lock_guard<std::mutex> lock(g_flexDecisionLedger.mutex);
+    std::fprintf(g_flexDecisionLedger.fp,
+        "%s\t%llu\t%s\t%lld\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d"
+        "\t%s\t%s\t%s\t%s\t%s\t.\t%s\t%d\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
+        event,
+        static_cast<unsigned long long>(iRead),
+        cleanQname.c_str(),
+        static_cast<long long>(lane),
+        laneOrdinalText.c_str(),
+        triageAction == nullptr ? "." : triageAction,
+        cacheClass,
+        cacheGene,
+        negativeCode,
+        hashOffset,
+        sampleOk,
+        finalTagToken,
+        cleanCbRaw.c_str(),
+        cleanCbCorrected.c_str(),
+        cbMatchText.c_str(),
+        cleanCandidates.c_str(),
+        cleanUmiRaw.c_str(),
+        umiPackedText.c_str(),
+        umiValid,
+        chosenSource == nullptr ? "." : chosenSource,
+        chosenGene,
+        finalState == nullptr ? "." : finalState,
+        finalReason == nullptr ? "." : finalReason,
+        moleculeText.c_str(),
+        ambiguousText.c_str(),
+        cleanDetail.c_str());
+}
+
+void flexDecisionLedgerTriage(uint64_t iRead, const char *qname,
+                              uint32_t lane, uint64_t laneOrdinal,
+                              const FlexHashScreenDecision &decision,
+                              bool sampleOk, uint8_t detectedSampleToken) {
+    flexDecisionLedgerEvent("TRIAGE", iRead, qname, lane, laneOrdinal,
+                            ledgerActionName(decision.action), decision.cacheClass,
+                            decision.geneIdx15, decision.negativeCode, decision.offset,
+                            sampleOk ? 1 : 0, detectedSampleToken, nullptr, nullptr, 0,
+                            "INTERMEDIATE", ".", UINT64_MAX, UINT64_MAX, std::string());
+}
+
+void flexDecisionLedgerNoAlign(uint64_t iRead, const char *reason) {
+    flexDecisionLedgerEvent("FINAL", iRead, nullptr, -1, UINT64_MAX, nullptr,
+                            -1, 0, 0, 0, -1, -1, nullptr, "NONE", 0,
+                            "REJECT", reason, UINT64_MAX, UINT64_MAX, std::string());
+}
+
+void flexDecisionLedgerAmbiguousResolution(uint64_t ambiguousKey,
+                                           bool resolved,
+                                           uint32_t correctedCbIndex,
+                                           const char *correctedCb) {
+    std::string detail = "corrected_cb_index=" + std::to_string(correctedCbIndex)
+        + ";corrected_cb=" + (correctedCb == nullptr ? std::string() : correctedCb);
+    flexDecisionLedgerEvent("AMBIGUOUS_RESOLUTION", UINT64_MAX, nullptr, -1,
+                            UINT64_MAX, nullptr, -1, 0, 0, 0, -1, -1, nullptr,
+                            "CB_RESOLVER", 0, resolved ? "KEEP" : "REJECT",
+                            resolved ? "AMBIG_CB_RESOLVED" : "AMBIG_CB_UNRESOLVED",
+                            UINT64_MAX, ambiguousKey, detail);
+}
+
+static void flexDecisionLedgerRecord(const SoloReadBarcode &soloBar,
+                                     uint64_t iRead,
+                                     const char *event,
+                                     const char *chosenSource,
+                                     uint16_t chosenGene,
+                                     const char *finalState,
+                                     const char *finalReason,
+                                     uint64_t moleculeKey = UINT64_MAX,
+                                     uint64_t ambiguousKey = UINT64_MAX,
+                                     const std::string &detail = std::string()) {
+    flexDecisionLedgerEvent(event, iRead, nullptr, -1, UINT64_MAX, nullptr,
+                            -1, 0, 0, 0, -1, -1, &soloBar, chosenSource,
+                            chosenGene, finalState, finalReason, moleculeKey,
+                            ambiguousKey, detail);
 }
 
 // Initialize reject logging from environment variable
@@ -440,6 +652,9 @@ bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode
         return false;
     }
     if (soloBar.cbMatch < 0) {
+        flexDecisionLedgerRecord(soloBar, iRead, "FINAL",
+                                 cacheClass == 0 ? "H0" : "H1", geneIdx15,
+                                 "REJECT", "NO_CB_MATCH");
         if (soloBar.pSolo.inlineHashMode) {
             char extraBuf[96];
             snprintf(extraBuf, sizeof(extraBuf), "cache_class=%u;gene=%u",
@@ -455,6 +670,9 @@ bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode
 
     const uint8_t tagIdx = extractTagIdxForFlex(soloBar);
     if (dropUnmatchedTagForFlex(soloBar, tagIdx)) {
+        flexDecisionLedgerRecord(soloBar, iRead, "FINAL",
+                                 cacheClass == 0 ? "H0" : "H1", geneIdx15,
+                                 "REJECT", "UNMATCHED_TAG");
         if (soloBar.pSolo.inlineHashMode) {
             logRejectReason(soloBar, iRead, soloReadFeat->featureType, 0, 0, "UNMATCHED_TAG", "", soloBar.pSolo);
         }
@@ -469,6 +687,11 @@ bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode
             logRejectReason(soloBar, iRead, soloReadFeat->featureType, 1, geneIdx15, "KEEP_SCREEN", extraBuf, soloBar.pSolo);
         }
         accumulateAmbiguousCBForFlex(soloReadFeat, soloBar, geneIdx15, tagIdx, probeRegion);
+        const uint64_t ambiguousKey = ReadAlign::hashCbSeq(soloBar.cbMatchString);
+        flexDecisionLedgerRecord(soloBar, iRead, "FINAL",
+                                 cacheClass == 0 ? "H0" : "H1", geneIdx15,
+                                 "PENDING", "AMBIG_CB", UINT64_MAX, ambiguousKey,
+                                 "tag_index=" + std::to_string(tagIdx));
     } else if ((soloReadFeat->inlineHash_ != nullptr || soloReadFeat->bucketStorageEnabled())
                && !soloBar.cbMatchInd.empty()) {
         uint32_t cbIdx = soloBar.cbMatchInd[0];
@@ -476,6 +699,11 @@ bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode
         uint64_t key = packCgAggKey(cbIdx, umi24, geneIdx15, tagIdx);
         soloReadFeat->appendInlineObservation(
             key, flexGdnaPackValue(1, probeRegion));
+        flexDecisionLedgerRecord(soloBar, iRead, "FINAL",
+                                 cacheClass == 0 ? "H0" : "H1", geneIdx15,
+                                 "KEEP", "COUNT_RECORD_CREATED", key,
+                                 UINT64_MAX,
+                                 "tag_index=" + std::to_string(tagIdx));
         trackReadIdForTagsFlex(soloReadFeat, soloBar, iRead, cbIdx, umi24);
         if (soloBar.pSolo.inlineHashMode) {
             char extraBuf[64];
@@ -501,6 +729,8 @@ void record_flex_hash_screen_deny(SoloReadFeature *soloReadFeat, SoloReadBarcode
         return;
     }
     soloReadFeat->stats.V[soloReadFeat->stats.noNoFeature]++;
+    flexDecisionLedgerRecord(soloBar, iRead, "FINAL", "CACHE_DENY", 0,
+                             "REJECT", reason ? reason : "CACHE_DENY");
     if (soloBar.pSolo.inlineHashMode) {
         logRejectReason(soloBar, iRead, soloReadFeat->featureType, 1, 0, "DENY_SCREEN", reason ? reason : "", soloBar.pSolo);
     }
@@ -1003,6 +1233,27 @@ FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
 
     uint16_t resolvedGeneIdx = resolveGeneFromCandidates(candidates);
 
+    if (resolvedGeneIdx != 0 && soloBar.residualAnchorGeneIdx15 != 0 &&
+        resolvedGeneIdx != soloBar.residualAnchorGeneIdx15) {
+        FLEX_COUNT_INC(resolverDropped);
+        if (soloBar.pSolo.inlineHashMode) {
+            char extraBuf[96];
+            snprintf(extraBuf, sizeof(extraBuf), "anchor=%u;alignment=%u",
+                     static_cast<unsigned>(soloBar.residualAnchorGeneIdx15),
+                     static_cast<unsigned>(resolvedGeneIdx));
+            logRejectReason(soloBar, iRead, featureType, 0, 0,
+                            "H1X2_ANCHOR_DISAGREE", extraBuf, soloBar.pSolo);
+        }
+        recordFlexAlignmentDecision(
+            soloBar, false, false, resolvedGeneIdx,
+            flex_decision_sidecar::kReasonAlignmentAnchorDisagree);
+        flexDecisionLedgerRecord(
+            soloBar, iRead, "FINAL", "ALIGNMENT", resolvedGeneIdx,
+            "REJECT", "H1X2_ANCHOR_DISAGREE", UINT64_MAX, UINT64_MAX,
+            "anchor_gene=" + std::to_string(soloBar.residualAnchorGeneIdx15));
+        return out;
+    }
+
     if (resolvedGeneIdx == 0) {
         FLEX_COUNT_INC(resolverDropped);
         if (soloBar.pSolo.inlineHashMode) {
@@ -1259,7 +1510,7 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
             // Insert exactly one quartet key with resolved gene (no per-gene fanout)
             if (soloReadFeat
                 && (soloReadFeat->inlineHash_ != nullptr || soloReadFeat->bucketStorageEnabled())
-                && soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1
+                && soloBar.cbMatch >= 0
                 && !soloBar.cbMatchInd.empty()) {
                 if (isAmbiguous) {
                     // Log AMBIG_CB when accumulating (will be resolved later)

@@ -202,11 +202,13 @@ static void buildR1FromParams(char* buf, uint32_t len, const ParametersSolo& ps,
     }
 }
 
-// verdict: 1=KEEP, 0=DENY, -1=DEAD (skip, don't store)
+// Every generated H1 variant has been tested by the synthetic-pair screen.
+// A failed test is therefore a known negative, not an unknown sequence: retain
+// both ambiguous/wrong-gene (0) and unmapped/unannotated (-1) outcomes as DENY.
+// At runtime, only a sequence absent from this tested set may fall through to
+// residual genome alignment.
 static void appendVariantRecord(std::vector<FlexHashScreenCache::Record>& out, const char* var50, uint16_t gene15,
                                 uint8_t cacheClass, FlexGdnaRegion probeRegion, int verdict) {
-    if (verdict < 0)
-        return; // DEAD: unmapped variant, no value in caching
     FlexHashScreenCache::Record r;
     if (!FlexHashScreenCache::encodeProbeWindow(var50, 0, r.seqLo, r.seqHi)) {
         return;

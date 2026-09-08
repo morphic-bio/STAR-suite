@@ -8,6 +8,12 @@ STAR-suite Flex decision sidecar --- 2026/09/07
 * Added the optional `--soloFlexDecisionSidecar` binary diagnostic for read-level cache and residual-alignment audits.
 * Recorded H0, H1, experimental H1X2, exactly-one-N, cache deny/miss, sample-tag rejection, and alignment-resolution provenance without changing the default Flex path.
 
+STAR-suite experimental Flex split-half residual gate --- 2026/09/08
+===================================================================
+* When an opt-in H1X2 cache is loaded, require each residual alignment candidate to have at least one active 25-base probe half within Hamming distance one.
+* Reject half hits spanning multiple genes, and count an aligned residual only when the Flex alignment resolver returns the uniquely anchored gene.
+* Restored aligned observations with ambiguous cell barcodes to the shared posterior-resolution store; the previous outer condition made that branch unreachable for `cbMatch > 1`.
+
 STAR-suite experimental Flex split-half cache --- 2026/09/07
 ============================================================
 * Added the opt-in `H1X2` cache tier for full 50-base probe keys with at most one mismatch in each 25-base half.

@@ -1,7 +1,8 @@
 #include "SoloReadBarcode.h"
 #include "streamFuns.h"
 
-SoloReadBarcode::SoloReadBarcode(Parameters &P) : P(P), pSolo(P.pSolo), detectedSampleToken(0xFF)
+SoloReadBarcode::SoloReadBarcode(Parameters &P) : P(P), pSolo(P.pSolo), detectedSampleToken(0xFF),
+                                                  residualAnchorGeneIdx15(0)
 {
     if (pSolo.type==0)
         return;

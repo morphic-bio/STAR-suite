@@ -177,8 +177,16 @@ run_case() {
         expected_keep=3
         expected_miss=2
     fi
+    local expected_deny=1
+    if [[ "${no_align}" == 0 ]]; then
+        # The only ordinary miss is T*50. With an H1X2 tier loaded, residual
+        # alignment now requires a unique active-probe half anchor, so this
+        # synthetic no-anchor read is denied before it reaches STAR.
+        expected_deny=2
+        expected_miss=0
+    fi
     grep -Fq \
-        "Flex pipeline complete: total=7, triageKeep=${expected_keep}, triageDeny=1, sampleReject=1, triageMiss=${expected_miss}" \
+        "Flex pipeline complete: total=7, triageKeep=${expected_keep}, triageDeny=${expected_deny}, sampleReject=1, triageMiss=${expected_miss}" \
         "${out_dir}/Log.out" \
         || die "${input_kind} flexNoAlign=${no_align} soloProbeMismatch=${probe_mismatch}: routing counters differ"
 
@@ -188,8 +196,8 @@ run_case() {
     fi
     [[ "$(metric "${out_dir}/Log.final.out" 'Hash screen: KEEP')" == "${expected_keep}" ]] \
         || die "${input_kind} flexNoAlign=${no_align} soloProbeMismatch=${probe_mismatch}: H0/H1 KEEP count differs"
-    [[ "$(metric "${out_dir}/Log.final.out" 'Hash screen: DENY')" == 1 ]] \
-        || die "${input_kind} flexNoAlign=${no_align} soloProbeMismatch=${probe_mismatch}: certified H1 DENY count differs"
+    [[ "$(metric "${out_dir}/Log.final.out" 'Hash screen: DENY')" == "${expected_deny}" ]] \
+        || die "${input_kind} flexNoAlign=${no_align} soloProbeMismatch=${probe_mismatch}: cache/half-anchor DENY count differs"
     [[ "$(metric "${out_dir}/Log.final.out" 'Hash screen: unmatched sample tag')" == 1 ]] \
         || die "${input_kind} flexNoAlign=${no_align} soloProbeMismatch=${probe_mismatch}: sample-tag DENY count differs"
     [[ "$(metric "${out_dir}/Log.final.out" 'Hash screen: PASS')" == "${expected_pass}" ]] \
@@ -206,11 +214,11 @@ run_case() {
     [[ "$(($(wc -l <"${out_dir}/flex_decisions.tsv") - 1))" == 7 ]] \
         || die "${input_kind}: decision sidecar does not contain seven records"
     awk -F '\t' '
-        NR == 2 && !($1 == 0 && $5 == "KEEP" && $6 == "H0" && $10 == 1 && $23 == "CACHE_KEEP") { exit 1 }
-        NR == 3 && !($1 == 1 && $5 == "KEEP" && $6 == "H1" && $10 == 2 && $23 == "CACHE_KEEP") { exit 1 }
-        NR == 4 && !($1 == 2 && $5 == "KEEP" && $6 == "H1X2" && $10 == 2 && $23 == "CACHE_KEEP") { exit 1 }
-        NR == 5 && !($1 == 3 && $5 == "DENY" && $6 == "NEGATIVE" && $11 == 1 && $23 == "CACHE_DENY") { exit 1 }
-        NR == 8 && !($1 == 6 && $5 == "DENY" && $6 == "." && $7 == "." && $15 == 1 && $23 == "SAMPLE_TAG_REJECT") { exit 1 }
+        NR == 2 && !($1 == 0 && $5 == "KEEP" && $6 == "H0" && $10 == 1 && $28 == "CACHE_KEEP") { exit 1 }
+        NR == 3 && !($1 == 1 && $5 == "KEEP" && $6 == "H1" && $10 == 2 && $28 == "CACHE_KEEP") { exit 1 }
+        NR == 4 && !($1 == 2 && $5 == "KEEP" && $6 == "H1X2" && $10 == 2 && $28 == "CACHE_KEEP") { exit 1 }
+        NR == 5 && !($1 == 3 && $5 == "DENY" && $6 == "NEGATIVE" && $11 == 1 && $28 == "CACHE_DENY") { exit 1 }
+        NR == 8 && !($1 == 6 && $5 == "DENY" && $6 == "." && $7 == "." && $15 == 1 && $28 == "SAMPLE_TAG_REJECT") { exit 1 }
     ' "${out_dir}/flex_decisions.tsv" \
         || die "${input_kind}: fixed H0/H1/H1X2/deny/sample records differ"
     if [[ "${probe_mismatch}" == "0" ]]; then
@@ -223,13 +231,13 @@ run_case() {
             || die "${input_kind}: single-N provenance differs"
     fi
     if [[ "${no_align}" == 1 ]]; then
-        awk -F '\t' 'NR == 7 { exit !($5 == "MISS" && $17 == 0 && $18 == 0 && $22 == 1 && $23 == "CACHE_MISS_NO_ALIGN") }' \
+        awk -F '\t' 'NR == 7 { exit !($5 == "MISS" && $17 == 0 && $18 == 0 && $27 == 1 && $28 == "CACHE_MISS_NO_ALIGN") }' \
             "${out_dir}/flex_decisions.tsv" \
             || die "${input_kind}: no-align miss provenance differs"
     else
-        awk -F '\t' 'NR == 7 { exit !($5 == "MISS" && $17 == 1 && $18 == 1 && ($19 == 1 || $20 == 1)) }' \
+        awk -F '\t' 'NR == 7 { exit !($5 == "DENY" && $17 == 0 && $18 == 0 && $22 == "ABSENT" && $28 == "RESIDUAL_NO_ANCHOR") }' \
             "${out_dir}/flex_decisions.tsv" \
-            || die "${input_kind}: residual-alignment provenance differs"
+            || die "${input_kind}: residual half-anchor denial provenance differs"
     fi
 }
 
@@ -297,8 +305,8 @@ run_bam_sidecar_case() {
         NR == 3 && !($5 == "KEEP" && $6 == "H1") { exit 1 }
         NR == 4 && !($5 == "KEEP" && $6 == "H1X2") { exit 1 }
         NR == 5 && !($5 == "DENY" && $6 == "NEGATIVE") { exit 1 }
-        NR == 6 && !($5 == "KEEP" && $6 == "H1" && $7 == "H0" && $8 == 1 && $9 == 1 && $17 == 0 && $23 == "CACHE_KEEP") { exit 1 }
-        NR == 8 && !($5 == "DENY" && $6 == "." && $15 == 1 && $23 == "SAMPLE_TAG_REJECT") { exit 1 }
+        NR == 6 && !($5 == "KEEP" && $6 == "H1" && $7 == "H0" && $8 == 1 && $9 == 1 && $17 == 0 && $28 == "CACHE_KEEP") { exit 1 }
+        NR == 8 && !($5 == "DENY" && $6 == "." && $15 == 1 && $28 == "SAMPLE_TAG_REJECT") { exit 1 }
     ' "${out_dir}/flex_decisions.tsv" \
         || die "ordinary ${input_kind} Flex/BAM decision provenance differs"
 }
