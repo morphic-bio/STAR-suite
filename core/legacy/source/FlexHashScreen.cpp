@@ -1,8 +1,6 @@
 #include "FlexHashScreen.h"
 #include "Parameters.h"
 #include "ParametersSolo.h"
-#include "Genome.h"
-#include "ProbeListIndex.h"
 
 #include <algorithm>
 #include <cstring>
@@ -65,7 +63,6 @@ bool FlexHashScreenCache::ensureLoaded(const ParametersSolo& pSolo, std::string*
     cacheVersion_ = 0;
     regionMetadataComplete_ = false;
     hasH1X2_ = false;
-    halfAnchorBuildAttempted_ = false;
     offset0MapsUseCbqOrder_ = pSolo.pP != nullptr && pSolo.pP->readFilesTypeN == 20;
 
     if (!pSolo.hashScreenEnabled || pSolo.hashScreenFile.empty()) {
@@ -73,6 +70,9 @@ bool FlexHashScreenCache::ensureLoaded(const ParametersSolo& pSolo, std::string*
     }
 
     enabled_ = loadFile(pSolo.hashScreenFile, errorOut);
+    if (enabled_ && hasH1X2_ && !buildH1X2ProbeIndex(errorOut)) {
+        enabled_ = false;
+    }
     if (enabled_) {
         loadedPath_ = pSolo.hashScreenFile;
     }
@@ -329,110 +329,121 @@ void FlexHashScreenCache::buildTieredVectors() {
     buildH1DenyNoSampleMap();
 }
 
-bool FlexHashScreenCache::ensureH1X2ResidualAnchorIndex(
-    const ParametersSolo& pSolo, const Genome& genome, std::string* errorOut,
-    bool* builtNow)
+std::string FlexHashScreenCache::decodeCacheSequence(uint64_t seqLo,
+                                                      uint64_t seqHi)
 {
-    if (builtNow != nullptr)
-        *builtNow = false;
-    if (!hasH1X2_ || halfAnchorIndex_.ready())
+    static const char bases[] = {'A', 'C', 'G', 'T'};
+    std::string sequence(kCacheKmerLength, 'N');
+    for (unsigned position = 0; position < kCacheKmerLength; ++position) {
+        const uint64_t packed = position < 18 ? seqHi : seqLo;
+        const unsigned shift = position < 18
+            ? 2U * (17U - position)
+            : 2U * (49U - position);
+        sequence[position] = bases[(packed >> shift) & UINT64_C(3)];
+    }
+    return sequence;
+}
+
+bool FlexHashScreenCache::buildH1X2ProbeIndex(std::string* errorOut)
+{
+    if (!hasH1X2_ || probeSeedIndex_.ready())
         return true;
-    if (halfAnchorBuildAttempted_) {
-        if (errorOut != nullptr)
-            *errorOut = "the H1X2 residual half-anchor index could not be built";
-        return false;
-    }
-    halfAnchorBuildAttempted_ = true;
 
-    ProbeListIndex probeList;
-    uint32_t deprecatedCount = 0;
-    if (!probeList.load(pSolo.probeListPath, pSolo.removeDeprecated,
-                        &deprecatedCount)) {
-        if (errorOut != nullptr)
-            *errorOut = "cannot load the active Flex probe-list gene axis";
-        return false;
-    }
-
+    // H0 entries are the authoritative active probe parents already embedded
+    // in the cache. Reconstructing from them keeps count-only/no-genome and
+    // alignment runs on the identical probe set and removes a genome-loading
+    // dependency from this probe-only classifier. H0 is sample-specific, so
+    // adjacent copies of the same packed probe are collapsed here.
     std::vector<FlexProbeHalfIndex::Probe> probes;
-    for (uint32_t chromosome = 0; chromosome < genome.nChrReal; ++chromosome) {
-        const std::string& name = genome.chrName[chromosome];
-        if (name.size() < 4 || name.compare(0, 4, "ENSG") != 0 ||
-            genome.chrLength[chromosome] != 50) {
-            continue;
-        }
-        const size_t pipe = name.find('|');
-        const std::string geneId = pipe == std::string::npos
-            ? name : name.substr(0, pipe);
-        const uint16_t geneIdx15 = probeList.geneIndex15(geneId);
-        if (geneIdx15 == 0)
-            continue;
-
-        std::string sequence(50, 'N');
-        const uint64_t start = genome.chrStart[chromosome];
-        static const char bases[] = {'A', 'C', 'G', 'T'};
-        bool valid = true;
-        for (unsigned position = 0; position < 50; ++position) {
-            const unsigned char code = static_cast<unsigned char>(
-                genome.G[start + position]);
-            if (code > 3) {
-                valid = false;
-                break;
+    probes.reserve(h0Records_.size());
+    uint64_t previousLo = 0;
+    uint64_t previousHi = 0;
+    uint16_t previousGene = 0;
+    bool havePrevious = false;
+    for (const Record& record : h0Records_) {
+        if (havePrevious && record.seqLo == previousLo &&
+            record.seqHi == previousHi) {
+            if (record.resolvedGeneIdx15 != previousGene) {
+                if (errorOut != nullptr)
+                    *errorOut = "H1X2 cache has one H0 probe assigned to multiple genes";
+                return false;
             }
-            sequence[position] = bases[code];
+            continue;
         }
-        if (valid)
-            probes.push_back(FlexProbeHalfIndex::Probe(sequence, geneIdx15));
+        probes.push_back(FlexProbeHalfIndex::Probe(
+            decodeCacheSequence(record.seqLo, record.seqHi),
+            static_cast<uint16_t>(record.resolvedGeneIdx15)));
+        previousLo = record.seqLo;
+        previousHi = record.seqHi;
+        previousGene = static_cast<uint16_t>(record.resolvedGeneIdx15);
+        havePrevious = true;
     }
 
-    if (!halfAnchorIndex_.build(probes, errorOut))
+    if (probes.empty()) {
+        if (errorOut != nullptr)
+            *errorOut = "H1X2 seed-and-extend requires H0 parent records in the same cache";
         return false;
-    if (builtNow != nullptr)
-        *builtNow = true;
+    }
+    if (!probeSeedIndex_.build(probes, errorOut))
+        return false;
     return true;
 }
 
 namespace {
 
-FlexHashScreenDecision halfAnchorDecision(
+FlexHashScreenDecision probeSeedDecision(
     const FlexProbeHalfIndex::Result& anchor)
 {
     FlexHashScreenDecision decision;
     if (anchor.status == FlexProbeHalfIndex::Unique) {
-        decision.action = FlexHashScreenDecision::Pass;
+        // The fixed-position 25-base seed plus 50-base Hamming extension is
+        // the complete H1X2 rescue. Do not send this read through genomic
+        // alignment: Cell Ranger's Flex gene assignment is probe-based, and
+        // its genomic alignment is output annotation only.
+        decision.action = FlexHashScreenDecision::Keep;
         decision.geneIdx15 = anchor.geneIdx15;
         decision.cacheClass = FlexHashCacheH1X2;
-        decision.residualAnchorGeneIdx15 = anchor.geneIdx15;
+        decision.probeHammingDistance = anchor.hammingDistance;
     } else {
         decision.action = FlexHashScreenDecision::Deny;
-        decision.negativeCode = anchor.status == FlexProbeHalfIndex::Ambiguous
-            ? FlexHashNegHalfGeneAmbig : FlexHashNegHalfNoAnchor;
+        if (anchor.status == FlexProbeHalfIndex::ScoreFail)
+            decision.probeHammingDistance = anchor.hammingDistance;
+        if (anchor.status == FlexProbeHalfIndex::Ambiguous) {
+            decision.negativeCode = FlexHashNegHalfGeneAmbig;
+        } else if (anchor.status == FlexProbeHalfIndex::ScoreFail) {
+            decision.negativeCode = FlexHashNegHalfScoreFail;
+        } else if (anchor.status == FlexProbeHalfIndex::SplitProbe) {
+            decision.negativeCode = FlexHashNegHalfSplitProbe;
+        } else {
+            decision.negativeCode = FlexHashNegHalfNoAnchor;
+        }
     }
     return decision;
 }
 
 } // namespace
 
-FlexHashScreenDecision FlexHashScreenCache::classifyReadH1X2ResidualAnchor(
+FlexHashScreenDecision FlexHashScreenCache::classifyReadH1X2SeedExtend(
     const char* readSeq, uint32_t readLen) const
 {
-    if (!hasH1X2_ || !halfAnchorIndex_.ready()) {
+    if (!hasH1X2_ || !probeSeedIndex_.ready()) {
         FlexHashScreenDecision decision;
         decision.action = FlexHashScreenDecision::Pass;
         return decision;
     }
-    return halfAnchorDecision(halfAnchorIndex_.classify(readSeq, readLen));
+    return probeSeedDecision(probeSeedIndex_.classify(readSeq, readLen));
 }
 
-FlexHashScreenDecision FlexHashScreenCache::classifyCbqH1X2ResidualAnchor(
+FlexHashScreenDecision FlexHashScreenCache::classifyCbqH1X2SeedExtend(
     uint64_t seqLo, uint64_t seqHi, uint64_t nMask) const
 {
-    if (!hasH1X2_ || !halfAnchorIndex_.ready()) {
+    if (!hasH1X2_ || !probeSeedIndex_.ready()) {
         FlexHashScreenDecision decision;
         decision.action = FlexHashScreenDecision::Pass;
         return decision;
     }
     const SeqKeyNoSample cacheKey = cbqKeyToCacheKey(seqLo, seqHi);
-    return halfAnchorDecision(halfAnchorIndex_.classifyCachePacked(
+    return probeSeedDecision(probeSeedIndex_.classifyCachePacked(
         cacheKey.lo, cacheKey.hi, nMask));
 }
 
@@ -776,7 +787,11 @@ const char* flexHashScreenDenyReason(uint8_t negativeCode)
         case FlexHashNegHalfNoAnchor:
             return "H1X2_HALF_NO_ANCHOR";
         case FlexHashNegHalfGeneAmbig:
-            return "H1X2_HALF_GENE_AMBIG";
+            return "H1X2_HALF_PROBE_AMBIG";
+        case FlexHashNegHalfScoreFail:
+            return "H1X2_PROBE_SCORE_FAIL";
+        case FlexHashNegHalfSplitProbe:
+            return "H1X2_SPLIT_PROBE";
         default:
             return "NEG_PROBE_AMBIG";
     }

@@ -38,7 +38,9 @@ enum StatusFlag : std::uint32_t {
     kResidualAnchorAbsent = 1u << 16,
     kResidualAnchorAmbiguous = 1u << 17,
     kAlignmentAnchorAgreed = 1u << 18,
-    kAlignmentAnchorDisagreed = 1u << 19
+    kAlignmentAnchorDisagreed = 1u << 19,
+    kProbeScoreFailed     = 1u << 20,
+    kProbeSplit           = 1u << 21
 };
 
 enum FinalReason : std::uint8_t {
@@ -53,7 +55,9 @@ enum FinalReason : std::uint8_t {
     kReasonAlignmentGenomic = 8,
     kReasonResidualNoAnchor = 9,
     kReasonResidualAnchorAmbiguous = 10,
-    kReasonAlignmentAnchorDisagree = 11
+    kReasonAlignmentAnchorDisagree = 11,
+    kReasonProbeScoreFail = 12,
+    kReasonProbeSplit = 13
 };
 
 struct Record {
