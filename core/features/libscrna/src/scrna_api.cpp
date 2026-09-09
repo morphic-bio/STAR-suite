@@ -12,6 +12,7 @@
 #include "scrna_api.h"
 #include "SampleMatrixData.h"
 #include "OrdMagStage.h"
+#include "OrdMagRank.h"
 #include "EmptyDropsMultinomial.h"
 #include "OccupancyGuard.h"
 #include <vector>
@@ -138,11 +139,36 @@ extern "C" int scrna_emptydrops_run(
     const scrna_ed_config *config,
     scrna_ed_result *result
 ) {
+    return scrna_emptydrops_run_with_rank_mask(input, config, nullptr, result);
+}
+
+extern "C" int scrna_emptydrops_run_with_rank_mask(
+    const scrna_matrix_input *input,
+    const scrna_ed_config *config,
+    const uint8_t *mitochondrial_features,
+    scrna_ed_result *result
+) {
+    return scrna_emptydrops_run_with_rank_options(input, config, mitochondrial_features, 0, result);
+}
+
+extern "C" int scrna_emptydrops_run_with_rank_options(
+    const scrna_matrix_input *input,
+    const scrna_ed_config *config,
+    const uint8_t *mitochondrial_features,
+    uint32_t bootstrap_threads,
+    scrna_ed_result *result
+) {
     if (!input || !config || !result) {
         return -1;
     }
     
     memset(result, 0, sizeof(scrna_ed_result));
+
+    if (mitochondrial_features && (!config->use_bootstrap || !input->sparse_gene_ids ||
+        !input->sparse_counts || !input->sparse_cell_index || !input->n_genes_per_cell)) {
+        result->error_message = strdup_safe("MT rank scores require sparse matrix data and bootstrap OrdMag");
+        return -1;
+    }
     
     if (input->n_cells == 0) {
         result->error_message = strdup_safe("No cells in input");
@@ -166,8 +192,9 @@ extern "C" int scrna_emptydrops_run(
     for (uint32_t i = 0; i < input->n_cells; i++) {
         umiIdx.push_back({nUMIperCB[i], i});
     }
-    stable_sort(umiIdx.begin(), umiIdx.end(), [](const pair<uint32_t,uint32_t>& a, const pair<uint32_t,uint32_t>& b) {
-        return a.first > b.first;
+    stable_sort(umiIdx.begin(), umiIdx.end(), [&](const pair<uint32_t,uint32_t>& a, const pair<uint32_t,uint32_t>& b) {
+        if (a.first != b.first) return a.first > b.first;
+        return barcodes[a.second] < barcodes[b.second];
     });
     
     // Apply retain window (top N by UMI, capped by ed_retain_count)
@@ -193,15 +220,35 @@ extern "C" int scrna_emptydrops_run(
     // Step 2: Build retainUMI for threshold calculation
     // ========================================================================
     vector<uint32_t> retainUMI;
+    vector<uint32_t> retainGenes;
+    vector<string> retainBarcodes;
+    vector<uint64_t> retainNonMitoUMIs;
     retainUMI.reserve(retainIndices.size());
+    retainGenes.reserve(retainIndices.size());
+    retainBarcodes.reserve(retainIndices.size());
+    if (mitochondrial_features) retainNonMitoUMIs.reserve(retainIndices.size());
+    vector<uint32_t> seenGenes(input->n_features, std::numeric_limits<uint32_t>::max());
     for (uint32_t idx : retainIndices) {
         retainUMI.push_back(nUMIperCB[idx]);
+        retainBarcodes.push_back(barcodes[idx]);
+        uint32_t detected = input->n_genes_per_cell ? input->n_genes_per_cell[idx] : 0;
+        if (input->sparse_gene_ids && input->sparse_counts &&
+            input->sparse_cell_index && input->n_genes_per_cell) {
+            const uint32_t start = input->sparse_cell_index[idx];
+            const OrdMagCellQuality quality = ordMagCellQuality(input->sparse_gene_ids + start,
+                input->sparse_counts + start, input->n_genes_per_cell[idx], seenGenes, idx,
+                mitochondrial_features);
+            detected = quality.detectedGenes;
+            if (mitochondrial_features) retainNonMitoUMIs.push_back(quality.nonMitoUMIs);
+        }
+        retainGenes.push_back(detected);
     }
     
     // ========================================================================
     // Step 3: Run Simple EmptyDrops to define simple cells and candidate tail
     // ========================================================================
     SimpleEmptyDropsParams simpleParams;
+    simpleParams.maxThreads = bootstrap_threads;
     simpleParams.nExpectedCells = config->n_expected_cells;
     simpleParams.maxPercentile = config->max_percentile;
     simpleParams.maxMinRatio = config->max_min_ratio;
@@ -220,7 +267,7 @@ extern "C" int scrna_emptydrops_run(
         cerr << "[scrna_api] Using bootstrap OrdMag (CR9 style), maxExpectedCells="
              << simpleParams.maxExpectedCells << endl;
         simpleResult = SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
-            retainUMI, retainIndices.size(), simpleParams);
+            retainUMI, retainIndices.size(), simpleParams, retainGenes, retainBarcodes, retainNonMitoUMIs);
     } else {
         simpleResult = SimpleEmptyDropsStage::runCRSimpleFilter(
             retainUMI, retainIndices.size(), simpleParams);

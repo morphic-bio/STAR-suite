@@ -2153,6 +2153,21 @@ soloFlexFatalOnError         no
 soloFlexTotalExpected        0
     int:                    total expected cells across all tags (deprecated, use soloFlexExpectedCellsTotal or soloFlexExpectedCellsPerTag)
 
+soloFlexCellCaller           tag-aware
+    string:                 tag-aware (shared grouped OrdMag+BH/FDR caller) or legacy (per-tag ED+occupancy).
+                            tag-aware groups identical whitelist sample labels, preserves CB16+TAG8,
+                            estimates cell counts, and uses FDR 0.01 unless soloFlexEdFdrThreshold is set.
+                            Legacy expected-cell/occupancy/OrdMag-fallback tuning requires legacy mode.
+
+soloCellFilterMitochondrialGenes -
+    string:                 optional plain-text mitochondrial feature-ID list for bootstrap OrdMag tie scores.
+                            Exact first-column IDs must match the active gene/probe annotation.
+                            Original counts remain in cell-number estimation and EmptyDrops.
+
+soloCellFilterBootstrapThreads 0
+    int:                    bootstrap worker count (0 uses runThreadN). Set explicitly for matched caller comparisons;
+                            current bootstrap RNG streams depend on this value.
+
 soloFlexExpectedCellsTotal   0
     int:                    total expected cells across ALL tags (e.g., 12000 for 4 tags x 3000 cells)
 
@@ -2178,7 +2193,7 @@ soloFlexEdLower              0
     int:                    EmptyDrops lower index for ambient range (0 = use default 45000)
 
 soloFlexEdNiters             0
-    int:                    EmptyDrops Monte Carlo iterations (0 = use default 10000)
+    int:                    EmptyDrops Monte Carlo iterations (0 = 100000 for tag-aware, 10000 for legacy)
 
 soloFlexEdFdrThreshold       0
     double:                 EmptyDrops FDR threshold (0 = use default 0.001)
@@ -2231,7 +2246,8 @@ soloFlexInvariantChecks       no
 soloFlexKeepCBTag             no
     string:                 yes|no (default no)
                             yes         ... keep full CB+TAG (24bp) barcodes in per-sample MEX outputs
-                            no          ... strip sample tag, output 16bp CB barcodes (default)
+                            no          ... legacy caller: strip sample tag, output 16bp CB barcodes (default).
+                            The tag-aware caller always retains full CB+TAG identities.
 
 soloFlexMinimalMemory         auto
     string:                 auto|yes|no (default auto)
@@ -2575,8 +2591,8 @@ defaultFlex                 No
                             soloRemoveDeprecated Yes, removeDeprecated Yes,
                             soloSampleSearchNearby no, plus Flex alignment defaults,
                             outSAMtype BAM Unsorted, outBAMsortMethod samtools (if sorting requested)
-                            NOTE: soloRunFlexFilter requires --soloFlexExpectedCellsTotal or
-                            --soloFlexExpectedCellsPerTag to be set (dataset-specific)
+                            NOTE: soloFlexCellCaller legacy requires --soloFlexExpectedCellsTotal or
+                            --soloFlexExpectedCellsPerTag (dataset-specific). The tag-aware caller estimates cell counts.
 
 defaultSlam                 No
     string:                 yes/no - apply SLAM-seq defaults (superset of bulk)
@@ -2599,3 +2615,6 @@ defaultA375Parity           No
 soloClusterCBfile           -
     string:                 file containing the cluster information for cell barcodes, two columns: CB cluster_index. Only used with --soloFeatures Transcript3p
 #####UnderDevelopment_end
+
+soloFlexFilteredGeneList      -
+    string: optional gene-ID allowlist for per-sample filtered Flex MEX export; does not restrict calling

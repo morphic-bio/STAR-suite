@@ -1,7 +1,10 @@
 #include "SoloFeature.h"
 #include "serviceFuns.cpp"
-#include "OrdMagStage.h"
+#include "libscrna/OrdMagStage.h"
 #include "scrna_api.h"
+#include "MitochondrialRankMask.h"
+#include "OrdMagRank.h"
+#include "ErrorWarning.h"
 
 #include <algorithm>
 #include <cstring>
@@ -133,7 +136,21 @@ void SoloFeature::emptyDrops_libscrna()
 
     scrna_ed_result result;
     memset(&result, 0, sizeof(result));
-    int rc = scrna_emptydrops_run(&input, config, &result);
+    vector<uint8_t> mitochondrialMask;
+    try {
+        if (!pSolo.cellFilterMitochondrialGenes.empty()) {
+            if (Trans.geID.size() != featuresNumber)
+                throw std::runtime_error("MT rank annotation does not match this feature matrix");
+            mitochondrialMask = loadMitochondrialRankMask(Trans.geID, pSolo.cellFilterMitochondrialGenes);
+        }
+    } catch (const std::exception& e) {
+        scrna_ed_config_destroy(config);
+        exitWithError(string("ERROR: ") + e.what(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+    const uint32_t bootstrapThreads = pSolo.cellFilterBootstrapThreads > 0
+        ? pSolo.cellFilterBootstrapThreads : static_cast<uint32_t>(std::max(1, P.runThreadN));
+    int rc = scrna_emptydrops_run_with_rank_options(&input, config,
+        mitochondrialMask.empty() ? nullptr : mitochondrialMask.data(), bootstrapThreads, &result);
     if (rc != 0) {
         P.inOut->logMain << "emptyDrops_CR (libscrna) failed: " 
                          << (result.error_message ? result.error_message : "unknown error") << "\n";
@@ -184,22 +201,36 @@ void SoloFeature::emptyDrops_libscrna()
         for (uint32_t i = 0; i < nCB; i++) {
             umiIdx.push_back({nUMIperCB[i], i});
         }
-        stable_sort(umiIdx.begin(), umiIdx.end(), [](const pair<uint32_t, uint32_t>& a, const pair<uint32_t, uint32_t>& b) {
-            return a.first > b.first;
+        stable_sort(umiIdx.begin(), umiIdx.end(), [&](const pair<uint32_t, uint32_t>& a, const pair<uint32_t, uint32_t>& b) {
+            if (a.first != b.first) return a.first > b.first;
+            return barcodes[a.second] < barcodes[b.second];
         });
 
         vector<uint32_t> retainIndices;
         vector<uint32_t> retainUMI;
+        vector<uint32_t> retainGenes;
+        vector<string> retainBarcodes;
+        vector<uint64_t> retainNonMito;
+        vector<uint32_t> seenGenes(featuresNumber, UINT32_MAX);
         retainIndices.reserve(nCB);
         retainUMI.reserve(nCB);
         vector<uint32_t> origToRetainRank(nCB, (uint32_t)-1);
         for (uint32_t rank = 0; rank < nCB; rank++) {
             retainIndices.push_back(umiIdx[rank].second);
             retainUMI.push_back(umiIdx[rank].first);
+            const uint32_t cell = umiIdx[rank].second;
+            const uint32_t start = sparse_cell_index[cell];
+            const auto quality = ordMagCellQuality(sparse_gene_ids.data() + start,
+                sparse_counts.data() + start, n_genes_per_cell[cell], seenGenes, cell,
+                mitochondrialMask.empty() ? nullptr : mitochondrialMask.data());
+            retainGenes.push_back(quality.detectedGenes);
+            if (!mitochondrialMask.empty()) retainNonMito.push_back(quality.nonMitoUMIs);
+            retainBarcodes.push_back(barcodes[umiIdx[rank].second]);
             origToRetainRank[umiIdx[rank].second] = rank;
         }
 
         SimpleEmptyDropsParams simpleParams;
+        simpleParams.maxThreads = bootstrapThreads;
         simpleParams.nExpectedCells = config->n_expected_cells;
         simpleParams.maxPercentile = config->max_percentile;
         simpleParams.maxMinRatio = config->max_min_ratio;
@@ -217,7 +248,8 @@ void SoloFeature::emptyDrops_libscrna()
             if (simpleParams.maxExpectedCells < 1000) {
                 simpleParams.maxExpectedCells = 90000;
             }
-            simpleResult = SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(retainUMI, retainIndices.size(), simpleParams);
+            simpleResult = SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
+                retainUMI, retainIndices.size(), simpleParams, retainGenes, retainBarcodes, retainNonMito);
         } else {
             simpleResult = SimpleEmptyDropsStage::runCRSimpleFilter(retainUMI, retainIndices.size(), simpleParams);
         }

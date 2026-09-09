@@ -529,6 +529,10 @@ int FlexFilter::runInternal(
         Outputs* outputs,
         const Config& config_in) {
     
+    if (config_in.tagAwareCaller) {
+        return runTagAware(matrixData, sampleLabels, sampleTags, outputs, config_in);
+    }
+
     // Copy config (unified pipeline: retain window -> ED -> occupancy post-filter)
     Config config = config_in;
     
@@ -1021,7 +1025,7 @@ int FlexFilter::runInternal(
             SimpleEmptyDropsResult simpleResult = SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
                 nUMIperCB_compact,
                 static_cast<uint32_t>(nUMIperCB_compact.size()),
-                simpleParams
+                simpleParams, nGenePerCB_compact, retainBarcodes
             );
             
             retainThreshold = simpleResult.retainThreshold;
@@ -1029,22 +1033,19 @@ int FlexFilter::runInternal(
             cerr << "  [Simple EmptyDrops] Estimated recovered_cells: " << simpleParams.nExpectedCells << endl;
             cerr << "  [Simple EmptyDrops] Retain threshold: " << retainThreshold << " UMI" << endl;
             
-            // The OrdMag threshold has no floor of its own. Apply the same
-            // inclusive UMI floor used for EmptyDrops candidates so an unused
-            // tag cannot promote one-UMI ambient barcodes into the occupancy
-            // surface.
-            const uint32_t simpleFloor = max(retainThreshold, simpleParams.umiMin);
-            for (size_t ci = 0; ci < nUMIperCB_compact.size(); ci++) {
-                if (nUMIperCB_compact[ci] >= simpleFloor) {
-                    simplePasserIndices.insert(static_cast<uint32_t>(ci));
+            // Preserve the quality-ranked selection. Reconstructing calls from
+            // retainThreshold would promote the entire boundary UMI tie again.
+            // Apply the existing inclusive candidate floor after rank selection.
+            for (uint32_t ci : simpleResult.passingIndices) {
+                if (nUMIperCB_compact[ci] >= simpleParams.umiMin) {
+                    simplePasserIndices.insert(ci);
                 }
             }
-            
+
             cerr << "  [Simple EmptyDrops] Found " << simplePasserIndices.size()
-                 << " cells with UMI >= " << simpleFloor
-                 << " (retain threshold " << retainThreshold
-                 << ", floor " << simpleParams.umiMin << ")" << endl;
-            
+                 << " quality-ranked cells above inclusive floor " << simpleParams.umiMin
+                 << " (last retained UMI " << retainThreshold << ")" << endl;
+
             tagResult.nSimpleCells = static_cast<uint32_t>(simplePasserIndices.size());
         } else {
             // This branch only reached if !useSimpleEmptyDrops && !needsFallback
