@@ -657,6 +657,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialOverflowPolicy", &soloSpatialOverflowPolicy));
     parArray.push_back(new ParameterInfoScalar <uint64>   (-1, -1, "soloSpatialSpillHighWaterCandidates", &soloSpatialSpillHighWaterCandidates));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloProbeList", &pSolo.probeListPath));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloFlexFilteredGeneList", &pSolo.flexFilteredGeneList));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloRemoveDeprecated", &pSolo.removeDeprecatedStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloFlexGdna", &pSolo.flexGdnaModeStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloFlexGdnaProbeSet", &pSolo.flexGdnaProbeSetPath));
@@ -706,6 +707,9 @@ Parameters::Parameters() {//initalize parameters info
     // FlexFilter inline integration
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloRunFlexFilter", &pSolo.runFlexFilterStr));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloFlexFatalOnError", &pSolo.flexFilterFatalOnErrorStr));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloFlexCellCaller", &pSolo.flexFilterCallerMode));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloCellFilterMitochondrialGenes", &pSolo.cellFilterMitochondrialGenes));
+    parArray.push_back(new ParameterInfoScalar<uint32>(-1, -1, "soloCellFilterBootstrapThreads", &pSolo.cellFilterBootstrapThreads));
     parArray.push_back(new ParameterInfoScalar<uint32>(-1, -1, "soloFlexTotalExpected", &pSolo.flexFilterTotalExpected));
     parArray.push_back(new ParameterInfoScalar<uint32>(-1, -1, "soloFlexExpectedCellsTotal", &pSolo.flexFilterExpectedCellsTotal));
     parArray.push_back(new ParameterInfoScalar<uint32>(-1, -1, "soloFlexExpectedCellsPerTag", &pSolo.flexFilterExpectedCellsPerTag));

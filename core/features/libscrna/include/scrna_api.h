@@ -148,6 +148,31 @@ int scrna_emptydrops_run(
 );
 
 /**
+ * Matrix-aware OrdMag ranking with an annotation-derived mitochondrial mask.
+ * mitochondrial_features has n_features entries (1 = MT, 0 = other), or NULL
+ * for ordinary detected-gene tie-breaking. Requires sparse matrix data and
+ * use_bootstrap when a mask is supplied. The mask affects only OrdMag tie
+ * scores: total UMIs, non-MT UMIs, non-MT detected genes, full barcode identity.
+ * Original counts, ambient estimation, and EmptyDrops likelihoods are retained.
+ * This separate entry point preserves the layout of the existing C ABI structs.
+ */
+int scrna_emptydrops_run_with_rank_mask(
+    const scrna_matrix_input *input,
+    const scrna_ed_config *config,
+    const uint8_t *mitochondrial_features,
+    scrna_ed_result *result
+);
+
+// As above, with an explicit bootstrap worker count (0 = existing automatic policy).
+int scrna_emptydrops_run_with_rank_options(
+    const scrna_matrix_input *input,
+    const scrna_ed_config *config,
+    const uint8_t *mitochondrial_features,
+    uint32_t bootstrap_threads,
+    scrna_ed_result *result
+);
+
+/**
  * Free EmptyDrops result.
  */
 void scrna_ed_result_free(scrna_ed_result *result);

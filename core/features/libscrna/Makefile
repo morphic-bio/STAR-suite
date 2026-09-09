@@ -10,6 +10,7 @@ INCLUDES := -I./include
 SRCS := src/EmptyDropsCRSampler.cpp \
         src/EmptyDropsMultinomial.cpp \
         src/OrdMagStage.cpp \
+        src/SimpleEDCaller.cpp \
         src/OccupancyGuard.cpp \
         src/scrna_api.cpp
 
@@ -33,6 +34,9 @@ PUBLIC_HEADERS := include/scrna_types.h \
                   include/EmptyDropsCRSampler.h \
                   include/EmptyDropsMultinomial.h \
                   include/OrdMagStage.h \
+                  include/OrdMagRank.h \
+                  include/SimpleEDCaller.h \
+                  include/MitochondrialRankMask.h \
                   include/OccupancyGuard.h \
                   include/CRLogProb.h \
                   include/scrna_api.h
@@ -103,7 +107,8 @@ clean:
 # Dependency on headers
 src/EmptyDropsCRSampler.o: include/EmptyDropsCRSampler.h include/scrna_types.h include/pcg_random.hpp
 src/EmptyDropsMultinomial.o: include/EmptyDropsMultinomial.h include/EmptyDropsCRSampler.h include/CRLogProb.h include/scrna_types.h include/SimpleGoodTuring/sgt.h
-src/OrdMagStage.o: include/OrdMagStage.h include/scrna_types.h include/pcg_random.hpp
+src/OrdMagStage.o: include/OrdMagStage.h include/OrdMagRank.h include/scrna_types.h include/pcg_random.hpp
+src/scrna_api.o: include/scrna_api.h include/OrdMagStage.h include/OrdMagRank.h include/EmptyDropsMultinomial.h include/scrna_types.h
 src/OccupancyGuard.o: include/OccupancyGuard.h include/scrna_types.h include/pcg_random.hpp
 
 # Test targets (tests are in ../../../tests/emptydrops/)
@@ -112,3 +117,5 @@ test: lib
 	@echo "Tests moved to tests/emptydrops/"
 	@echo "Run: make -C ../../../tests/emptydrops test"
 	$(MAKE) -C ../../../tests/emptydrops test
+
+src/SimpleEDCaller.o: include/SimpleEDCaller.h include/OrdMagStage.h include/OrdMagRank.h include/AdaptiveAmbientWindow.h include/EmptyDropsMultinomial.h include/scrna_api.h

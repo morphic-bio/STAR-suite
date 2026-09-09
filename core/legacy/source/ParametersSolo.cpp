@@ -879,6 +879,29 @@ void ParametersSolo::initialize(Parameters *pPin)
         flexFilterUseSimpleED = (flexFilterUseSimpleEDStr == "yes");
         flexFilterInvariantChecks = (flexFilterInvariantChecksStr == "yes");
         flexFilterKeepCBTag = (flexFilterKeepCBTagStr == "yes");
+
+        if (flexFilterCallerMode != "tag-aware" && flexFilterCallerMode != "legacy") {
+            exitWithError("EXITING: --soloFlexCellCaller must be tag-aware or legacy\n",
+                std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+        if (cellFilterMitochondrialGenes == "-" || cellFilterMitochondrialGenes == "None")
+            cellFilterMitochondrialGenes.clear();
+        if (runFlexFilter && flexFilterCallerMode == "tag-aware" &&
+            (flexFilterTotalExpected || flexFilterExpectedCellsTotal || flexFilterExpectedCellsPerTag ||
+             flexFilterOrdmagNsamples || flexFilterOrdmagUmiMin || flexFilterOrdmagTargetPct ||
+             flexFilterEdLower || flexFilterEdMaxTotalBuckets || flexFilterTotalPartitions ||
+             flexFilterRecoveryFactor || flexFilterOccupancyPercentile || flexFilterLowUmiThreshold ||
+             flexFilterUseSimpleED || flexFilterSimpleEDMinRescues != 50 ||
+             flexFilterSimpleEDMinAmbient != 100 || flexFilterSimpleEDMinCandidates != 100)) {
+            exitWithError("EXITING: legacy Flex expected-cell, ambient-rank, occupancy or fallback tuning "
+                "is incompatible with --soloFlexCellCaller tag-aware. Remove those overrides or select legacy. "
+                "The grouped caller supports soloFlexEdNiters, soloFlexEdFdrThreshold and shared rank-score options.\n",
+                std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+        if (runFlexFilter && flexFilterCallerMode == "legacy" && !cellFilterMitochondrialGenes.empty()) {
+            exitWithError("EXITING: MT ranking in Flex requires --soloFlexCellCaller tag-aware\n",
+                std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
         
         // Resolve expected cells: new flags take precedence over deprecated --soloFlexTotalExpected
         if (flexFilterExpectedCellsTotal > 0) {
@@ -892,7 +915,7 @@ void ParametersSolo::initialize(Parameters *pPin)
         // If neither new flag is set, flexFilterTotalExpected keeps its value (backwards compatibility)
         
         // Validate required parameters when enabled
-        if (runFlexFilter && !skipProcessing && flexFilterTotalExpected == 0) {
+        if (runFlexFilter && flexFilterCallerMode == "legacy" && !skipProcessing && flexFilterTotalExpected == 0) {
             ostringstream errOut;
             errOut << "EXITING because of fatal input ERROR: FlexFilter requires expected cells count.\n";
             errOut << "       Use one of:\n";

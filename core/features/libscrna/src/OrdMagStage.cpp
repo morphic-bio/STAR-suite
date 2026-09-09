@@ -4,6 +4,7 @@
  */
 
 #include "OrdMagStage.h"
+#include "OrdMagRank.h"
 #include "EmptyDropsMultinomial.h"
 #include "pcg_random.hpp"
 #include <algorithm>
@@ -17,6 +18,7 @@
 #include <iostream>
 #include <thread>
 #include <vector>
+#include <stdexcept>
 
 using namespace std;
 
@@ -107,7 +109,28 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
     uint32 nCB,
     OrdMagParams& params
 ) {
-    OrdMagResult result;
+    return runCRSimpleFilterBootstrap(nUMIperCB, nCB, params,
+                                     vector<uint32>(), vector<string>());
+}
+
+OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
+    const vector<uint32>& nUMIperCB,
+    uint32 nCB,
+    OrdMagParams& params,
+    const vector<uint32>& detectedGenes,
+    const vector<string>& barcodeIds,
+    const vector<uint64_t>& nonMitoUMIs,
+    OrdMagBootstrapTrace* trace
+) {
+    OrdMagResult result = {};
+    if (trace) *trace = OrdMagBootstrapTrace();
+
+    if (nUMIperCB.size() != nCB ||
+        (!nonMitoUMIs.empty() && nonMitoUMIs.size() != nCB) ||
+        (!detectedGenes.empty() && detectedGenes.size() != nCB) ||
+        (!barcodeIds.empty() && barcodeIds.size() != nCB)) {
+        throw std::invalid_argument("OrdMag tie metadata must match the barcode count");
+    }
     
     if (nCB == 0) {
         result.retainThreshold = 0;
@@ -139,6 +162,10 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
     }
     
     uint32 nNonzero = nonzeroCounts.size();
+
+    // Make bootstrap samples depend on the count distribution, not the input
+    // barcode order. The external caller already supplies descending counts.
+    sort(nonzeroCounts.begin(), nonzeroCounts.end(), std::greater<uint32>());
     
     // Determine maxExpectedCells if not set
     uint32 maxExpectedCells = params.maxExpectedCells;
@@ -170,6 +197,7 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
             }
         }
         nThreads = min(nThreads, nBoot);
+        if (trace) trace->bootstrapThreads = nThreads;
         vector<thread> threads;
         
         uint32 baseSeed = (params.bootstrapSeed > 0) ? params.bootstrapSeed : 1;
@@ -246,6 +274,7 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
             }
         }
         nThreads = min(nThreads, nBoot);
+        if (trace) trace->bootstrapThreads = nThreads;
         vector<thread> threads;
         uint32 baseSeed2 = (params.bootstrapSeed > 0) ? (params.bootstrapSeed + 10000) : 100;
         
@@ -291,10 +320,14 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
     }
     double varTopN = sumSqDiff / params.nBootstrapSamples;
     double sdTopN = sqrt(varTopN);
+    if (trace) {
+        trace->recoveredCells = recoveredCells;
+        trace->meanRetained = meanTopN;
+        trace->sdRetained = sdTopN;
+    }
     
     // Round to get number of cells
-    uint32 nCellsSimple = (uint32)round(meanTopN);
-    if (nCellsSimple > nNonzero) nCellsSimple = nNonzero;
+    uint32 nCellsSimple = ordMagRetainCount(nNonzero, meanTopN);
     
     cout << "Bootstrap mean = " << meanTopN << ", sd = " << sdTopN << ", nCellsSimple = " << nCellsSimple << endl;
     
@@ -307,28 +340,49 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
         indCount[ii].count = nUMIperCB[ii];
     }
     
-    sort(indCount.begin(), indCount.end(), [](const IndCount& ic1, const IndCount& ic2) {
-        return (ic1.count > ic2.count) || (ic1.count == ic2.count && ic1.index < ic2.index);
+    sort(indCount.begin(), indCount.end(), [&](const IndCount& ic1, const IndCount& ic2) {
+        return ordMagRankBefore(ic1.index, ic2.index, nUMIperCB,
+                                detectedGenes.empty() ? nullptr : &detectedGenes,
+                                barcodeIds.empty() ? nullptr : &barcodeIds,
+                                nonMitoUMIs.empty() ? nullptr : &nonMitoUMIs);
     });
     
-    // Ensure we select all barcodes with count >= cutoff (handle ties)
-    uint32 cutoffCount = 0;
-    if (nCellsSimple > 0 && nCellsSimple <= nCB) {
-        cutoffCount = indCount[nCellsSimple - 1].count;
-        // Extend to include ties
-        while (nCellsSimple < nCB && indCount[nCellsSimple].count == cutoffCount) {
-            // Check if we're grabbing too many (> 20% more than original)
-            if (nCellsSimple > (uint32)(meanTopN * 1.2)) {
-                nCellsSimple = (uint32)round(meanTopN);  // Revert to original
-                break;
-            }
-            nCellsSimple++;
-        }
-    }
+    // The rank target does not override the configured UMI floor. Apply it
+    // before constructing the primary prefix, median and tail candidates:
+    // primary cells receive automatic p=0 in EmptyDrops. Previously only
+    // the legacy Flex wrapper removed these low-UMI passers afterward.
+    const uint32 estimatedRetainCount = nCellsSimple;
+    while (nCellsSimple > 0 && indCount[nCellsSimple - 1].count < params.umiMin)
+        --nCellsSimple;
+    if (nCellsSimple != estimatedRetainCount)
+        cout << "[OrdMag floor] umi_min=" << params.umiMin
+             << " removed=" << estimatedRetainCount - nCellsSimple
+             << " nCellsSimple=" << nCellsSimple << endl;
+
+    // Within the floor, keep the exact target and deterministic quality/barcode
+    // ordering without expanding or dropping an entire boundary count group.
     
     // Compute retain threshold (UMI of last passing cell)
     uint32 retainThreshold = (nCellsSimple > 0 && nCellsSimple <= nCB) 
         ? indCount[nCellsSimple - 1].count : 0;
+
+    if (nCellsSimple > 0) {
+        const uint32 cutoff = indCount[nCellsSimple - 1].index;
+        uint32 umiTie = 0, qualityTie = 0, selectedTie = 0;
+        for (uint32 rank = 0; rank < nCB; ++rank) {
+            const uint32 idx = indCount[rank].index;
+            if (nUMIperCB[idx] != retainThreshold) continue;
+            ++umiTie;
+            if (rank < nCellsSimple) ++selectedTie;
+            if ((detectedGenes.empty() || detectedGenes[idx] == detectedGenes[cutoff]) &&
+                (nonMitoUMIs.empty() || nonMitoUMIs[idx] == nonMitoUMIs[cutoff])) ++qualityTie;
+        }
+        cout << "[OrdMag rank] total_UMI=" << retainThreshold
+             << " detected_genes=" << (detectedGenes.empty() ? 0 : detectedGenes[cutoff])
+             << " non_MT_UMI=" << (nonMitoUMIs.empty() ? retainThreshold : nonMitoUMIs[cutoff])
+             << " umi_tie=" << umiTie << " quality_tie=" << qualityTie
+             << " selected_umi_tie=" << selectedTie << endl;
+    }
     
     // Extract passing indices
     for (uint32 ii = 0; ii < nCellsSimple; ii++) {
@@ -364,7 +418,13 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
         result.candidateIndices.push_back(indCount[ii].index);
     }
     
-    // Extract ambient indices (same logic as non-bootstrap version)
+    // Ambient ranks use UMIs and barcode identity only: tie quality must not
+    // preferentially put low-quality cells into the ambient profile.
+    sort(indCount.begin(), indCount.end(), [&](const IndCount& a, const IndCount& b) {
+        return ordMagRankBefore(a.index, b.index, nUMIperCB, nullptr,
+                                barcodeIds.empty() ? nullptr : &barcodeIds);
+    });
+    // Extract ambient indices (same window logic as non-bootstrap version)
     uint32 scaledIndMin = min(params.indMin, nCB);
     // STAR EmptyDrops_CR treats indMax as exclusive
     uint32 scaledIndMax = min(params.indMax, nCB);
@@ -418,7 +478,7 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilter(
     uint32 nCB,
     const OrdMagParams& params
 ) {
-    OrdMagResult result;
+    OrdMagResult result = {};
     
     if (nCB == 0) {
         result.retainThreshold = 0;
@@ -481,6 +541,12 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilter(
         ncellsSimple = max(min(ncellsSimple, nCB), (uint32)0);
     }
     
+    // Apply the same primary floor as the bootstrap path, after the fallback
+    // so that it cannot reintroduce low-count cells (including zero counts).
+    retain = max(retain, max(params.umiMin, (uint32)1));
+    while (ncellsSimple > 0 && totalsSorted[ncellsSimple - 1] < retain)
+        --ncellsSimple;
+
     // Compute median value
     uint32 medianVal;
     if (ncellsSimple == 0) {

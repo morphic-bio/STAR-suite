@@ -16,7 +16,10 @@ LDFLAGS := -L$(LIBSCRNA_DIR) -lscrna -lpthread
 TESTS := test_sampler_deterministic \
          test_ambient_profile \
          test_simple_ed_threshold \
-         test_no_tag_mode
+         test_ordmag_ties \
+         test_ordmag_floor \
+         test_no_tag_mode \
+         test_observed_occupancy
 
 .PHONY: all clean test libscrna
 
@@ -38,8 +41,17 @@ test_ambient_profile: test_ambient_profile.cpp $(LIBSCRNA)
 test_simple_ed_threshold: test_simple_ed_threshold.cpp $(LIBSCRNA)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
 
+test_ordmag_ties: test_ordmag_ties.cpp $(LIBSCRNA_INC)/OrdMagRank.h $(LIBSCRNA)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
+
+test_ordmag_floor: test_ordmag_floor.cpp $(LIBSCRNA)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
+
 test_no_tag_mode: test_no_tag_mode.cpp $(LIBSCRNA)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
+
+test_observed_occupancy: test_observed_occupancy.cpp $(LIBSCRNA_INC)/ObservedTagOccupancy.h
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $<
 
 # Run all tests
 test: $(TESTS)
@@ -59,4 +71,9 @@ test: $(TESTS)
 	fi
 
 clean:
-	rm -f $(TESTS)
+	rm -f $(TESTS) test_flex_tag_aware
+
+# Integration fixture: run explicitly with a fresh output directory, then compare
+# its saved internal results against scrna_simpleed using check_flex_tag_aware.py.
+test_flex_tag_aware: test_flex_tag_aware.cpp $(LIBSCRNA) ../../flex/source/libflex/libflex.a ../../core/legacy/source/MexWriter.o
+	$(CXX) $(CXXFLAGS) -fopenmp $(INCLUDES) -I../../flex/source -I../../core/legacy/source -o $@ $< ../../flex/source/libflex/libflex.a ../../core/legacy/source/MexWriter.o $(LDFLAGS)

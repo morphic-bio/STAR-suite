@@ -269,6 +269,7 @@ public:
     } crMultimapRescueEvidenceMode = CrMultimapRescueEvidenceCompatibility;
 
     // Probe list and sample detection resources
+    string flexFilteredGeneList;       // optional export-only gene allowlist
     string probeListPath;             // path to probe_list.txt
     string removeDeprecatedStr;      // --removeDeprecated Yes/No (remove deprecated entries from probe lists)
     bool removeDeprecated;           // Converted from removeDeprecatedStr
@@ -384,8 +385,11 @@ public:
     bool runFlexFilter = false;      // resolved: true if enabled
     string flexFilterFatalOnErrorStr = "no";  // raw CLI: yes|no
     bool flexFilterFatalOnError = false;       // resolved: true if fail-fast
+    string flexFilterCallerMode = "tag-aware"; // tag-aware|legacy
+    string cellFilterMitochondrialGenes;        // Exact reference feature IDs; '-' disables MT scoring
+    uint32_t cellFilterBootstrapThreads = 0;    // 0 uses STAR's declared thread budget
 
-    // Expected cells configuration (one of these required when runFlexFilter=true)
+    // Expected cells configuration (required by the legacy Flex caller only)
     uint32_t flexFilterTotalExpected = 0;        // Total expected cells across all tags (deprecated, use below)
     uint32_t flexFilterExpectedCellsTotal = 0;   // --soloFlexExpectedCellsTotal: total cells across ALL tags
     uint32_t flexFilterExpectedCellsPerTag = 0;  // --soloFlexExpectedCellsPerTag: cells PER tag (multiplied by numTags)
