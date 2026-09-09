@@ -19,7 +19,7 @@ struct SimpleEmptyDropsResult {
     vector<uint32> passingIndices;      // Cell indices that pass simple filter
     vector<uint32> candidateIndices;    // Candidate cell indices for EmptyDrops
     vector<uint32> ambientIndices;      // Ambient cell indices (for ambient profile)
-    uint32 retainThreshold;             // UMI threshold for simple filtering
+    uint32 retainThreshold;             // Last retained UMI; passingIndices resolves boundary ties
     uint32 nCellsSimple;                // Number of cells passing simple filter
     uint32 minUMI;                      // Inclusive minimum UMI for candidates
     uint32 medianVal;                   // Median UMI value
@@ -36,7 +36,7 @@ struct SimpleEmptyDropsParams {
     uint32 nExpectedCells = 0;      // Expected number of cells (default: 3000)
     double maxPercentile = 0.0;      // Max percentile for robust max (default: 0.99)
     double maxMinRatio = 0.0;         // Max/min ratio (default: 10.0)
-    uint32 umiMin = 0;              // Inclusive minimum UMI threshold (default: 500)
+    uint32 umiMin = 0;              // Inclusive primary floor and base candidate floor (default: 500)
     double umiMinFracMedian = 0.0;   // Min UMI as fraction of median (default: 0.01)
     uint32 candMaxN = 0;            // Maximum candidates (default: 20000)
     uint32 indMin = 0;              // Min index for ambient cells (default: 45000)
@@ -55,10 +55,19 @@ struct SimpleEmptyDropsParams {
     
     uint32 bootstrapSeed = 0;        // Seed for bootstrap RNG (0 = use default seeds 1,2,3...)
     uint32 maxThreads = 0;           // Max threads for bootstrap (0 = auto: hardware_concurrency or OMP_NUM_THREADS)
+
 };
 
 // Type alias for backwards compatibility
 using OrdMagParams = SimpleEmptyDropsParams;
+
+// Optional diagnostics; recording these values does not alter sampling.
+struct OrdMagBootstrapTrace {
+    uint32 recoveredCells = 0;
+    uint32 bootstrapThreads = 0;
+    double meanRetained = 0.0;
+    double sdRetained = 0.0;
+};
 
 // Main class for Simple EmptyDrops (knee/rank) filtering
 // Formerly known as OrdMag - renamed for clarity
@@ -76,12 +85,28 @@ public:
         const SimpleEmptyDropsParams& params
     );
     
-    // Run Cell Ranger-style filtering with bootstrap (matches Python filter_cellular_barcodes_ordmag)
-    // This is the full CR algorithm with bootstrap sampling for robustness
+    // Run Cell Ranger-style filtering with bootstrap. Retain the rounded
+    // bootstrap count. The matrix-aware overload resolves ties by quality.
     static SimpleEmptyDropsResult runCRSimpleFilterBootstrap(
         const vector<uint32>& nUMIperCB,
         uint32 nCB,
         SimpleEmptyDropsParams& params  // Non-const: may update nExpectedCells if estimated
+    );
+
+    // Matrix-aware overload. Metadata must be empty or have nCB entries in
+    // the same order as nUMIperCB. Full barcode identities make equal-quality
+    // ties independent of input order. The count-only overload retains an
+    // input-index fallback when these keys are unavailable. Ranking is total
+    // UMIs, optional non-MT UMIs, detected genes, then full barcode identity.
+    // With MT scores supplied, detectedGenes should also exclude MT features.
+    static SimpleEmptyDropsResult runCRSimpleFilterBootstrap(
+        const vector<uint32>& nUMIperCB,
+        uint32 nCB,
+        SimpleEmptyDropsParams& params,
+        const vector<uint32>& detectedGenes,
+        const vector<string>& barcodeIds,
+        const vector<uint64_t>& nonMitoUMIs = vector<uint64_t>(),
+        OrdMagBootstrapTrace* trace = nullptr
     );
     
     // Find number of cells within order of magnitude of baseline (matches Python find_within_ordmag)

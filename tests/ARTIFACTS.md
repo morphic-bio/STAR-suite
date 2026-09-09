@@ -1020,3 +1020,43 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   binary/cache hashes, and logs.
 - Status: untracked. The fixture was executed once; do not rerun it without new
   authorization and do not commit FASTQs, cache binaries, MEX files, or logs.
+
+## Full 320K STAR deprecated-feature integration (2026-09-09)
+
+- Main source and tested executable updated. Report:
+  `docs/HANDOFF_FULL320K_STAR_DEPRECATED_20260909.md`; invocation:
+  `docs/FLEX_MODEL_FEATURES.md`.
+- Local source snapshot, implementation patch, build/tests, binary backup,
+  verified results, and per-sample comparisons:
+  `/mnt/pikachu/star_suite_paper/analysis/full320k_star_deprecated_20260909/`.
+- One full CBQ and one full BGZF cloud execution, serialized at 48 threads,
+  100K simulations, diagnostics on, no genome-index load, BAM or decision
+  sidecar. Each processes 7,303,142,230 pairs; times 1,217.150 / 1,452.071 s,
+  peak RSS 138.852 / 139.944 GiB. Raw coordinates and all callsets are exact
+  between formats.
+- STAR independently quantifies 542 deprecated features from reads, using
+  623 added public-panel probe parents. Model/export features: 19,068 / 18,129.
+  No CR counts enter the model. The original active counts lose only 639
+  UMIs over 628 coordinates out of 1,283,927,962 prior active UMIs.
+- All eight samples improve against the matched 100K active-only control.
+  Pooled Jaccard 0.954180 → 0.973961; lymph 0.862962 → 0.957777. CR misses
+  7,813 → 331; CR-absent calls 7,438 → 8,360. Pooled cell/gene UMI Pearson:
+  0.999980266 / 0.999999663.
+- Occupancy lambda 2.356086655, cutoff 8; 4,520 removals, zero CR matches.
+  Minimum included-export UMIs 114; zero exports below 100. Shared caller
+  tests and actual CBQ/BGZF fixtures cover unused deprecated-only low-count
+  tags and preserve the primary-floor regression fix.
+- Cloud root: `/scratch/full320k_star_deprecated_20260909_v1` on
+  `i-06de289faa5d78117`. Durable S3 prefix:
+  `s3://star-suite-320k-benchmark-alt-171440768238-us-west-2-20260904/analysis-tools/full320k_star_deprecated_20260909_v1/`.
+  Ten binary matrix caches and the compressed probe cache have separate
+  SHA-256 archive manifests.
+- Benchmark SSM `5cf319cb-dbc2-4d46-a32c-f98109756865`; analysis SSM
+  `60cbe7f6-ff96-4a91-a499-cae99bfd19c6`; archive SSM
+  `3930a434-dde1-454e-b5e3-264c1692468c`: all Success/exit 0.
+  Compact archive SHA-256:
+  `16c612747689b44ebad11d46eb3e4a7da98bd356a63b95d58651c38a25141a8f`.
+  Installed STAR SHA-256:
+  `1b7fc3f961fbccae2ef3b84e67bdaec9c20b487b1d162974a764d7657bc622ec`.
+- Existing unrelated edits preserved; no successful dataset/caller execution
+  repeated, no commit/merge and no Cell Ranger source inspection.

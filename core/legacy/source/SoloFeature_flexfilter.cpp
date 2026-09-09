@@ -239,6 +239,8 @@ void SoloFeature::runFlexFilterInline(
     mem.sampleTags = sampleTags;
 
     FlexFilter::Config config;
+    config.tagAwareCaller = pSolo.flexFilterCallerMode == "tag-aware";
+    config.mitochondrialGenesPath = pSolo.cellFilterMitochondrialGenes;
     config.totalThreads = static_cast<uint32_t>(std::max(1, P.runThreadN));
     // Handle per-tag mode: multiply by number of tags
     if (pSolo.flexFilterExpectedPerTagMode) {
@@ -252,12 +254,12 @@ void SoloFeature::runFlexFilterInline(
     if (pSolo.flexFilterEdNiters > 0) {
         config.emptydropsParams.simN = pSolo.flexFilterEdNiters;
     } else {
-        config.emptydropsParams.simN = 10000;
+        config.emptydropsParams.simN = config.tagAwareCaller ? 100000 : 10000;
     }
     if (pSolo.flexFilterEdFdrThreshold > 0.0) {
         config.emptydropsParams.FDR = pSolo.flexFilterEdFdrThreshold;
     } else {
-        config.emptydropsParams.FDR = 0.001;
+        config.emptydropsParams.FDR = config.tagAwareCaller ? 0.01 : 0.001;
     }
     // Simple EmptyDrops parameters (formerly OrdMag)
     if (pSolo.flexFilterOrdmagNsamples > 0) {
@@ -309,7 +311,17 @@ void SoloFeature::runFlexFilterInline(
     config.enableInvariantChecks = pSolo.flexFilterInvariantChecks;
     
     // Output options
-    config.keepCBTag = pSolo.flexFilterKeepCBTag;
+    config.keepCBTag = config.tagAwareCaller || pSolo.flexFilterKeepCBTag;
+    if (config.tagAwareCaller) {
+        config.simpleEmptyDropsParams.maxThreads = pSolo.cellFilterBootstrapThreads > 0
+            ? pSolo.cellFilterBootstrapThreads : config.totalThreads;
+        config.emptydropsParams.mcThreads = std::min<uint32_t>(8, config.totalThreads);
+        P.inOut->logMain << "Flex cell caller: tag-aware, grouped sample labels, full CB16+TAG8; "
+            << "bootstrapThreads=" << config.simpleEmptyDropsParams.maxThreads
+            << " mcThreads=" << config.emptydropsParams.mcThreads
+            << " simulations=" << config.emptydropsParams.simN
+            << " FDR=" << config.emptydropsParams.FDR << "\n";
+    }
 
     createDirectory(outputPrefix, P.runDirPerm, "FlexFilter output directory", P);
 
@@ -331,10 +343,10 @@ void SoloFeature::runFlexFilterInline(
     }
 
     P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Flexfilter pipeline complete" << endl;
-    P.inOut->logMain << "  Processed " << outputs.tagResults.size() << " tags" << endl;
+    P.inOut->logMain << "  Processed " << outputs.tagResults.size() << " sample groups" << endl;
 
     std::cout << "FlexFilter completed successfully\n";
-    std::cout << "  Processed " << outputs.tagResults.size() << " tags\n";
+    std::cout << "  Processed " << outputs.tagResults.size() << " sample groups\n";
     std::cout << "Writing per-sample MEX outputs...\n";
 
     std::unordered_map<std::string, uint32_t> barcodeToIdx;
@@ -354,6 +366,32 @@ void SoloFeature::runFlexFilterInline(
     };
 
     std::vector<MexWriter::Feature> mexFeatures = makeMexFeatures(inlineMatrix.matrixData.features);
+    std::vector<int32_t> exportGeneIndex(mexFeatures.size());
+    std::iota(exportGeneIndex.begin(), exportGeneIndex.end(), 0);
+    if (!pSolo.flexFilteredGeneList.empty() && pSolo.flexFilteredGeneList != "-") {
+        std::ifstream allowFile(pSolo.flexFilteredGeneList);
+        if (!allowFile) exitWithError("Cannot open --soloFlexFilteredGeneList\n", std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        std::unordered_set<std::string> allowed;
+        std::string gene;
+        while (std::getline(allowFile, gene)) {
+            trim(gene);
+            if (!gene.empty() && gene[0] != '#') allowed.insert(gene);
+        }
+        std::vector<MexWriter::Feature> selected;
+        std::fill(exportGeneIndex.begin(), exportGeneIndex.end(), -1);
+        for (size_t i = 0; i < mexFeatures.size(); ++i) {
+            if (allowed.erase(inlineMatrix.matrixData.features[i])) {
+                exportGeneIndex[i] = selected.size();
+                selected.push_back(mexFeatures[i]);
+            }
+        }
+        if (selected.empty() || !allowed.empty())
+            exitWithError("Empty or unmatched gene IDs in --soloFlexFilteredGeneList\n", std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        mexFeatures.swap(selected);
+        P.inOut->logMain << "Flex feature universes: calling=" << exportGeneIndex.size()
+            << " filteredExport=" << mexFeatures.size() << "\n";
+    }
+
     std::string summaryPath = outputPrefix;
     if (!summaryPath.empty() && summaryPath.back() != '/') {
         summaryPath += '/';
@@ -467,7 +505,8 @@ void SoloFeature::runFlexFilterInline(
                     uint32_t count = inlineMatrix.matrixData.countCellGeneUMI[ptr + 1];
                     if (count == 0)
                         continue;
-                    filteredTriplets.push_back({newIdx, geneIdx, count});
+                    if (exportGeneIndex[geneIdx] < 0) continue;
+                    filteredTriplets.push_back({newIdx, static_cast<uint32_t>(exportGeneIndex[geneIdx]), count});
                 }
             }
 

@@ -68,6 +68,8 @@ public:
     };
     
     struct Config {
+        bool tagAwareCaller = false;  // Explicit compatibility choice for library callers
+        std::string mitochondrialGenesPath;
         SimpleEmptyDropsParams simpleEmptyDropsParams;  // Simple EmptyDrops (formerly OrdMag) - disabled by default
         EmptyDropsParams emptydropsParams;
         // Occupancy post-filter parameters
@@ -145,6 +147,11 @@ private:
         Outputs* outputs,
         const Config& config);
     
+    int runTagAware(const SampleMatrixData& matrixData,
+        const std::vector<std::string>& sampleLabels,
+        const std::vector<std::string>& sampleTags,
+        Outputs* outputs, const Config& config);
+
     // Helper: Compute per-tag expected cells allocation
     // If tagExpectedCells override provided, use that; otherwise compute from matrix
     std::map<std::string, uint32_t> computeTagAllocations(
