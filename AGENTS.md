@@ -210,9 +210,15 @@ actionable; link to deeper docs rather than copying them.
 
 - Non-Flex libscrna path uses CR9-style bootstrapped `recovered_cells`
   estimation (100 samples) instead of hardcoded `nExpectedCells=3000`.
-- Flex path keeps fixed `nExpectedCells=3000` (CR 7.1 defaults).
-- EmptyDrops MC simulations: 100K for non-Flex, 10K for Flex.
-- BH FDR correction enabled for non-Flex; raw p-value for Flex.
+- Flex legacy path keeps fixed `nExpectedCells=3000` (CR 7.1 defaults).
+- EmptyDrops MC simulations: 100K for non-Flex and tag-aware Flex, 10K for
+  legacy Flex. Explicit simulation settings override these defaults.
+- BH FDR correction enabled for non-Flex and tag-aware Flex; raw p-value for
+  legacy Flex.
+- Tag-aware Flex uses grouped sample barcodes, bootstrapped recovered-cell
+  estimation, a fixed ambient window, the 500-UMI floor, and observed-tag
+  occupancy. Use all probe features for modeling and an included-gene
+  allowlist for filtered export; see `docs/FLEX_MODEL_FEATURES.md`.
 - Validated: UCSF iPSC2 full sample Jaccard 0.99, gene Pearson 0.997.
 
 ## MCP Server (Agent Tooling)

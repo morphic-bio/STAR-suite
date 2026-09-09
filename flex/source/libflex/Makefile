@@ -21,6 +21,7 @@ LIBSCRNA_INC := $(ROOT_DIR)/core/features/libscrna/include
 #       Only Flex-specific orchestration code remains here.
 LIBFLEX_OBJECTS = \
 	FlexFilter.o \
+	FlexFilterTagAware.o \
 	FlexFilterAdapters.o \
 	FlexFilterIO.o
 
@@ -46,3 +47,5 @@ clean:
 	rm -f $(LIBFLEX_OBJECTS) libflex.a
 
 .PHONY: clean all
+
+FlexFilter.o FlexFilterTagAware.o FlexFilterAdapters.o: FlexFilter.h
