@@ -1603,3 +1603,12 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
 - OCM materialization: `kernel_gates/ocm_native_*` and `ocm_large`; the larger fixture uses unchanged real A375 counts with explicitly synthetic OCM tag suffixes, not biological OCM assignments.
 - Full input/reference provenance, frozen binaries and build logs remain under the same evidence root. Failed comparisons are retained alongside corrected source executions. Read each wrapper's completion record and the final acceptance report; a zero process exit alone did not detect the original nonfatal PF pre-MEX failure.
 - No Cell Ranger source was read. No cloud resources or release artifacts were created for this runbook.
+
+## OCM direct count routing (2026-09-10)
+
+- Report: [OCM direct-count results](../docs/benchmarks/OCM_DIRECT_COUNTS_20260910.md).
+- Evidence: `/mnt/pikachu/star_suite_paper/analysis/ocm_direct_counts_20260910`.
+- `bin/` holds frozen final STAR/OCM harnesses; `regression_accepted/` holds exact-output and malformed-input gates; `STORE_COMPLETE.json` records the ASan/UBSan count-store test.
+- `native_accepted`, `native_default_accepted`, `existing_accepted`, and `existing_control` retain native/materialization outputs, commands, binary hashes and wall/CPU/RSS/I/O measurements. `ACCEPTED_LARGE_RESULTS.json` is the final comparison record.
+- The large input reuses real A375 counts and explicitly synthetic OCM sample suffixes from the prior cross-module fixture. The existing-call arm uses the prior caller's 1,188 global calls. See `large_inventory.json` and `existing_inventory.json`.
+- No reference index, alignment, BAM, sidecar, cloud job or new release was needed. Reuse saved controls; the regression runner accepts `--saved-native`, `--saved-existing`, and `--saved-ordered`.
