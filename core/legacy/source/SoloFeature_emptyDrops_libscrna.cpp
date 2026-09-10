@@ -113,7 +113,7 @@ void SoloFeature::emptyDrops_libscrna()
     config->sim_n = 100000; // match CR9: 100K MC simulations for better p-value resolution
     config->use_fdr_gate = 1;
     config->apply_bh_correction = 1; // scRNA-seq: proper BH-corrected FDR (matches CR9)
-    config->mc_threads = 0;
+    config->mc_threads = static_cast<uint32_t>(std::max(1, P.runThreadN));
     config->disable_occupancy_filter = 1;
 
     if (bootstrapEnabled) {
@@ -131,6 +131,7 @@ void SoloFeature::emptyDrops_libscrna()
                      << " candMaxN=" << config->cand_max_n
                      << " FDR=" << config->fdr
                      << " simN=" << config->sim_n
+                     << " mcThreads=" << config->mc_threads
                      << " bootstrap=" << (config->use_bootstrap ? "yes" : "no")
                      << " legacyKnee=" << (pSolo.emptyDropsLegacyKnee ? "yes" : "no")
                      << " mode=" << (forceUnionMode ? "union" : "auto") << "\n";
