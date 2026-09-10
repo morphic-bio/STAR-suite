@@ -49,3 +49,4 @@ clean:
 .PHONY: clean all
 
 FlexFilter.o FlexFilterTagAware.o FlexFilterAdapters.o: FlexFilter.h
+FlexFilterTagAware.o: $(LIBSCRNA_INC)/ParallelTasks.h $(LIBSCRNA_INC)/ThreadPermits.h $(LIBSCRNA_INC)/SimpleEDCaller.h

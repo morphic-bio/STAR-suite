@@ -69,6 +69,7 @@ public:
     
     struct Config {
         bool tagAwareCaller = false;  // Explicit compatibility choice for library callers
+        bool useThreadPermits = true; // Share released workers across tag-aware sample groups
         std::string mitochondrialGenesPath;
         SimpleEmptyDropsParams simpleEmptyDropsParams;  // Simple EmptyDrops (formerly OrdMag) - disabled by default
         EmptyDropsParams emptydropsParams;
