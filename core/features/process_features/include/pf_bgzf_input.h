@@ -37,6 +37,14 @@ pf_bgzf_input *pf_bgzf_open(const char *const *paths, int streams,
 int pf_bgzf_next(pf_bgzf_input *input, pf_bgzf_record *records,
                  char *error, size_t error_size);
 void pf_bgzf_close(pf_bgzf_input *input);
+typedef int (*pf_bgzf_batch_consumer)(void *, unsigned, const pf_bgzf_record *, size_t, int);
+/* Bounded leased batches, shared assignment workers, stable lane-local ordinals.
+ * Callback owns a worker ID exclusively and must return held permits before it
+ * returns. No view survives the callback. max_reads applies per lane. */
+int pf_bgzf_process_batches(const char *const *paths, unsigned lanes, int streams,
+    unsigned workers, unsigned inflater_threads, int crc, uint64_t max_reads,
+    const pf_bgzf_permits *permits, pf_bgzf_batch_consumer consume, void *context,
+    char *error, size_t error_size);
 
 #ifdef __cplusplus
 }

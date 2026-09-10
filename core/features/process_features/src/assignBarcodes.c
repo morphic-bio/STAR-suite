@@ -5508,7 +5508,7 @@ struct pf_direct_consumer_state {
     unsigned int hot_check_counter;
 };
 
-static void pf_direct_consumer_flush_permit(pf_direct_consumer_state *state) {
+void pf_direct_consumer_flush_permit(pf_direct_consumer_state *state) {
     if (!state || !state->permit_hooks_enabled || state->permit_batch_count <= 0) {
         return;
     }
@@ -5612,21 +5612,29 @@ int pf_direct_consumer_process_record(pf_direct_consumer_state *state,
         return 1;
     }
 
+    const char *fields[6] = {barcode_sequence, barcode_quality, feature_sequence,
+                             feature_quality, feature_sequence2, feature_quality2};
+    size_t lengths[6];
+    for (int i = 0; i < 6; ++i) lengths[i] = fields[i] ? strlen(fields[i]) : 0;
+    return pf_direct_consumer_process_views(state, fields, lengths);
+}
+
+int pf_direct_consumer_process_views(pf_direct_consumer_state *state,
+                                     const char *const *fields, const size_t *lengths) {
+    if (!state || !fields || !lengths) return 0;
     uint64_t work_bytes = 0;
-    char *end;
-    end = stpcpy(state->barcode_lines[0], barcode_sequence);
-    work_bytes += (uint64_t)(end - state->barcode_lines[0]);
-    end = stpcpy(state->barcode_lines[1], barcode_quality);
-    work_bytes += (uint64_t)(end - state->barcode_lines[1]);
-    end = stpcpy(state->forward_lines[0], feature_sequence);
-    work_bytes += (uint64_t)(end - state->forward_lines[0]);
-    end = stpcpy(state->forward_lines[1], feature_quality);
-    work_bytes += (uint64_t)(end - state->forward_lines[1]);
-    if (state->reverse_lines) {
-        end = stpcpy(state->reverse_lines[0], feature_sequence2);
-        work_bytes += (uint64_t)(end - state->reverse_lines[0]);
-        end = stpcpy(state->reverse_lines[1], feature_quality2);
-        work_bytes += (uint64_t)(end - state->reverse_lines[1]);
+    for (int i = 0; i < 2 * state->nreaders; ++i) {
+        size_t length = lengths[i];
+        if (!fields[i] && !(i & 1)) return 0;
+        if (!fields[i] && length) return 0;
+        if (!fields[i]) length = lengths[i-1];
+        int newline = fields[i] && length && fields[i][length-1] == '\n';
+        if (length + (newline ? 1 : 2) > LINE_LENGTH) return 0;
+        if (fields[i]) memcpy(state->lines[i], fields[i], length);
+        else memset(state->lines[i], 'I', length);
+        if (!newline) state->lines[i][length++] = '\n';
+        state->lines[i][length] = '\0';
+        work_bytes += length;
     }
 
     const sample_args *sample_args = state->sample_args;
@@ -6484,6 +6492,24 @@ void merge_process_feature_thread_data(data_structures *dst_hashes,
     merge_queues(dst_hashes->neighbors_queue, src_hashes->neighbors_queue);
 }
 
+static int pf_bgzf_assign_batch(void *opaque, unsigned worker,
+                                const pf_bgzf_record *records, size_t count, int streams) {
+    pf_direct_consumer_state *state = ((pf_direct_consumer_state **)opaque)[worker];
+    int ok = 1;
+    for (size_t n = 0; n < count && ok; ++n) {
+        const char *fields[6] = {0};
+        size_t lengths[6] = {0};
+        for (int i = 0; i < streams; ++i) {
+            const pf_bgzf_record *record = &records[n * streams + i];
+            fields[2*i] = record->sequence; fields[2*i+1] = record->quality;
+            lengths[2*i] = record->sequence_length; lengths[2*i+1] = record->quality_length;
+        }
+        ok = pf_direct_consumer_process_views(state, fields, lengths);
+    }
+    pf_direct_consumer_flush_permit(state);
+    return ok;
+}
+
 void process_files_in_sample(sample_args *args) {
     //allocate buffers here
     //number of lines to read into the buffer
@@ -6607,6 +6633,34 @@ void process_files_in_sample(sample_args *args) {
         pthread_mutex_init(&processor_args[i].process_mutex, NULL);
     }
 
+    int input_error = 0;
+    const int direct = native_count == sample_size && fastq_files->forward_fastq &&
+        !fastq_files->reverse_fastq && !args->legacy_cb_rescue &&
+        feature_mode_bootstrap_reads == 0 && !args->chem_detect && !args->probe_only;
+    if (direct) {
+        pf_direct_consumer_state *states[nconsumers];
+        memset(states, 0, sizeof(states));
+        for (int i = 0; i < nconsumers; ++i) {
+            states[i] = pf_direct_consumer_state_create(&processor_args[i], 2);
+            if (!states[i]) input_error = 1;
+        }
+        if (!input_error) {
+            const char *paths[2*sample_size];
+            for (int i = 0; i < sample_size; ++i) {
+                paths[2*i] = fastq_files->barcode_fastq[sample_offset+i];
+                paths[2*i+1] = fastq_files->forward_fastq[sample_offset+i];
+            }
+            pf_bgzf_permits permits = {args->permit_hook_ctx, args->permit_acquire_hook, args->permit_release_hook};
+            char error[1024] = "";
+            input_error = !pf_bgzf_process_batches(paths, sample_size, 2, nconsumers,
+                args->bgzf_threads, args->bgzf_crc_check, max_reads > 0 ? max_reads : 0,
+                args->permit_hooks_enabled ? &permits : NULL, pf_bgzf_assign_batch,
+                states, error, sizeof(error));
+            if (input_error) fprintf(stderr, "[pf-bgzf] direct input error: %s\n", error);
+        }
+        for (int i = 0; i < nconsumers; ++i) pf_direct_consumer_state_destroy(states[i]);
+    } else {
+        fprintf(stderr, "[pf-bgzf] handoff=ring reason=mixed input, read layout or order-sensitive mode\n");
     pthread_t *producer_threads = malloc(sample_size * sizeof(pthread_t));
     for (int i = 0; i < sample_size; ++i) {
         if (pthread_create(&producer_threads[i],
@@ -6633,8 +6687,8 @@ void process_files_in_sample(sample_args *args) {
     for (int j=0; j<nconsumers; j++){
         pthread_join(consumer_threads[j], NULL);
     }
-    int input_error = 0;
     for (int i = 0; i < sample_size; ++i) input_error |= reader_sets[i]->input_error;
+    }
     if (input_error && args->error_out) *args->error_out = 1;
     // Merge data from all threads into the first thread's data structures
     for (int i = 1; i < nconsumers; i++) {

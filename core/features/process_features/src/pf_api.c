@@ -2504,52 +2504,14 @@ pf_error pf_direct_range_process_record_views(pf_direct_range_job *job,
             return PF_ERR_INVALID_ARG;
         }
 
-        char barcode_sequence[LINE_LENGTH];
-        char barcode_quality[LINE_LENGTH];
-        char feature_sequence[LINE_LENGTH];
-        char feature_quality[LINE_LENGTH];
-        char feature_sequence2[LINE_LENGTH];
-        char feature_quality2[LINE_LENGTH];
-        feature_sequence2[0] = '\0';
-        feature_quality2[0] = '\0';
-
-        if (!pf_copy_record_view_line(ctx, barcode_sequence,
-                                      records[i].barcode_sequence,
-                                      "barcode_sequence", 1)) {
-            job->failed = 1;
-            return PF_ERR_INVALID_ARG;
-        }
-        pf_copy_quality_or_default(barcode_quality,
-                                   records[i].barcode_quality,
-                                   records[i].barcode_sequence.length);
-        if (!pf_copy_record_view_line(ctx, feature_sequence,
-                                      records[i].feature_sequence,
-                                      "feature_sequence", 1)) {
-            job->failed = 1;
-            return PF_ERR_INVALID_ARG;
-        }
-        pf_copy_quality_or_default(feature_quality,
-                                   records[i].feature_quality,
-                                   records[i].feature_sequence.length);
-        if (job->nreaders == 3) {
-            if (!pf_copy_record_view_line(ctx, feature_sequence2,
-                                          records[i].feature_sequence2,
-                                          "feature_sequence2", 1)) {
-                job->failed = 1;
-                return PF_ERR_INVALID_ARG;
-            }
-            pf_copy_quality_or_default(feature_quality2,
-                                       records[i].feature_quality2,
-                                       records[i].feature_sequence2.length);
-        }
-
-        if (!pf_direct_consumer_process_record(job->consumer_states[worker_id],
-                                               barcode_sequence,
-                                               barcode_quality,
-                                               feature_sequence,
-                                               feature_quality,
-                                               feature_sequence2,
-                                               feature_quality2)) {
+        const pf_read_record_view *record = &records[i];
+        const char *fields[6] = {record->barcode_sequence.data, record->barcode_quality.data,
+            record->feature_sequence.data, record->feature_quality.data,
+            record->feature_sequence2.data, record->feature_quality2.data};
+        const size_t lengths[6] = {record->barcode_sequence.length, record->barcode_quality.length,
+            record->feature_sequence.length, record->feature_quality.length,
+            record->feature_sequence2.length, record->feature_quality2.length};
+        if (!pf_direct_consumer_process_views(job->consumer_states[worker_id], fields, lengths)) {
             snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                      "Direct range process_features worker %d failed", worker_id);
             job->failed = 1;
@@ -2557,6 +2519,7 @@ pf_error pf_direct_range_process_record_views(pf_direct_range_job *job,
         }
     }
 
+    pf_direct_consumer_flush_permit(job->consumer_states[worker_id]);
     return PF_OK;
 }
 

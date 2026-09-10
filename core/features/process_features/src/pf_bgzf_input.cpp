@@ -121,3 +121,133 @@ extern "C" int pf_bgzf_next(pf_bgzf_input *input, pf_bgzf_record *out,
 }
 
 extern "C" void pf_bgzf_close(pf_bgzf_input *input) { delete input; }
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <deque>
+#include <stdexcept>
+
+extern "C" int pf_bgzf_process_batches(const char *const *paths, unsigned lanes, int streams,
+    unsigned workers, unsigned inflater_threads, int crc, uint64_t max_reads,
+    const pf_bgzf_permits *permits, pf_bgzf_batch_consumer consume, void *context,
+    char *error, size_t error_size) {
+    if (!paths || !lanes || !workers || streams < 2 || streams > 3 || !consume) {
+        report(error, error_size, "invalid BGZF batch dispatch arguments"); return 0;
+    }
+    constexpr size_t batch_size = 512;
+    struct Batch {
+        std::vector<BgzfFastqRecord> owned;
+        std::array<BgzfBatchLease, 3> leases;
+        std::vector<pf_bgzf_record> views;
+        size_t count = 0;
+        explicit Batch(int streams) : owned(batch_size * streams), views(batch_size * streams) {}
+    };
+    std::mutex mutex;
+    std::condition_variable ready, space;
+    std::deque<std::unique_ptr<Batch>> free, queue;
+    std::vector<std::thread> producers, consumers;
+    std::atomic<bool> failed(false);
+    unsigned remaining = lanes;
+    size_t peak = 0;
+    uint64_t records = 0, decode_ns = 0;
+    std::string message;
+    auto fail = [&](const std::string& msg) {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (!failed.exchange(true)) message = msg;
+        ready.notify_all(); space.notify_all();
+    };
+    try {
+        for (size_t i = 0; i < workers * 2 + lanes; ++i) free.emplace_back(new Batch(streams));
+        for (unsigned worker = 0; worker < workers; ++worker) consumers.emplace_back([&, worker] {
+            try {
+                while (true) {
+                    std::unique_ptr<Batch> batch;
+                    {
+                        std::unique_lock<std::mutex> lock(mutex);
+                        ready.wait(lock, [&] { return failed || !queue.empty() || !remaining; });
+                        if (failed || queue.empty()) break;
+                        batch = std::move(queue.front()); queue.pop_front();
+                    }
+                    if (!consume(context, worker, batch->views.data(), batch->count, streams))
+                        throw std::runtime_error("PF direct batch consumer failed");
+                    {
+                        std::lock_guard<std::mutex> lock(mutex);
+                        free.push_back(std::move(batch));
+                    }
+                    space.notify_one();
+                }
+            } catch (const std::exception& e) { fail(e.what()); }
+              catch (...) { fail("unknown PF batch consumer exception"); }
+        });
+        for (unsigned lane = 0; lane < lanes; ++lane) producers.emplace_back([&, lane] {
+            try {
+                char local_error[1024] = "";
+                std::unique_ptr<pf_bgzf_input, decltype(&pf_bgzf_close)> input(
+                    pf_bgzf_open(paths + lane * streams, streams,
+                        inflater_threads / lanes + (lane < inflater_threads % lanes),
+                        crc, permits, local_error, sizeof(local_error)), pf_bgzf_close);
+                if (!input) throw std::runtime_error(local_error);
+                uint64_t count = 0, elapsed = 0;
+                bool end = false;
+                while (!failed && !end && (!max_reads || count < max_reads)) {
+                    std::unique_ptr<Batch> batch;
+                    {
+                        std::unique_lock<std::mutex> lock(mutex);
+                        space.wait(lock, [&] { return failed || !free.empty(); });
+                        if (failed) break;
+                        batch = std::move(free.front()); free.pop_front();
+                    }
+                    for (auto& lease : batch->leases) lease.clear();
+                    batch->count = 0;
+                    auto start = std::chrono::steady_clock::now();
+                    while (!failed && batch->count < batch_size && (!max_reads || count < max_reads)) {
+                        const size_t offset = batch->count * streams;
+                        int present = 0;
+                        for (int i = 0; i < streams; ++i) {
+                            std::string err;
+                            if (input->readers[i].next(&batch->owned[offset+i], &err, &batch->leases[i])) ++present;
+                            else if (!err.empty()) throw std::runtime_error(err);
+                        }
+                        if (!present) { end = true; break; }
+                        if (present != streams) throw std::runtime_error("BGZF mate record counts differ");
+                        const auto& first = batch->owned[offset];
+                        const size_t name_length = normalized_length(first);
+                        for (int i = 0; i < streams; ++i) {
+                            const auto& rec = batch->owned[offset+i];
+                            if (rec.ordinal != first.ordinal || normalized_length(rec) != name_length ||
+                                std::memcmp(first.name_data(), rec.name_data(), name_length))
+                                throw std::runtime_error("BGZF mate names differ at record " + std::to_string(first.ordinal));
+                            batch->views[offset+i] = {rec.name_data(), rec.sequence_data(), rec.quality_data(),
+                                rec.nameLength, rec.sequenceLength, rec.qualityLength, rec.ordinal};
+                        }
+                        ++batch->count; ++count;
+                    }
+                    elapsed += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - start).count();
+                    {
+                        std::lock_guard<std::mutex> lock(mutex);
+                        if (batch->count) { queue.push_back(std::move(batch)); peak = std::max(peak, queue.size()); }
+                        else free.push_back(std::move(batch));
+                    }
+                    ready.notify_one();
+                }
+                std::lock_guard<std::mutex> lock(mutex);
+                records += count; decode_ns += elapsed;
+            } catch (const std::exception& e) { fail(e.what()); }
+              catch (...) { fail("unknown BGZF batch producer exception"); }
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                --remaining;
+            }
+            ready.notify_all();
+        });
+    } catch (const std::exception& e) { fail(e.what()); }
+      catch (...) { fail("BGZF dispatcher startup failed"); }
+    for (auto& thread : producers) thread.join();
+    for (auto& thread : consumers) thread.join();
+    report(error, error_size, message);
+    std::fprintf(stderr, "[pf-bgzf] handoff=direct records=%llu batch_records=%zu queue_peak_batches=%zu batch_capacity=%u decode_pair_seconds_sum=%.6f\n",
+        (unsigned long long)records, batch_size, peak, workers*2+lanes, double(decode_ns)/1e9);
+    return failed ? 0 : 1;
+}
