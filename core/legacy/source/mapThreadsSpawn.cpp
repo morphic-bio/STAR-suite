@@ -911,7 +911,10 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     std::string flexActivationReason;
     const bool flexPipelineActive =
         flexPipelineActivationGuard(P, &flexActivationReason, true);
-    const bool interfaceEnabled = (P.dynamicThreadInterface == 1);
+    // Native decompression and mapping share the requested compute budget even
+    // when dynamic retuning is disabled. Readers enable their hooks only after
+    // this pool has been initialized (including after a SLAM input reopen).
+    const bool interfaceEnabled = (P.dynamicThreadInterface == 1) || bool(P.bgzfPipes);
     const bool telemetryEnabled = (P.dynamicThreadTelemetry == 1);
     const bool variableThreadsEnabled = (P.variableThreads == 1);
     // Permit-pool budget. With chromapAtac concurrent the pool spans STAR's

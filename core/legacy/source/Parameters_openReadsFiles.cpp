@@ -417,9 +417,20 @@ void Parameters::openReadsFiles()
                        << "; no index or prescan)\n";
         return;
     }
+    // Fused FLEX owns its range readers; do not also start unused FIFO decoders.
+    const bool flexInput = pSolo.flexMode || lowerCopyLocal(pSolo.flexModeStr) == "yes";
+    // TranscriptVB learns fragment-length/error models online in mapping
+    // workers. Different reader scheduling changes those model inputs. Keep
+    // its established ingestion path until ordered model learning is available.
+    const bool orderedVb = quant.transcriptVB.yes ||
+        std::find(quant.mode.begin(), quant.mode.end(), "TranscriptVB") != quant.mode.end();
+    if (orderedVb && readFilesBgzfMode == "range")
+        exitWithError("Native BGZF range is not supported with TranscriptVB online model learning. Use --readFilesBgzfMode auto/off, or finalize saved equivalence classes.\n", std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    if (orderedVb && readFilesBgzfMode == "auto")
+        inOut->logMain << "BGZF raw input: fallback to established reader (TranscriptVB online model learning is order-sensitive)\n";
     vector<vector<bool>> bgzfNative(readFilesNames.size());
     bool anyNative = false;
-    if (readFilesTypeN == 1 && readFilesBgzfMode != "off" && readFilesUseInternalGzip && !readFilesLegacyZcat) {
+    if (!flexInput && !orderedVb && readFilesTypeN == 1 && readFilesBgzfMode != "off" && readFilesUseInternalGzip && !readFilesLegacyZcat) {
         for (size_t mate = 0; mate < readFilesNames.size(); ++mate) {
             for (const auto& path : readFilesNames[mate]) {
                 star::input::BgzfDetection detection;
@@ -435,11 +446,11 @@ void Parameters::openReadsFiles()
             }
         }
     }
-    if (readFilesBgzfMode == "range" && !anyNative)
+    if (!flexInput && readFilesBgzfMode == "range" && !anyNative)
         exitWithError("Forced BGZF range requires internal BGZF input; remove an explicit read command or select auto/off.\n", std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     if (anyNative) {
         star::input::BgzfWorkPermitHooks hooks;
-        if (dynamicThreadInterface == 1) {
+        {
             hooks.acquire = [](void*) -> uint64_t {
                 return g_threadChunks.mapPermitEnabled() ? g_threadChunks.mapPermitAcquire() : UINT64_MAX;
             };
@@ -642,6 +653,7 @@ void Parameters::openReadsFiles()
                 const unsigned total = bgzfReaderThreads > 0 ? bgzfReaderThreads :
                     (dynamicThreadInterface == 1 ? runThreadN : std::max(0, runThreadN - int(readFilesNames.size())));
                 const unsigned workers = total / readFilesNames.size() + (imate < total % readFilesNames.size());
+                inOut->logMain << "BGZF raw input mate=" << imate + 1 << " inflater_workers=" << workers << " compute_budget=" << runThreadN << "\n";
                 readFilesCommandPID[imate] = 0;
                 bgzfPipes->start(readFilesNames[imate], bgzfNative[imate], readFilesInTmp[imate], workers, bgzfCrcCheck != 0);
                 inOut->readIn[imate].open(readFilesInTmp[imate].c_str());

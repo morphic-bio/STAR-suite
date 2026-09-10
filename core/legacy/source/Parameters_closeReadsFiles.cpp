@@ -40,6 +40,7 @@ void Parameters::closeReadsFiles() {
 
     if (bgzfPipes) {
         bgzfPipes->join();
+        inOut->logMain << bgzfPipes->summary();
         const string error = bgzfPipes->error();
         bgzfPipes.reset();
         if (!error.empty()) exitWithError("BGZF input failed: " + error + "\n", std::cerr, inOut->logMain, EXIT_CODE_INPUT_FILES, *this);
