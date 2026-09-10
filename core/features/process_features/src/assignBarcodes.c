@@ -5622,12 +5622,16 @@ int pf_direct_consumer_process_record(pf_direct_consumer_state *state,
 int pf_direct_consumer_process_views(pf_direct_consumer_state *state,
                                      const char *const *fields, const size_t *lengths) {
     if (!state || !fields || !lengths) return 0;
+    if (state->sample_args->probe_only && state->chem_detect && state->chem_detect->done) return 1;
     uint64_t work_bytes = 0;
     for (int i = 0; i < 2 * state->nreaders; ++i) {
         size_t length = lengths[i];
         if (!fields[i] && !(i & 1)) return 0;
         if (!fields[i] && length) return 0;
         if (!fields[i]) length = lengths[i-1];
+        if (length >= LINE_LENGTH) return 0;
+        /* Default quality covers sequence bases, excluding its line ending. */
+        if (!fields[i] && length && fields[i-1][length-1] == '\n') --length;
         int newline = fields[i] && length && fields[i][length-1] == '\n';
         if (length + (newline ? 1 : 2) > LINE_LENGTH) return 0;
         if (fields[i]) memcpy(state->lines[i], fields[i], length);
