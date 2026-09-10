@@ -1,3 +1,19 @@
+star-suite (1.9.1-1) unstable; urgency=medium
+
+  * Extend native BGZF input to the established STAR parser and feature
+    assignment, with bounded shared thread permits and leased record batches.
+  * Reuse OrdMag results and sparse count storage in shared EmptyDrops calling;
+    schedule independent OCM samples within CPU and matrix admission budgets.
+  * Route OCM counts once, call samples without intermediate MEX reloads, and
+    spill bounded compact count records while preserving output contracts.
+  * Cache SLAM probability tables, reuse gene fits, and parallelize independent
+    fits in integrated analysis and standalone requantification.
+  * Expose opt-in component-parallel TranscriptVB with global convergence;
+    retain the established reader for order-sensitive online model learning.
+  * Report STAR Suite 1.9.1 from STAR --version; retain index compatibility.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Thu, 10 Sep 2026 21:15:11 +0000
+
 star-suite (1.9.0-1) unstable; urgency=medium
 
   * Add grouped sample-tag Flex calling with deterministic quality ranking,
