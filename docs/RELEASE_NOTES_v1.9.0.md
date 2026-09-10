@@ -16,7 +16,8 @@ compatibility remains `2.7.1a`. Existing indexes do not need rebuilding.
 
 - The tag-aware default groups tags belonging to the same sample into one
   model while retaining complete CB16+TAG8 cell identities. The legacy caller
-  remains selectable explicitly.
+  remains selectable explicitly. The CR-config recipe selects tag-aware mode
+  without injecting its former incompatible legacy expected-cell override.
 - Bootstrap OrdMag uses deterministic quality ordering for equal total UMIs:
   non-mitochondrial counts when an annotation mask is supplied, then detected
   genes, then full barcode identity. Tie-breaking itself needs no bootstrap.
