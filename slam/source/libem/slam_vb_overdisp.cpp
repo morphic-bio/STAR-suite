@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <limits>
+#include <vector>
 
 static inline double clamp_prob(double p) {
     const double eps = 1e-12;
@@ -71,17 +72,23 @@ VbOverdispResult SlamVbOverdispSolver::solve(const MismatchHistogram& gene_data)
     double prior_a = (prior_alpha_ > 0.0) ? prior_alpha_ : 1.0;
     double prior_b = (prior_beta_ > 0.0) ? prior_beta_ : 1.0;
 
+    struct ProbabilityBin { double count, oldLog, newLog; };
+    std::vector<ProbabilityBin> probabilities;
+    probabilities.reserve(gene_data.size());
+    for (const auto& entry : gene_data) {
+        const uint16_t n = slamKeyNT(entry.first), tc = slamKeyTC(entry.first);
+        probabilities.push_back({entry.second, log_beta_binom_pmf(n, tc, p_error_rate_, dispersion_phi_), log_beta_binom_pmf(n, tc, p_conversion_rate_, dispersion_phi_)});
+    }
+
     for (int iter = 0; iter < max_iters; ++iter) {
         double sum_gamma = 0.0;
         double ll = 0.0;
 
-        for (const auto& entry : gene_data) {
-            uint16_t n = slamKeyNT(entry.first);
-            uint16_t tc = slamKeyTC(entry.first);
-            double count = entry.second;
+        for (const auto& entry : probabilities) {
+            double count = entry.count;
 
-            double log_old = std::log(1.0 - pi) + log_beta_binom_pmf(n, tc, p_error_rate_, dispersion_phi_);
-            double log_new = std::log(pi) + log_beta_binom_pmf(n, tc, p_conversion_rate_, dispersion_phi_);
+            double log_old = std::log(1.0 - pi) + entry.oldLog;
+            double log_new = std::log(pi) + entry.newLog;
             double max_log = (log_old > log_new) ? log_old : log_new;
             double sum = std::exp(log_old - max_log) + std::exp(log_new - max_log);
             double gamma = std::exp(log_new - max_log) / sum;
@@ -115,12 +122,10 @@ VbOverdispResult SlamVbOverdispSolver::solve(const MismatchHistogram& gene_data)
 
     // Posterior mean for pi under Beta prior
     double sum_gamma = 0.0;
-    for (const auto& entry : gene_data) {
-        uint16_t n = slamKeyNT(entry.first);
-        uint16_t tc = slamKeyTC(entry.first);
-        double count = entry.second;
-        double log_old = std::log(1.0 - pi) + log_beta_binom_pmf(n, tc, p_error_rate_, dispersion_phi_);
-        double log_new = std::log(pi) + log_beta_binom_pmf(n, tc, p_conversion_rate_, dispersion_phi_);
+    for (const auto& entry : probabilities) {
+            double count = entry.count;
+        double log_old = std::log(1.0 - pi) + entry.oldLog;
+        double log_new = std::log(pi) + entry.newLog;
         double max_log = (log_old > log_new) ? log_old : log_new;
         double sum = std::exp(log_old - max_log) + std::exp(log_new - max_log);
         double gamma = std::exp(log_new - max_log) / sum;
