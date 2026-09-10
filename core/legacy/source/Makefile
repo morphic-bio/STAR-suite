@@ -271,8 +271,15 @@ OCM_UNIT_TEST_SRC := $(ROOT_DIR)/tests/test_ocm_multi_unit.cpp
 .PHONY: ocm-multi-unit-tests
 ocm-multi-unit-tests : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 ocm-multi-unit-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-ocm-multi-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(OCM_UNIT_TEST_SRC)
-	$(CXX) -o ocm_multi_unit_tests $(CXXFLAGS) $(OCM_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
+ocm-multi-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS) $(OCM_UNIT_TEST_SRC)
+	$(CXX) -o ocm_multi_unit_tests $(CXXFLAGS) $(OCM_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
+
+SLAM_FIT_TEST_SRC := $(ROOT_DIR)/tests/slam/test_slam_fit_reuse.cpp
+.PHONY: slam-fit-reuse-tests
+slam-fit-reuse-tests : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+slam-fit-reuse-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
+slam-fit-reuse-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS) $(SLAM_FIT_TEST_SRC)
+	$(CXX) -o slam_fit_reuse_tests $(CXXFLAGS) $(SLAM_FIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
 
 # Standalone sidecar gather parity harness. Links only the sidecar reader and
 # libem: no Genome, no suffix array, no STAR index. Demonstrates the gather half
