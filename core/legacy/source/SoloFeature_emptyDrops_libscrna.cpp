@@ -2,6 +2,7 @@
 #include "serviceFuns.cpp"
 #include "libscrna/OrdMagStage.h"
 #include "scrna_api.h"
+#include "ScrnaTrace.h"
 #include "MitochondrialRankMask.h"
 #include "OrdMagRank.h"
 #include "ErrorWarning.h"
@@ -149,8 +150,9 @@ void SoloFeature::emptyDrops_libscrna()
     }
     const uint32_t bootstrapThreads = pSolo.cellFilterBootstrapThreads > 0
         ? pSolo.cellFilterBootstrapThreads : static_cast<uint32_t>(std::max(1, P.runThreadN));
-    int rc = scrna_emptydrops_run_with_rank_options(&input, config,
-        mitochondrialMask.empty() ? nullptr : mitochondrialMask.data(), bootstrapThreads, &result);
+    ScrnaTrace trace;
+    int rc = scrnaEmptyDropsTrace(&input, config,
+        mitochondrialMask.empty() ? nullptr : mitochondrialMask.data(), bootstrapThreads, &result, &trace);
     if (rc != 0) {
         P.inOut->logMain << "emptyDrops_CR (libscrna) failed: " 
                          << (result.error_message ? result.error_message : "unknown error") << "\n";
@@ -196,63 +198,11 @@ void SoloFeature::emptyDrops_libscrna()
 
     // Emit branch-only audit files so libscrna can be compared against legacy on the same ranked cells.
     {
-        vector<pair<uint32_t, uint32_t>> umiIdx;
-        umiIdx.reserve(nCB);
-        for (uint32_t i = 0; i < nCB; i++) {
-            umiIdx.push_back({nUMIperCB[i], i});
-        }
-        stable_sort(umiIdx.begin(), umiIdx.end(), [&](const pair<uint32_t, uint32_t>& a, const pair<uint32_t, uint32_t>& b) {
-            if (a.first != b.first) return a.first > b.first;
-            return barcodes[a.second] < barcodes[b.second];
-        });
-
-        vector<uint32_t> retainIndices;
-        vector<uint32_t> retainUMI;
-        vector<uint32_t> retainGenes;
-        vector<string> retainBarcodes;
-        vector<uint64_t> retainNonMito;
-        vector<uint32_t> seenGenes(featuresNumber, UINT32_MAX);
-        retainIndices.reserve(nCB);
-        retainUMI.reserve(nCB);
-        vector<uint32_t> origToRetainRank(nCB, (uint32_t)-1);
-        for (uint32_t rank = 0; rank < nCB; rank++) {
-            retainIndices.push_back(umiIdx[rank].second);
-            retainUMI.push_back(umiIdx[rank].first);
-            const uint32_t cell = umiIdx[rank].second;
-            const uint32_t start = sparse_cell_index[cell];
-            const auto quality = ordMagCellQuality(sparse_gene_ids.data() + start,
-                sparse_counts.data() + start, n_genes_per_cell[cell], seenGenes, cell,
-                mitochondrialMask.empty() ? nullptr : mitochondrialMask.data());
-            retainGenes.push_back(quality.detectedGenes);
-            if (!mitochondrialMask.empty()) retainNonMito.push_back(quality.nonMitoUMIs);
-            retainBarcodes.push_back(barcodes[umiIdx[rank].second]);
-            origToRetainRank[umiIdx[rank].second] = rank;
-        }
-
-        SimpleEmptyDropsParams simpleParams;
-        simpleParams.maxThreads = bootstrapThreads;
-        simpleParams.nExpectedCells = config->n_expected_cells;
-        simpleParams.maxPercentile = config->max_percentile;
-        simpleParams.maxMinRatio = config->max_min_ratio;
-        simpleParams.umiMin = config->umi_min;
-        simpleParams.umiMinFracMedian = config->umi_min_frac_median;
-        simpleParams.candMaxN = config->cand_max_n;
-        simpleParams.indMin = config->ind_min;
-        simpleParams.indMax = config->ind_max;
-
-        SimpleEmptyDropsResult simpleResult;
-        if (config->use_bootstrap) {
-            simpleParams.useBootstrap = true;
-            simpleParams.nExpectedCells = 0;
-            simpleParams.maxExpectedCells = min(config->ind_min / 2, (uint32_t)262144);
-            if (simpleParams.maxExpectedCells < 1000) {
-                simpleParams.maxExpectedCells = 90000;
-            }
-            simpleResult = SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
-                retainUMI, retainIndices.size(), simpleParams, retainGenes, retainBarcodes, retainNonMito);
-        } else {
-            simpleResult = SimpleEmptyDropsStage::runCRSimpleFilter(retainUMI, retainIndices.size(), simpleParams);
-        }
+        const auto& retainIndices = trace.retainIndices;
+        const auto& simpleResult = trace.ordmag;
+        vector<uint32_t> origToRetainRank(nCB, UINT32_MAX);
+        for (size_t rank = 0; rank < retainIndices.size(); ++rank)
+            origToRetainRank[retainIndices[rank]] = rank;
 
         unordered_set<uint32_t> ambientOrigIndices;
         ambientOrigIndices.reserve(simpleResult.ambientIndices.size() * 2);
