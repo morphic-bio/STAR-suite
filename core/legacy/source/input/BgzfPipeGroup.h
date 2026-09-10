@@ -7,6 +7,8 @@
 #include <cstring>
 #include <fcntl.h>
 #include <stdexcept>
+#include <sstream>
+#include <chrono>
 #include <unistd.h>
 
 namespace star { namespace input {
@@ -18,6 +20,7 @@ class BgzfPipeGroup {
     std::string error_;
     std::atomic<bool> permitsEnabled_{false};
     BgzfWorkPermitHooks external_;
+    std::atomic<uint64_t> decodeWork_{0}, decodeBytes_{0}, decodeNs_{0}, permitWaitNs_{0};
     static uint64_t acquire(void *p) {
         auto *self = static_cast<BgzfPipeGroup*>(p);
         return self->permitsEnabled_.load() && self->external_.enabled()
@@ -25,6 +28,10 @@ class BgzfPipeGroup {
     }
     static void release(void *p, uint64_t wait, uint64_t units, uint64_t bytes, uint64_t ns) {
         auto *self = static_cast<BgzfPipeGroup*>(p);
+        self->decodeWork_.fetch_add(units, std::memory_order_relaxed);
+        self->decodeBytes_.fetch_add(bytes, std::memory_order_relaxed);
+        self->decodeNs_.fetch_add(ns, std::memory_order_relaxed);
+        if (wait != UINT64_MAX) self->permitWaitNs_.fetch_add(wait, std::memory_order_relaxed);
         if (wait != UINT64_MAX) self->external_.release(self->external_.context, wait, units, bytes, ns);
     }
     static bool writeAll(int fd, const char *p, size_t n) {
@@ -43,6 +50,14 @@ public:
     void enablePermits() { permitsEnabled_.store(true); }
     void join() { for (auto& thread : producers_) if (thread.joinable()) thread.join(); }
     std::string error() { std::lock_guard<std::mutex> lock(mutex_); return error_; }
+    std::string summary() const {
+        std::ostringstream out;
+        out << "BGZF raw input totals: decode_work=" << decodeWork_.load()
+            << " decode_bytes=" << decodeBytes_.load()
+            << " inflate_seconds_sum=" << decodeNs_.load() / 1e9
+            << " permit_wait_seconds_sum=" << permitWaitNs_.load() / 1e9 << "\n";
+        return out.str();
+    }
     void start(std::vector<std::string> paths, std::vector<bool> native,
                std::string fifo, unsigned threads, bool crc) {
         producers_.emplace_back([this, paths, native, fifo, threads, crc] {
