@@ -33,6 +33,22 @@ core/features/process_features/assignBarcodes \
   /path/to/fastq_dir
 ```
 
+## Native BGZF FASTQ input
+
+Standalone `assignBarcodes` accepts `--readFilesBgzfMode auto|off|range`,
+`--bgzfReaderThreads N`, and `--bgzfCrcCheck 0|1`. Embedded STAR feature
+assignment selects the same adapter with `--crAssignBgzfMode auto|off|range`.
+`auto` detects BGZF metadata; ordinary gzip and unsupported mixed layouts keep
+the established reader. `range` requires supported BGZF input and reports an
+error otherwise. No genome reference or BGZF index is needed by standalone PF.
+
+Compatible two-stream feature libraries use bounded leased batches and the
+common direct worker kernel. Chemistry detection, third-stream layouts and
+order-sensitive rescue keep the queued path. Continue using the normal shared
+budget (`--dynamicThreadInterface 1 --crAssignConsumerThreads -1
+--crAssignSearchThreads 1`) for concurrent GEX and feature assignment.
+See [cross-module measurements and limits](benchmarks/CROSS_MODULE_PERFORMANCE_20260910.md).
+
 ## Quick Usage (call_features from MEX)
 
 ```bash
