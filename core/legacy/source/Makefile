@@ -790,7 +790,7 @@ Depend.list: $(SOURCES) parametersDefault.xxd htslib $(CHROMAP_DEP_STAMP)
 	'rm' -f ./Depend.list
 	# parametersDefault.xxd is generated input, not a compilation unit.
 	# Ensure it exists before dep-scan and only scan real source files.
-	test -f parametersDefault.xxd || xxd -i parametersDefault > parametersDefault.xxd
+	test -f parametersDefault.xxd
 	$(CXX) $(CXXFLAGS_common) -MM $(SOURCES) >> Depend.list
 include Depend.list
 endif
@@ -806,8 +806,17 @@ htslib : htslib/libhts.a
 htslib/libhts.a :
 	$(MAKE) -C htslib lib-static
 
-parametersDefault.xxd: parametersDefault
-	xxd -i parametersDefault > parametersDefault.xxd
+# Source archives assign equal mtimes to inputs and tracked generated files.
+# Check content on every make invocation, but preserve the header mtime when
+# its bytes already match so dependency scanning and object builds stay cached.
+.PHONY: force-parameters-default-check
+force-parameters-default-check:
+
+parametersDefault.xxd: parametersDefault force-parameters-default-check
+	@set -eu; tmp=$$(mktemp parametersDefault.xxd.XXXXXX); \
+	trap 'rm -f "$$tmp"' EXIT HUP INT TERM; \
+	xxd -i parametersDefault > "$$tmp"; \
+	if ! cmp -s "$$tmp" "$@"; then chmod 644 "$$tmp"; mv -f "$$tmp" "$@"; fi
 
 # Ensure libflex is always rebuilt from scratch (clean first to remove stale objects)
 # NOTE: After migration to libscrna, libflex.a no longer contains EmptyDrops/OrdMag/Occupancy.
