@@ -1,3 +1,4 @@
+#include "input/BgzfPipeGroup.h"
 #include "ReadAlignChunk.h"
 #include "ThreadControl.h"
 #include "ErrorWarning.h"
@@ -1409,6 +1410,10 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
             };
         };
 
+        if (P.bgzfPipes) {
+            const string error = P.bgzfPipes->error();
+            if (!error.empty()) exitWithError("BGZF input failed: " + error + "\n", std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+        }
         const bool permitEnabled = g_threadChunks.mapPermitEnabled();
         uint64_t waitNs = 0;
         if (permitEnabled) {

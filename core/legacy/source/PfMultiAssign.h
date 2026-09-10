@@ -60,6 +60,9 @@ struct AssignOptions {
     int hashMinTotal = 3;
     int hashMinTop = 3;
     double hashMinRatio = 2.0;
+    string bgzfMode = "auto";
+    int bgzfThreads = 0;
+    int bgzfCrcCheck = 1;
     string cbqMode = "auto"; // auto | stream | range
     string sampleName;
     bool useSplitReadLayout = false;

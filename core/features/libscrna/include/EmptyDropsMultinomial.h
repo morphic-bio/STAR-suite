@@ -10,6 +10,7 @@
 #define H_EmptyDropsMultinomial
 
 #include "scrna_types.h"
+#include "SparseCountView.h"
 #include <vector>
 #include <string>
 
@@ -119,7 +120,8 @@ public:
         uint32 nTotalCells = 0,
         const string& debugOutputDir = string(),
         const string& tagName = string(),
-        bool enableInvariantChecks = false
+        bool enableInvariantChecks = false,
+        const SparseCountView* matrixView = nullptr
     );
     
     // Helper: compute log factorial table

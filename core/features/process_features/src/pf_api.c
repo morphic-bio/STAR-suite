@@ -48,6 +48,9 @@ struct pf_config {
     int search_threads;
     int consumer_threads;
     int read_buffer_lines;
+    pf_bgzf_mode bgzf_mode;
+    unsigned bgzf_threads;
+    int bgzf_crc_check;
     pf_permit_acquire_fn permit_acquire_cb;
     pf_permit_release_fn permit_release_cb;
     void *permit_hook_ctx;
@@ -298,6 +301,9 @@ pf_config* pf_config_create(void) {
     config->search_threads = 4;
     config->consumer_threads = 1;
     config->read_buffer_lines = READ_BUFFER_LINES;
+    config->bgzf_mode = PF_BGZF_AUTO;
+    config->bgzf_threads = 0;
+    config->bgzf_crc_check = 1;
     config->permit_acquire_cb = NULL;
     config->permit_release_cb = NULL;
     config->permit_hook_ctx = NULL;
@@ -427,6 +433,15 @@ void pf_config_set_search_threads(pf_config *config, int threads) {
 
 void pf_config_set_consumer_threads(pf_config *config, int threads) {
     if (config) config->consumer_threads = threads;
+}
+
+int pf_config_set_bgzf_input(pf_config *config, pf_bgzf_mode mode, int threads, int crc) {
+    if (!config || mode < PF_BGZF_AUTO || mode > PF_BGZF_RANGE || threads < 0 || threads > 1024 ||
+        (crc != 0 && crc != 1)) return -1;
+    config->bgzf_mode = mode;
+    config->bgzf_threads = (unsigned)threads;
+    config->bgzf_crc_check = crc;
+    return 0;
 }
 
 void pf_config_set_read_buffer_lines(pf_config *config, int lines) {
@@ -1157,7 +1172,8 @@ static int pf_copy_record_view_line(pf_context *ctx,
         dst[0] = '\0';
         return 1;
     }
-    const int has_newline = view.length > 0 && view.data[view.length - 1] == '\n';
+    const int has_newline = view.length > 0 && view.length < LINE_LENGTH &&
+        view.data[view.length - 1] == '\n';
     if ((!has_newline && view.length >= LINE_LENGTH - 1) ||
         (has_newline && view.length >= LINE_LENGTH)) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
@@ -1176,22 +1192,23 @@ static int pf_copy_record_view_line(pf_context *ctx,
     return 1;
 }
 
-static int pf_validate_record_view_field(pf_context *ctx,
+static int pf_validate_record_view_field(char *error_buf,
                                          pf_sequence_view view,
                                          const char *field_name,
                                          int required) {
     if (!view.data) {
         if (required || view.length > 0) {
-            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+            snprintf(error_buf, PF_ERROR_BUF_SIZE,
                      "In-memory record is missing %s", field_name);
             return 0;
         }
         return 1;
     }
-    const int has_newline = view.length > 0 && view.data[view.length - 1] == '\n';
+    const int has_newline = view.length > 0 && view.length < LINE_LENGTH &&
+        view.data[view.length - 1] == '\n';
     if ((!has_newline && view.length >= LINE_LENGTH - 1) ||
         (has_newline && view.length >= LINE_LENGTH)) {
-        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+        snprintf(error_buf, PF_ERROR_BUF_SIZE,
                  "In-memory record %s length %zu exceeds LINE_LENGTH=%d "
                  "after adding FASTQ-line newline",
                  field_name, view.length, LINE_LENGTH);
@@ -1509,34 +1526,34 @@ static int pf_stream_initialize_queue(pf_record_stream *stream, int nreaders) {
     return 1;
 }
 
-static int pf_record_view_reader_count(pf_context *ctx,
+static int pf_record_view_reader_count(char *error_buf,
                                        const pf_read_record_view *record,
                                        int *nreaders_out) {
     const int has_feature2 =
         (record->feature_sequence2.data || record->feature_sequence2.length > 0);
 
-    if (!pf_validate_record_view_field(ctx, record->barcode_sequence,
+    if (!pf_validate_record_view_field(error_buf, record->barcode_sequence,
                                        "barcode_sequence", 1) ||
-        !pf_validate_record_view_field(ctx, record->barcode_quality,
+        !pf_validate_record_view_field(error_buf, record->barcode_quality,
                                        "barcode_quality", 0) ||
-        !pf_validate_record_view_field(ctx, record->feature_sequence,
+        !pf_validate_record_view_field(error_buf, record->feature_sequence,
                                        "feature_sequence", 1) ||
-        !pf_validate_record_view_field(ctx, record->feature_quality,
+        !pf_validate_record_view_field(error_buf, record->feature_quality,
                                        "feature_quality", 0)) {
         return 0;
     }
 
     if (has_feature2) {
-        if (!pf_validate_record_view_field(ctx, record->feature_sequence2,
+        if (!pf_validate_record_view_field(error_buf, record->feature_sequence2,
                                            "feature_sequence2", 1) ||
-            !pf_validate_record_view_field(ctx, record->feature_quality2,
+            !pf_validate_record_view_field(error_buf, record->feature_quality2,
                                            "feature_quality2", 0)) {
             return 0;
         }
         *nreaders_out = 3;
     } else {
         if (record->feature_quality2.data || record->feature_quality2.length > 0) {
-            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+            snprintf(error_buf, PF_ERROR_BUF_SIZE,
                      "feature_quality2 was provided without feature_sequence2");
             return 0;
         }
@@ -1546,7 +1563,7 @@ static int pf_record_view_reader_count(pf_context *ctx,
     const size_t barcode_len = pf_trimmed_line_length(record->barcode_sequence);
     const size_t barcode_qual_len = pf_trimmed_line_length(record->barcode_quality);
     if (record->barcode_quality.data && barcode_qual_len != barcode_len) {
-        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+        snprintf(error_buf, PF_ERROR_BUF_SIZE,
                  "barcode_quality length %zu does not match barcode_sequence length %zu",
                  barcode_qual_len, barcode_len);
         return 0;
@@ -1555,7 +1572,7 @@ static int pf_record_view_reader_count(pf_context *ctx,
     const size_t feature_len = pf_trimmed_line_length(record->feature_sequence);
     const size_t feature_qual_len = pf_trimmed_line_length(record->feature_quality);
     if (record->feature_quality.data && feature_qual_len != feature_len) {
-        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+        snprintf(error_buf, PF_ERROR_BUF_SIZE,
                  "feature_quality length %zu does not match feature_sequence length %zu",
                  feature_qual_len, feature_len);
         return 0;
@@ -1565,7 +1582,7 @@ static int pf_record_view_reader_count(pf_context *ctx,
         const size_t feature2_len = pf_trimmed_line_length(record->feature_sequence2);
         const size_t feature2_qual_len = pf_trimmed_line_length(record->feature_quality2);
         if (record->feature_quality2.data && feature2_qual_len != feature2_len) {
-            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+            snprintf(error_buf, PF_ERROR_BUF_SIZE,
                      "feature_quality2 length %zu does not match feature_sequence2 length %zu",
                      feature2_qual_len, feature2_len);
             return 0;
@@ -1595,7 +1612,7 @@ static int pf_stream_push_record_view(pf_record_stream *stream,
                                       const pf_read_record_view *record) {
     pf_context *ctx = stream->ctx;
     int nreaders = 0;
-    if (!pf_record_view_reader_count(ctx, record, &nreaders)) {
+    if (!pf_record_view_reader_count(ctx->error_buf, record, &nreaders)) {
         return 0;
     }
     if (!pf_stream_initialize_queue(stream, nreaders)) {
@@ -1832,6 +1849,9 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.min_posterior = ctx->config->min_posterior;
         args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
         args.consumer_threads_per_set = ctx->config->consumer_threads;
+        args.bgzf_mode = ctx->config->bgzf_mode;
+        args.bgzf_threads = ctx->config->bgzf_threads;
+        args.bgzf_crc_check = ctx->config->bgzf_crc_check;
         args.permit_acquire_hook = ctx->config->permit_acquire_cb;
         args.permit_release_hook = ctx->config->permit_release_cb;
         args.permit_hook_ctx = ctx->config->permit_hook_ctx;
@@ -2097,6 +2117,9 @@ pf_error pf_process_fastqs(pf_context *ctx,
     args.min_posterior = ctx->config->min_posterior;
     args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
     args.consumer_threads_per_set = ctx->config->consumer_threads;
+    args.bgzf_mode = ctx->config->bgzf_mode;
+    args.bgzf_threads = ctx->config->bgzf_threads;
+    args.bgzf_crc_check = ctx->config->bgzf_crc_check;
     args.permit_acquire_hook = ctx->config->permit_acquire_cb;
     args.permit_release_hook = ctx->config->permit_release_cb;
     args.permit_hook_ctx = ctx->config->permit_hook_ctx;
@@ -2465,77 +2488,49 @@ pf_error pf_direct_range_process_record_views(pf_direct_range_job *job,
                                               const pf_read_record_view *records,
                                               size_t n_records) {
     if (!job || worker_id < 0 || worker_id >= job->nworkers ||
-        (!records && n_records > 0) || job->closed || job->failed) {
+        (!records && n_records > 0) || job->closed || __atomic_load_n(&job->failed, __ATOMIC_ACQUIRE)) {
         return PF_ERR_INVALID_ARG;
     }
 
-    pf_context *ctx = job->ctx;
+    char error_buf[PF_ERROR_BUF_SIZE];
     for (size_t i = 0; i < n_records; ++i) {
         int nreaders = 0;
-        if (!pf_record_view_reader_count(ctx, &records[i], &nreaders)) {
-            job->failed = 1;
+        if (!pf_record_view_reader_count(error_buf, &records[i], &nreaders)) {
+            /* Only the first failing worker publishes the shared error text. */
+            if (!__atomic_exchange_n(&job->failed, 1, __ATOMIC_ACQ_REL))
+                snprintf(job->ctx->error_buf, PF_ERROR_BUF_SIZE, "%s", error_buf);
+            pf_direct_consumer_flush_permit(job->consumer_states[worker_id]);
             return PF_ERR_INVALID_ARG;
         }
         if (nreaders != job->nreaders) {
-            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+            snprintf(error_buf, PF_ERROR_BUF_SIZE,
                      "Mixed direct range record layouts in one process_features job");
-            job->failed = 1;
+            /* Only the first failing worker publishes the shared error text. */
+            if (!__atomic_exchange_n(&job->failed, 1, __ATOMIC_ACQ_REL))
+                snprintf(job->ctx->error_buf, PF_ERROR_BUF_SIZE, "%s", error_buf);
+            pf_direct_consumer_flush_permit(job->consumer_states[worker_id]);
             return PF_ERR_INVALID_ARG;
         }
 
-        char barcode_sequence[LINE_LENGTH];
-        char barcode_quality[LINE_LENGTH];
-        char feature_sequence[LINE_LENGTH];
-        char feature_quality[LINE_LENGTH];
-        char feature_sequence2[LINE_LENGTH];
-        char feature_quality2[LINE_LENGTH];
-        feature_sequence2[0] = '\0';
-        feature_quality2[0] = '\0';
-
-        if (!pf_copy_record_view_line(ctx, barcode_sequence,
-                                      records[i].barcode_sequence,
-                                      "barcode_sequence", 1)) {
-            job->failed = 1;
-            return PF_ERR_INVALID_ARG;
-        }
-        pf_copy_quality_or_default(barcode_quality,
-                                   records[i].barcode_quality,
-                                   records[i].barcode_sequence.length);
-        if (!pf_copy_record_view_line(ctx, feature_sequence,
-                                      records[i].feature_sequence,
-                                      "feature_sequence", 1)) {
-            job->failed = 1;
-            return PF_ERR_INVALID_ARG;
-        }
-        pf_copy_quality_or_default(feature_quality,
-                                   records[i].feature_quality,
-                                   records[i].feature_sequence.length);
-        if (job->nreaders == 3) {
-            if (!pf_copy_record_view_line(ctx, feature_sequence2,
-                                          records[i].feature_sequence2,
-                                          "feature_sequence2", 1)) {
-                job->failed = 1;
-                return PF_ERR_INVALID_ARG;
-            }
-            pf_copy_quality_or_default(feature_quality2,
-                                       records[i].feature_quality2,
-                                       records[i].feature_sequence2.length);
-        }
-
-        if (!pf_direct_consumer_process_record(job->consumer_states[worker_id],
-                                               barcode_sequence,
-                                               barcode_quality,
-                                               feature_sequence,
-                                               feature_quality,
-                                               feature_sequence2,
-                                               feature_quality2)) {
-            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+        const pf_read_record_view *record = &records[i];
+        const char *fields[6] = {record->barcode_sequence.data, record->barcode_quality.data,
+            record->feature_sequence.data, record->feature_quality.data,
+            record->feature_sequence2.data, record->feature_quality2.data};
+        const size_t lengths[6] = {record->barcode_sequence.length, record->barcode_quality.length,
+            record->feature_sequence.length, record->feature_quality.length,
+            record->feature_sequence2.length, record->feature_quality2.length};
+        if (!pf_direct_consumer_process_views(job->consumer_states[worker_id], fields, lengths)) {
+            snprintf(error_buf, PF_ERROR_BUF_SIZE,
                      "Direct range process_features worker %d failed", worker_id);
-            job->failed = 1;
+            /* Only the first failing worker publishes the shared error text. */
+            if (!__atomic_exchange_n(&job->failed, 1, __ATOMIC_ACQ_REL))
+                snprintf(job->ctx->error_buf, PF_ERROR_BUF_SIZE, "%s", error_buf);
+            pf_direct_consumer_flush_permit(job->consumer_states[worker_id]);
             return PF_ERR_INVALID_ARG;
         }
     }
 
+    pf_direct_consumer_flush_permit(job->consumer_states[worker_id]);
     return PF_OK;
 }
 
@@ -2546,7 +2541,7 @@ pf_error pf_direct_range_end(pf_direct_range_job *job,
     }
 
     pf_context *ctx = job->ctx;
-    pf_error result = job->failed ? PF_ERR_INVALID_ARG : PF_OK;
+    pf_error result = __atomic_load_n(&job->failed, __ATOMIC_ACQUIRE) ? PF_ERR_INVALID_ARG : PF_OK;
     int sample_error = 0;
     job->closed = 1;
 
@@ -3013,6 +3008,15 @@ pf_error pf_run_emptydrops_premex(
     input.sparse_counts = (uint32_t*)sparse_counts;
     input.sparse_cell_index = (uint32_t*)sparse_cell_index;
     input.n_genes_per_cell = (uint32_t*)n_genes_per_cell;
+    /* This API receives split arrays without an explicit nnz argument. Their
+     * occupied extent is required by libscrna's validated borrowed view. */
+    if (sparse_cell_index && n_genes_per_cell) {
+        for (uint32_t c = 0; c < n_barcodes; ++c) {
+            const uint64_t end = (uint64_t)sparse_cell_index[c] + n_genes_per_cell[c];
+            if (end > SIZE_MAX) return PF_ERR_INVALID_ARG;
+            if ((size_t)end > input.sparse_nnz) input.sparse_nnz = (size_t)end;
+        }
+    }
     
     /* Create config */
     scrna_ed_config *config = scrna_ed_config_create();
@@ -3581,6 +3585,12 @@ pf_error pf_process_split_fastq_dir(pf_context *ctx,
     if (!ctx || !fastq_dir || !output_dir) {
         return PF_ERR_INVALID_ARG;
     }
+    if (ctx->config->bgzf_mode == PF_BGZF_RANGE) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Forced BGZF range is not supported by split-read synthesis yet");
+        return PF_ERR_INVALID_ARG;
+    }
+    fprintf(stderr, "[pf-bgzf] effective=gzip reason=split-read synthesis\n");
     pf_split_read_layout *layout = &ctx->config->split_read_layout;
     if (!layout->enabled) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,

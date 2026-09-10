@@ -180,3 +180,10 @@ AGENTS_local.md
 /core/legacy/source/transcriptvb_finalize
 /core/legacy/source/sidecar_gather_parity
 /core/legacy/source/sparse_gate_parity
+
+/tests/pf_bgzf_harness
+/core/legacy/source/slam_fit_reuse_tests
+/tests/emptydrops/test_ordmag_floor
+/tests/emptydrops/test_ordmag_ties
+/tests/emptydrops/test_thread_permits
+/tests/emptydrops/test_flex_tag_aware

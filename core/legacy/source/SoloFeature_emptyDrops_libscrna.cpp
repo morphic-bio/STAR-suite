@@ -2,6 +2,7 @@
 #include "serviceFuns.cpp"
 #include "libscrna/OrdMagStage.h"
 #include "scrna_api.h"
+#include "ScrnaTrace.h"
 #include "MitochondrialRankMask.h"
 #include "OrdMagRank.h"
 #include "ErrorWarning.h"
@@ -52,33 +53,20 @@ void SoloFeature::emptyDrops_libscrna()
         barcode_ptrs.push_back(const_cast<char*>(bc.c_str()));
     }
 
-    // Build sparse matrix (main count only)
-    vector<uint32_t> sparse_gene_ids;
-    vector<uint32_t> sparse_counts;
-    vector<uint32_t> sparse_cell_index(nCB + 1, 0);
-    vector<uint32_t> n_genes_per_cell(nCB, 0);
-    size_t nnz = 0;
-
-    for (uint32 icb = 0; icb < nCB; icb++) {
-        sparse_cell_index[icb] = static_cast<uint32_t>(nnz);
-        uint32 nGenes = nGenePerCB[icb];
-        for (uint32 ig = 0; ig < nGenes; ig++) {
-            uint32 irec = countCellGeneUMIindex[icb] + ig * countMatStride;
-            if (irec + pSolo.umiDedup.countInd.main >= countCellGeneUMI.size()) {
-                continue;
-            }
-            uint32 geneId = countCellGeneUMI[irec];
-            uint32 count = countCellGeneUMI[irec + pSolo.umiDedup.countInd.main];
-            if (count == 0) {
-                continue;
-            }
-            sparse_gene_ids.push_back(geneId);
-            sparse_counts.push_back(count);
-            n_genes_per_cell[icb]++;
-            nnz++;
-        }
+    SparseCountView matrix;
+    matrix.genes = countCellGeneUMI.data();
+    matrix.geneWords = countCellGeneUMI.size();
+    const size_t shift = pSolo.umiDedup.countInd.main;
+    if (shift < countCellGeneUMI.size()) {
+        matrix.counts = countCellGeneUMI.data() + shift;
+        matrix.countWords = countCellGeneUMI.size() - shift;
     }
-    sparse_cell_index[nCB] = static_cast<uint32_t>(nnz);
+    matrix.stride = countMatStride;
+    matrix.offsets = countCellGeneUMIindex.data();
+    matrix.entries = nGenePerCB.data();
+    matrix.cells = nCB;
+    P.inOut->logMain << "emptyDrops matrix: borrowed " << countCellGeneUMI.size() * sizeof(uint32_t)
+                    << " bytes; adapter and interleave copies=0\n";
 
     // Prepare input for libscrna
     scrna_matrix_input input;
@@ -88,12 +76,6 @@ void SoloFeature::emptyDrops_libscrna()
     input.n_cells = nCB;
     input.n_features = featuresNumber;
     input.features = nullptr;
-    input.sparse_gene_ids = sparse_gene_ids.data();
-    input.sparse_counts = sparse_counts.data();
-    input.sparse_cell_index = sparse_cell_index.data();
-    input.n_genes_per_cell = n_genes_per_cell.data();
-    input.sparse_nnz = nnz;
-
     scrna_ed_config *config = scrna_ed_config_create();
     if (config == nullptr) {
         P.inOut->logMain << "emptyDrops_CR (libscrna) failed: could not allocate config\n";
@@ -112,7 +94,7 @@ void SoloFeature::emptyDrops_libscrna()
     config->sim_n = 100000; // match CR9: 100K MC simulations for better p-value resolution
     config->use_fdr_gate = 1;
     config->apply_bh_correction = 1; // scRNA-seq: proper BH-corrected FDR (matches CR9)
-    config->mc_threads = 0;
+    config->mc_threads = static_cast<uint32_t>(std::max(1, P.runThreadN));
     config->disable_occupancy_filter = 1;
 
     if (bootstrapEnabled) {
@@ -130,6 +112,7 @@ void SoloFeature::emptyDrops_libscrna()
                      << " candMaxN=" << config->cand_max_n
                      << " FDR=" << config->fdr
                      << " simN=" << config->sim_n
+                     << " mcThreads=" << config->mc_threads
                      << " bootstrap=" << (config->use_bootstrap ? "yes" : "no")
                      << " legacyKnee=" << (pSolo.emptyDropsLegacyKnee ? "yes" : "no")
                      << " mode=" << (forceUnionMode ? "union" : "auto") << "\n";
@@ -149,8 +132,9 @@ void SoloFeature::emptyDrops_libscrna()
     }
     const uint32_t bootstrapThreads = pSolo.cellFilterBootstrapThreads > 0
         ? pSolo.cellFilterBootstrapThreads : static_cast<uint32_t>(std::max(1, P.runThreadN));
-    int rc = scrna_emptydrops_run_with_rank_options(&input, config,
-        mitochondrialMask.empty() ? nullptr : mitochondrialMask.data(), bootstrapThreads, &result);
+    ScrnaTrace trace;
+    int rc = scrnaEmptyDropsTrace(&input, config,
+        mitochondrialMask.empty() ? nullptr : mitochondrialMask.data(), bootstrapThreads, &result, &trace, &matrix);
     if (rc != 0) {
         P.inOut->logMain << "emptyDrops_CR (libscrna) failed: " 
                          << (result.error_message ? result.error_message : "unknown error") << "\n";
@@ -196,63 +180,11 @@ void SoloFeature::emptyDrops_libscrna()
 
     // Emit branch-only audit files so libscrna can be compared against legacy on the same ranked cells.
     {
-        vector<pair<uint32_t, uint32_t>> umiIdx;
-        umiIdx.reserve(nCB);
-        for (uint32_t i = 0; i < nCB; i++) {
-            umiIdx.push_back({nUMIperCB[i], i});
-        }
-        stable_sort(umiIdx.begin(), umiIdx.end(), [&](const pair<uint32_t, uint32_t>& a, const pair<uint32_t, uint32_t>& b) {
-            if (a.first != b.first) return a.first > b.first;
-            return barcodes[a.second] < barcodes[b.second];
-        });
-
-        vector<uint32_t> retainIndices;
-        vector<uint32_t> retainUMI;
-        vector<uint32_t> retainGenes;
-        vector<string> retainBarcodes;
-        vector<uint64_t> retainNonMito;
-        vector<uint32_t> seenGenes(featuresNumber, UINT32_MAX);
-        retainIndices.reserve(nCB);
-        retainUMI.reserve(nCB);
-        vector<uint32_t> origToRetainRank(nCB, (uint32_t)-1);
-        for (uint32_t rank = 0; rank < nCB; rank++) {
-            retainIndices.push_back(umiIdx[rank].second);
-            retainUMI.push_back(umiIdx[rank].first);
-            const uint32_t cell = umiIdx[rank].second;
-            const uint32_t start = sparse_cell_index[cell];
-            const auto quality = ordMagCellQuality(sparse_gene_ids.data() + start,
-                sparse_counts.data() + start, n_genes_per_cell[cell], seenGenes, cell,
-                mitochondrialMask.empty() ? nullptr : mitochondrialMask.data());
-            retainGenes.push_back(quality.detectedGenes);
-            if (!mitochondrialMask.empty()) retainNonMito.push_back(quality.nonMitoUMIs);
-            retainBarcodes.push_back(barcodes[umiIdx[rank].second]);
-            origToRetainRank[umiIdx[rank].second] = rank;
-        }
-
-        SimpleEmptyDropsParams simpleParams;
-        simpleParams.maxThreads = bootstrapThreads;
-        simpleParams.nExpectedCells = config->n_expected_cells;
-        simpleParams.maxPercentile = config->max_percentile;
-        simpleParams.maxMinRatio = config->max_min_ratio;
-        simpleParams.umiMin = config->umi_min;
-        simpleParams.umiMinFracMedian = config->umi_min_frac_median;
-        simpleParams.candMaxN = config->cand_max_n;
-        simpleParams.indMin = config->ind_min;
-        simpleParams.indMax = config->ind_max;
-
-        SimpleEmptyDropsResult simpleResult;
-        if (config->use_bootstrap) {
-            simpleParams.useBootstrap = true;
-            simpleParams.nExpectedCells = 0;
-            simpleParams.maxExpectedCells = min(config->ind_min / 2, (uint32_t)262144);
-            if (simpleParams.maxExpectedCells < 1000) {
-                simpleParams.maxExpectedCells = 90000;
-            }
-            simpleResult = SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
-                retainUMI, retainIndices.size(), simpleParams, retainGenes, retainBarcodes, retainNonMito);
-        } else {
-            simpleResult = SimpleEmptyDropsStage::runCRSimpleFilter(retainUMI, retainIndices.size(), simpleParams);
-        }
+        const auto& retainIndices = trace.retainIndices;
+        const auto& simpleResult = trace.ordmag;
+        vector<uint32_t> origToRetainRank(nCB, UINT32_MAX);
+        for (size_t rank = 0; rank < retainIndices.size(); ++rank)
+            origToRetainRank[retainIndices[rank]] = rank;
 
         unordered_set<uint32_t> ambientOrigIndices;
         ambientOrigIndices.reserve(simpleResult.ambientIndices.size() * 2);

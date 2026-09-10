@@ -35,3 +35,7 @@ make
 - `<out>.SlamQuant.out.mismatches.tsv`
 - `<out>.SlamQuant.out.mismatchdetails.tsv`
 - QC JSON/HTML if `--slamQcReport` is provided
+
+Independent gene fits can use `--threads N` (default 1). Histogram processing
+and output order stay unchanged. Fits use the same invariant-probability cache
+as STAR, and repeated compatible output requests reuse the fitted results.

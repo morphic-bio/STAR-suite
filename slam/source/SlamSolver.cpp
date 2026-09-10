@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <limits>
+#include <vector>
 
 double SlamSolver::log_binom_pmf(uint16_t n, uint16_t tc, double p) const {
     if (tc > n || p <= 0.0 || p >= 1.0) {
@@ -49,16 +50,22 @@ SlamResult SlamSolver::solve(const MismatchHistogram& gene_data) const {
     const int max_iters = 1000;
     const double tol = 1e-6;
 
+    struct ProbabilityBin { double count, oldLog, newLog; };
+    std::vector<ProbabilityBin> probabilities;
+    probabilities.reserve(gene_data.size());
+    for (const auto& entry : gene_data) {
+        const uint16_t n = slamKeyNT(entry.first), tc = slamKeyTC(entry.first);
+        probabilities.push_back({entry.second, log_binom_pmf(n, tc, p_error_rate_), log_binom_pmf(n, tc, p_conversion_rate_)});
+    }
+
     for (int iter = 0; iter < max_iters; ++iter) {
         double num = 0.0;
         double ll = 0.0;
-        for (const auto& entry : gene_data) {
-            uint16_t n = slamKeyNT(entry.first);
-            uint16_t tc = slamKeyTC(entry.first);
-            double count = entry.second;
+        for (const auto& entry : probabilities) {
+            double count = entry.count;
 
-            double log_old = std::log(1.0 - pi) + log_binom_pmf(n, tc, p_error_rate_);
-            double log_new = std::log(pi) + log_binom_pmf(n, tc, p_conversion_rate_);
+            double log_old = std::log(1.0 - pi) + entry.oldLog;
+            double log_new = std::log(pi) + entry.newLog;
             double max_log = (log_old > log_new) ? log_old : log_new;
             double sum = std::exp(log_old - max_log) + std::exp(log_new - max_log);
             double gamma = std::exp(log_new - max_log) / sum;

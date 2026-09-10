@@ -77,6 +77,9 @@ int pf_direct_consumer_process_record(pf_direct_consumer_state *state,
                                       const char *feature_quality,
                                       const char *feature_sequence2,
                                       const char *feature_quality2);
+int pf_direct_consumer_process_views(pf_direct_consumer_state *state,
+                                     const char *const *fields, const size_t *lengths);
+void pf_direct_consumer_flush_permit(pf_direct_consumer_state *state);
 void pf_direct_consumer_state_destroy(pf_direct_consumer_state *state);
 void free_fastq_reader(fastq_reader *reader);
 void free_fastq_reader_set(fastq_reader_set *reader_set);

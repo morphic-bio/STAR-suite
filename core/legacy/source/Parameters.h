@@ -35,6 +35,7 @@ namespace input {
 class CbqInputModule;
 struct CbqReadBatchView;
 class BgzfStarAdapter;
+class BgzfPipeGroup;
 class FastxInputModule;
 struct InputRecord;
 } // namespace input
@@ -178,6 +179,7 @@ class Parameters {
         // with coordinate-sorted BAM output. The adapter is opened lazily
         // after the mapping thread controller has been initialized.
         std::shared_ptr<star::input::BgzfStarAdapter> bgzfCoreInputAdapter;
+        std::shared_ptr<star::input::BgzfPipeGroup> bgzfPipes;
         bool bgzfCoreActive = false;
         bool bgzfCoreExhausted = false;
         uint32 bgzfCoreLaneIndex = 0;
@@ -492,6 +494,7 @@ class Parameters {
                 bool vb=true;           // Use VB (true) or EM (false)
                 bool gcBias=false;      // Enable GC bias correction
                 int gcBiasInt=0;        // Command-line flag for gcBias (0/1)
+                int componentParallel=0; // optional one-writer-per-component VB execution
                 int quantVBemInt=0;     // Command-line flag: if 1, use EM instead of VB
                 double vbPrior=0.01;    // Dirichlet prior
                 string outFile;         // Output file path
@@ -796,12 +799,14 @@ class Parameters {
             int crAssignConsumerThreads;    // Optional: pass --consumer_threads_per_set (default: unset)
             int crAssignSearchThreads;      // Optional: pass --search_threads (default: unset)
             int crAssignReadBufferLines;    // Optional: PF reader queue lines (default: unset)
+            string crAssignBgzfMode;        // auto|off|range for PF FASTQ, independent of GEX input
             string crAssignCbqMode;         // auto|stream|range for CBQ feature assignment
             double crAssignMinPosterior;    // Optional: pass --min_posterior (default: unset)
             int crAssignLegacyCbRescue;     // Optional: pass legacy order-dependent pending CB rescue mode
             int crAssignSkipQcOutputs;      // Skip feature histograms/heatmaps in assignBarcodes outputs
             string crAssignFilteredBarcodes;// Optional filtered barcode file for assignBarcodes
             int crAssignAllowUnionWhitelist; // Accept mixed NXT+TRU filtered barcode sets
+            uint64 ocmCellCallMaxMemory = 1073741824; // bytes admitted for concurrent sample matrices
             string ocmMultiEnable;           // no|yes|auto - OCM per-sample MEX materialization
             string ocmMultiConfig;           // Cell Ranger multi config with [samples]
             string ocmMultiBarcodeMode;      // posthoc|flex - when flex, use CB16+OCM_TAG8 before CB correction

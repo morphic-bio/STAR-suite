@@ -381,6 +381,12 @@ static string pfErrorCodeString(pf_error err) {
 }
 
 static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
+    pf_bgzf_mode mode = options.bgzfMode == "off" ? PF_BGZF_OFF :
+                        options.bgzfMode == "range" ? PF_BGZF_RANGE : PF_BGZF_AUTO;
+    if ((options.bgzfMode != "off" && options.bgzfMode != "auto" && options.bgzfMode != "range") ||
+        pf_config_set_bgzf_input(cfg, mode, options.bgzfThreads, options.bgzfCrcCheck) != 0) {
+        throw std::runtime_error("Invalid PF BGZF reader configuration");
+    }
     // Match assignBarcodes CLI default for min_counts.
     pf_config_set_min_counts(cfg, 0);
 
@@ -990,6 +996,9 @@ static void writeApiRunSummary(const string& assignOut,
     out << "hashMinTop=" << options.hashMinTop << "\n";
     out << "hashMinRatio=" << options.hashMinRatio << "\n";
     out << "libraryFeatureType=" << options.libraryFeatureType << "\n";
+    out << "bgzfModeRequested=" << options.bgzfMode << "\n";
+    out << "bgzfReaderThreads=" << options.bgzfThreads << "\n";
+    out << "bgzfCrcCheck=" << options.bgzfCrcCheck << "\n";
     out << "enableStarDynamicPermitHooks=" << (options.enableStarDynamicPermitHooks ? 1 : 0) << "\n";
     out << "filteredBarcodesPath=" << options.filteredBarcodesPath << "\n";
     out << "stats.total_reads=" << stats.total_reads << "\n";

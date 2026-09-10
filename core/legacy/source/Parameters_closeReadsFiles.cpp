@@ -3,6 +3,7 @@
 #include "input/CbqInputModule.h"
 #include "input/FastxInputModule.h"
 #include "input/BgzfStarAdapter.h"
+#include "input/BgzfPipeGroup.h"
 #include <fstream>
 #include <sys/stat.h>
 #include <cerrno>
@@ -35,6 +36,14 @@ void Parameters::closeReadsFiles() {
         if (inOut->readIn[imate].is_open()) {
             inOut->readIn[imate].close();
         }
+    }
+
+    if (bgzfPipes) {
+        bgzfPipes->join();
+        inOut->logMain << bgzfPipes->summary();
+        const string error = bgzfPipes->error();
+        bgzfPipes.reset();
+        if (!error.empty()) exitWithError("BGZF input failed: " + error + "\n", std::cerr, inOut->logMain, EXIT_CODE_INPUT_FILES, *this);
     }
 
     // Terminate and reap readFilesCommand helper children to avoid lingering
