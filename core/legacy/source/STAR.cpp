@@ -3057,6 +3057,7 @@ int main(int argInN, char *argIn[])
             }
             P.inOut->logMain << "\n";
         }
+        mergedSlam.setFitWorkers(std::max(1, P.runThreadN));
         mergedSlam.write(*transcriptomeMain, P.quant.slam.outFile,
                          P.quant.slam.errorRate, P.quant.slam.convRate,
                          P.quant.slam.vbOverdisp, P.quant.slam.vbOverdispPhi,
@@ -3070,6 +3071,8 @@ int main(int argInN, char *argIn[])
                                       P.quant.slam.vbOverdisp, P.quant.slam.vbOverdispPhi,
                                       P.quant.slam.vbOverdispPriorAlpha, P.quant.slam.vbOverdispPriorBeta);
         }
+        P.inOut->logMain << "SLAM fits: workers=" << std::max(1, P.runThreadN)
+            << " passes=" << mergedSlam.fitPasses() << " result_bytes=" << mergedSlam.fitResultBytes() << "\n";
         if (P.quant.slam.cbOut != 0) {
             std::string cbOut = P.quant.slam.cbOutFile.empty()
                                 ? (P.outFileNamePrefix + "SlamQuant.cB.tsv")

@@ -1,4 +1,5 @@
 #include "SlamQuant.h"
+#include "../../core/features/libscrna/include/ParallelTasks.h"
 #include "SlamCompat.h"
 #include "SlamDump.h"
 #include "libem/slam_vb_overdisp.h"
@@ -832,10 +833,10 @@ void SlamQuant::merge(const SlamQuant& other) {
 const std::vector<SlamFit>& SlamQuant::fitGenes(const SlamFitParameters& parameters) const {
     if (fitsValid_ && fitParameters_ == parameters) return fittedGenes_;
     std::vector<SlamFit> next(geneStats_.size());
-    for (size_t i = 0; i < geneStats_.size(); ++i) {
+    scrna::parallelFor(geneStats_.size(), fitWorkers_, [&](size_t i, size_t) {
         if (geneStats_[i].readCount > 0.0)
             next[i] = fitSlamHistogram(geneStats_[i].histogram, parameters);
-    }
+    });
     fittedGenes_.swap(next); fitParameters_ = parameters; fitsValid_ = true; ++fitPasses_;
     return fittedGenes_;
 }
