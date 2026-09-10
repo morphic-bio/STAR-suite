@@ -53,33 +53,20 @@ void SoloFeature::emptyDrops_libscrna()
         barcode_ptrs.push_back(const_cast<char*>(bc.c_str()));
     }
 
-    // Build sparse matrix (main count only)
-    vector<uint32_t> sparse_gene_ids;
-    vector<uint32_t> sparse_counts;
-    vector<uint32_t> sparse_cell_index(nCB + 1, 0);
-    vector<uint32_t> n_genes_per_cell(nCB, 0);
-    size_t nnz = 0;
-
-    for (uint32 icb = 0; icb < nCB; icb++) {
-        sparse_cell_index[icb] = static_cast<uint32_t>(nnz);
-        uint32 nGenes = nGenePerCB[icb];
-        for (uint32 ig = 0; ig < nGenes; ig++) {
-            uint32 irec = countCellGeneUMIindex[icb] + ig * countMatStride;
-            if (irec + pSolo.umiDedup.countInd.main >= countCellGeneUMI.size()) {
-                continue;
-            }
-            uint32 geneId = countCellGeneUMI[irec];
-            uint32 count = countCellGeneUMI[irec + pSolo.umiDedup.countInd.main];
-            if (count == 0) {
-                continue;
-            }
-            sparse_gene_ids.push_back(geneId);
-            sparse_counts.push_back(count);
-            n_genes_per_cell[icb]++;
-            nnz++;
-        }
+    SparseCountView matrix;
+    matrix.genes = countCellGeneUMI.data();
+    matrix.geneWords = countCellGeneUMI.size();
+    const size_t shift = pSolo.umiDedup.countInd.main;
+    if (shift < countCellGeneUMI.size()) {
+        matrix.counts = countCellGeneUMI.data() + shift;
+        matrix.countWords = countCellGeneUMI.size() - shift;
     }
-    sparse_cell_index[nCB] = static_cast<uint32_t>(nnz);
+    matrix.stride = countMatStride;
+    matrix.offsets = countCellGeneUMIindex.data();
+    matrix.entries = nGenePerCB.data();
+    matrix.cells = nCB;
+    P.inOut->logMain << "emptyDrops matrix: borrowed " << countCellGeneUMI.size() * sizeof(uint32_t)
+                    << " bytes; adapter and interleave copies=0\n";
 
     // Prepare input for libscrna
     scrna_matrix_input input;
@@ -89,12 +76,6 @@ void SoloFeature::emptyDrops_libscrna()
     input.n_cells = nCB;
     input.n_features = featuresNumber;
     input.features = nullptr;
-    input.sparse_gene_ids = sparse_gene_ids.data();
-    input.sparse_counts = sparse_counts.data();
-    input.sparse_cell_index = sparse_cell_index.data();
-    input.n_genes_per_cell = n_genes_per_cell.data();
-    input.sparse_nnz = nnz;
-
     scrna_ed_config *config = scrna_ed_config_create();
     if (config == nullptr) {
         P.inOut->logMain << "emptyDrops_CR (libscrna) failed: could not allocate config\n";
@@ -153,7 +134,7 @@ void SoloFeature::emptyDrops_libscrna()
         ? pSolo.cellFilterBootstrapThreads : static_cast<uint32_t>(std::max(1, P.runThreadN));
     ScrnaTrace trace;
     int rc = scrnaEmptyDropsTrace(&input, config,
-        mitochondrialMask.empty() ? nullptr : mitochondrialMask.data(), bootstrapThreads, &result, &trace);
+        mitochondrialMask.empty() ? nullptr : mitochondrialMask.data(), bootstrapThreads, &result, &trace, &matrix);
     if (rc != 0) {
         P.inOut->logMain << "emptyDrops_CR (libscrna) failed: " 
                          << (result.error_message ? result.error_message : "unknown error") << "\n";

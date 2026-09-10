@@ -164,19 +164,32 @@ extern "C" int scrna_emptydrops_run_with_rank_options(
 
 int scrnaEmptyDropsTrace(const scrna_matrix_input* input, const scrna_ed_config* config,
     const uint8_t* mitochondrial_features, uint32_t bootstrap_threads,
-    scrna_ed_result* result, ScrnaTrace* trace) {
+    scrna_ed_result* result, ScrnaTrace* trace, const SparseCountView* borrowed) {
     if (!input || !config || !result) {
         return -1;
     }
     
     memset(result, 0, sizeof(scrna_ed_result));
 
-    if (mitochondrial_features && (!config->use_bootstrap || !input->sparse_gene_ids ||
-        !input->sparse_counts || !input->sparse_cell_index || !input->n_genes_per_cell)) {
+    SparseCountView matrix;
+    bool hasSparse = borrowed || (input->sparse_cell_index && input->n_genes_per_cell &&
+        (input->sparse_nnz == 0 || (input->sparse_gene_ids && input->sparse_counts)));
+    if (hasSparse) {
+        if (borrowed) matrix = *borrowed;
+        else {
+            matrix.genes = input->sparse_gene_ids; matrix.counts = input->sparse_counts;
+            matrix.geneWords = matrix.countWords = input->sparse_nnz;
+            matrix.offsets = input->sparse_cell_index; matrix.entries = input->n_genes_per_cell;
+            matrix.cells = input->n_cells;
+        }
+        try { matrix.validate(input->n_cells); }
+        catch (const std::exception& e) { result->error_message = strdup_safe(e.what()); return -1; }
+    }
+    if (mitochondrial_features && (!config->use_bootstrap || !hasSparse)) {
         result->error_message = strdup_safe("MT rank scores require sparse matrix data and bootstrap OrdMag");
         return -1;
     }
-    
+
     if (input->n_cells == 0) {
         result->error_message = strdup_safe("No cells in input");
         return -1;
@@ -239,12 +252,14 @@ int scrnaEmptyDropsTrace(const scrna_matrix_input* input, const scrna_ed_config*
         retainUMI.push_back(nUMIperCB[idx]);
         retainBarcodes.push_back(barcodes[idx]);
         uint32_t detected = input->n_genes_per_cell ? input->n_genes_per_cell[idx] : 0;
-        if (input->sparse_gene_ids && input->sparse_counts &&
-            input->sparse_cell_index && input->n_genes_per_cell) {
-            const uint32_t start = input->sparse_cell_index[idx];
-            const OrdMagCellQuality quality = ordMagCellQuality(input->sparse_gene_ids + start,
-                input->sparse_counts + start, input->n_genes_per_cell[idx], seenGenes, idx,
-                mitochondrial_features);
+        if (hasSparse) {
+            OrdMagCellQuality quality;
+            for (size_t g = 0; g < matrix.entries[idx]; ++g) {
+                const uint32_t gene = matrix.gene(idx, g), count = matrix.count(idx, g);
+                if (!count || gene >= seenGenes.size() || (mitochondrial_features && mitochondrial_features[gene])) continue;
+                quality.nonMitoUMIs += count;
+                if (seenGenes[gene] != idx) { seenGenes[gene] = idx; ++quality.detectedGenes; }
+            }
             detected = quality.detectedGenes;
             if (mitochondrial_features) retainNonMitoUMIs.push_back(quality.nonMitoUMIs);
         }
@@ -293,7 +308,7 @@ int scrnaEmptyDropsTrace(const scrna_matrix_input* input, const scrna_ed_config*
     // When bootstrap is enabled, MC tail rescue always proceeds regardless of
     // barcode count — the OrdMag ambient-window fallback handles small datasets.
     // The legacy ind_min gate is only active without bootstrap.
-    const bool skipMC = (!input->sparse_gene_ids || !input->sparse_counts || !input->sparse_cell_index)
+    const bool skipMC = !hasSparse
                      || (!config->use_bootstrap && input->n_cells <= config->ind_min);
     if (skipMC) {
         if (!config->use_bootstrap && input->n_cells <= config->ind_min) {
@@ -336,11 +351,10 @@ int scrnaEmptyDropsTrace(const scrna_matrix_input* input, const scrna_ed_config*
         if (retainIdx >= retainIndices.size()) continue;
         uint32_t origIdx = retainIndices[retainIdx];
 
-        uint32_t start = input->sparse_cell_index[origIdx];
-        uint32_t nGenes = input->n_genes_per_cell[origIdx];
+        uint32_t nGenes = matrix.entries[origIdx];
         for (uint32_t g = 0; g < nGenes; g++) {
-            uint32_t geneId = input->sparse_gene_ids[start + g];
-            uint32_t count = input->sparse_counts[start + g];
+            uint32_t geneId = matrix.gene(origIdx, g);
+            uint32_t count = matrix.count(origIdx, g);
             if (geneId < input->n_features) {
                 ambCount[geneId] += count;
             }
@@ -381,21 +395,9 @@ int scrnaEmptyDropsTrace(const scrna_matrix_input* input, const scrna_ed_config*
     // ========================================================================
     // Build sparse matrix for EmptyDrops
     // ========================================================================
-    vector<uint32_t> countCellGeneUMI;
-    vector<uint32_t> countCellGeneUMIindex(input->n_cells);
-    vector<uint32_t> nGenePerCB(input->n_cells);
-    
-    for (uint32_t c = 0; c < input->n_cells; c++) {
-        countCellGeneUMIindex[c] = countCellGeneUMI.size();
-        uint32_t start = input->sparse_cell_index[c];
-        uint32_t nGenes = input->n_genes_per_cell[c];
-        nGenePerCB[c] = nGenes;
-        for (uint32_t g = 0; g < nGenes; g++) {
-            countCellGeneUMI.push_back(input->sparse_gene_ids[start + g]);  // gene ID
-            countCellGeneUMI.push_back(input->sparse_counts[start + g]);    // count
-        }
-    }
-    
+    // The matrix stays in the caller's split or strided storage throughout MC.
+    const vector<uint32_t> unused;
+
     // Map candidate retain indices back to original indices for ED
     vector<uint32_t> candidateOrigIndices;
     for (uint32_t retainIdx : candidateRetainIndices) {
@@ -427,9 +429,7 @@ int scrnaEmptyDropsTrace(const scrna_matrix_input* input, const scrna_ed_config*
         ambProfile,
         candidateOrigIndices,
         candidateCounts,
-        countCellGeneUMI,
-        countCellGeneUMIindex,
-        nGenePerCB,
+        unused, unused, unused,
         2,  // stride (gene, count pairs)
         1,  // count offset
         edParams,
@@ -438,7 +438,8 @@ int scrnaEmptyDropsTrace(const scrna_matrix_input* input, const scrna_ed_config*
         input->n_cells,
         "",  // debugOutputDir
         "",  // tagName
-        false  // enableInvariantChecks
+        false,  // enableInvariantChecks
+        &matrix
     );
     
     // ========================================================================
