@@ -18,6 +18,9 @@ TESTS := test_sampler_deterministic \
          test_simple_ed_threshold \
          test_ordmag_ties \
          test_ordmag_floor \
+         test_ordmag_parallel \
+         test_ordmag_estimator_parity \
+         test_thread_permits \
          test_no_tag_mode \
          test_observed_occupancy
 
@@ -45,6 +48,15 @@ test_ordmag_ties: test_ordmag_ties.cpp $(LIBSCRNA_INC)/OrdMagRank.h $(LIBSCRNA)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
 
 test_ordmag_floor: test_ordmag_floor.cpp $(LIBSCRNA)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
+
+test_ordmag_parallel: test_ordmag_parallel.cpp $(LIBSCRNA_INC)/ParallelTasks.h $(LIBSCRNA)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
+
+test_ordmag_estimator_parity: test_ordmag_estimator_parity.cpp $(LIBSCRNA)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
+
+test_thread_permits: test_thread_permits.cpp $(LIBSCRNA_INC)/ParallelTasks.h $(LIBSCRNA_INC)/ThreadPermits.h $(LIBSCRNA)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
 
 test_no_tag_mode: test_no_tag_mode.cpp $(LIBSCRNA)
