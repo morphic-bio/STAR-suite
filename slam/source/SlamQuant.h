@@ -2,6 +2,7 @@
 #define SLAM_QUANT_H
 
 #include "SlamSolver.h"
+#include "SlamFit.h"
 #include "SlamVarianceAnalysis.h"
 #include "SlamReadBuffer.h"
 #include "SlamDump.h"
@@ -291,6 +292,9 @@ public:
     void debugSnpSiteObserve(uint64_t absPos, bool anyMismatch, bool convMismatch,
                              double weight, bool primaryFlag, int mapq);
 
+    void setFitWorkers(size_t workers) { fitWorkers_ = workers ? workers : 1; }
+    size_t fitPasses() const { return fitPasses_; }
+    size_t fitResultBytes() const { return fittedGenes_.capacity() * sizeof(SlamFit); }
     const std::vector<SlamGeneStats>& genes() const { return geneStats_; }
     const std::vector<uint8_t>& allowedGenes() const { return allowedGenes_; }
     SlamDiagnostics& diagnostics() { return diag_; }
@@ -298,6 +302,13 @@ public:
 
 private:
     std::vector<SlamGeneStats> geneStats_;
+    mutable bool fitsValid_ = false;
+    mutable SlamFitParameters fitParameters_{};
+    mutable std::vector<SlamFit> fittedGenes_;
+    mutable size_t fitPasses_ = 0;
+    size_t fitWorkers_ = 1;
+    const std::vector<SlamFit>& fitGenes(const SlamFitParameters&) const;
+
     SlamDiagnostics diag_;
     std::array<SlamTransitionStats, kSlamMismatchCategoryCount> transitions_;
     std::array<SlamTransitionStats, kSlamMismatchCategoryCount> transitionsFirst_;

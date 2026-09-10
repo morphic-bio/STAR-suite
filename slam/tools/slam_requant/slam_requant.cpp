@@ -160,22 +160,22 @@ static void writeSlamOut(const std::string& outFile,
     std::ofstream out(outFile.c_str());
     if (!out.good()) return;
     out << "Gene\tSymbol\tReadCount\tConversions\tCoverage\tNTR\tMAP\tSigma\tLogLikelihood\n";
-    SlamSolver solver(errorRate, convRate);
+    const SlamFitParameters parameters{errorRate, convRate, 50, 1, 1, false};
     const auto& genes = quant.genes();
     for (size_t i = 0; i < genes.size(); ++i) {
         const SlamGeneStats& stats = genes[i];
         if (stats.readCount <= 0.0) continue;
-        SlamResult res = solver.solve(stats.histogram);
+        const auto res = fitSlamHistogram(stats.histogram, parameters);
         const std::string& gid = (i < geneIds.size()) ? geneIds[i] : std::string("GENE_") + std::to_string(i);
         const std::string& gname = (i < geneNames.size() && !geneNames[i].empty()) ? geneNames[i] : gid;
         out << gid << "\t" << gname << "\t"
             << stats.readCount << "\t"
             << stats.conversions << "\t"
             << stats.coverage << "\t"
-            << res.ntr << "\t"
-            << res.ntr << "\t"
+            << res.map << "\t"
+            << res.map << "\t"
             << res.sigma << "\t"
-            << res.log_likelihood << "\n";
+            << res.likelihood << "\n";
     }
 }
 
