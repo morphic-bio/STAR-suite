@@ -110,7 +110,9 @@ packaging, and checksums. Hosted tarball/Debian builds use the established
 portable no-Chromap build; production multiome source builds retain the
 Chromap-enabled default. Release checks cover packaged versions and source
 commit provenance, runtime loading, installer selection, smoke tests, and
-Debian installation/removal on the supported Ubuntu releases.
+Debian installation/removal on the supported Ubuntu releases. Generated parameter headers are
+content-checked and replaced atomically during builds, so source archives with
+equal file timestamps cannot silently compile stale parameter defaults.
 
 The compact probe cache and its gene-ID list are paired artifacts. Repack
 after changing probe records, keep mapped cache files immutable, and retain
