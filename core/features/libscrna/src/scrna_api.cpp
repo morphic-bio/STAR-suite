@@ -10,6 +10,7 @@
  */
 
 #include "scrna_api.h"
+#include "ScrnaTrace.h"
 #include "SampleMatrixData.h"
 #include "OrdMagStage.h"
 #include "OrdMagRank.h"
@@ -158,6 +159,12 @@ extern "C" int scrna_emptydrops_run_with_rank_options(
     uint32_t bootstrap_threads,
     scrna_ed_result *result
 ) {
+    return scrnaEmptyDropsTrace(input, config, mitochondrial_features, bootstrap_threads, result, nullptr);
+}
+
+int scrnaEmptyDropsTrace(const scrna_matrix_input* input, const scrna_ed_config* config,
+    const uint8_t* mitochondrial_features, uint32_t bootstrap_threads,
+    scrna_ed_result* result, ScrnaTrace* trace) {
     if (!input || !config || !result) {
         return -1;
     }
@@ -272,6 +279,8 @@ extern "C" int scrna_emptydrops_run_with_rank_options(
         simpleResult = SimpleEmptyDropsStage::runCRSimpleFilter(
             retainUMI, retainIndices.size(), simpleParams);
     }
+
+    if (trace) { trace->ordmag = simpleResult; trace->retainIndices = retainIndices; }
 
     result->retain_threshold = simpleResult.retainThreshold;
     result->min_umi = simpleResult.minUMI;
