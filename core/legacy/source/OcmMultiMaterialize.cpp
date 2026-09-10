@@ -1,5 +1,6 @@
 #include "OcmMultiMaterialize.h"
 #include "OcmMultiConfig.h"
+#include "OcmCountStore.h"
 #include "PfMultiMerge.h"
 #include "VelocytoMexWriter.h"
 #include "SoloMemoryProfile.h"
@@ -11,6 +12,9 @@
 #include "BoundedSampleTasks.h"
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <memory>
+#include <numeric>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -28,6 +32,7 @@
 namespace {
 
 static const int kGzLevel = 3;
+static uint32_t ocmCountValue(double value, bool round);
 
 static bool isUnsetTokenLocal(const string& input) {
     return input.empty() || input == "-";
@@ -346,60 +351,54 @@ template <typename ShapeFn, typename EntryFn>
 static void streamMtxEntries(const string& matrixPath, ShapeFn onShape, EntryFn onEntry) {
     const bool isGz = matrixPath.size() > 3 && matrixPath.substr(matrixPath.size() - 3) == ".gz";
     bool shapeSeen = false;
+    uint64_t nRows = 0, nCols = 0, expected = 0, entries = 0;
     auto processLine = [&](const string& line) {
-        if (line.empty() || line[0] == '%') {
-            return;
-        }
+        if (line.empty() || line[0] == '%') return;
+        istringstream ss(line);
         if (!shapeSeen) {
-            uint64_t nRows = 0;
-            uint64_t nCols = 0;
-            uint64_t nnz = 0;
-            istringstream ss(line);
-            if (!(ss >> nRows >> nCols >> nnz)) {
+            if (!(ss >> nRows >> nCols >> expected) || nRows > UINT32_MAX || nCols > UINT32_MAX)
                 throw std::runtime_error("Invalid MatrixMarket dimensions in " + matrixPath);
-            }
-            onShape(nRows, nCols, nnz);
+            onShape(nRows, nCols, expected);
             shapeSeen = true;
             return;
         }
-        uint32_t row = 0;
-        uint32_t col = 0;
-        double value = 0.0;
-        istringstream ss(line);
-        if (ss >> row >> col >> value) {
-            onEntry(row, col, value);
-        }
+        uint32_t row = 0, col = 0;
+        double value = 0;
+        if (!(ss >> row >> col >> value) || row == 0 || row > nRows || col == 0 || col > nCols ||
+            !std::isfinite(value) || value < 0 || entries == expected)
+            throw std::runtime_error("Invalid MatrixMarket entry in " + matrixPath);
+        ++entries;
+        onEntry(row, col, value);
     };
-
     if (isGz) {
         gzFile gz = gzopen(matrixPath.c_str(), "rb");
-        if (gz == nullptr) {
-            throw std::runtime_error("Failed to open MatrixMarket file: " + matrixPath);
+        if (!gz) throw std::runtime_error("Failed to open MatrixMarket file: " + matrixPath);
+        gzbuffer(gz, 1 << 20);
+        try {
+            string line;
+            while (gzGetLineLocal(gz, line)) processLine(line);
+            int error = Z_OK;
+            gzerror(gz, &error);
+            if (error != Z_OK && error != Z_STREAM_END)
+                throw std::runtime_error("Failed while reading MatrixMarket file: " + matrixPath);
+        } catch (...) {
+            gzclose(gz);
+            throw;
         }
-        string line;
-        while (gzGetLineLocal(gz, line)) {
-            processLine(line);
-        }
-        const int rc = gzclose(gz);
-        if (rc != Z_OK) {
-            throw std::runtime_error("Failed while reading MatrixMarket file: " + matrixPath);
-        }
+        if (gzclose(gz) != Z_OK)
+            throw std::runtime_error("Failed while closing MatrixMarket file: " + matrixPath);
     } else {
         ifstream in(matrixPath.c_str());
-        if (!in.is_open()) {
-            throw std::runtime_error("Failed to open MatrixMarket file: " + matrixPath);
-        }
+        if (!in.is_open()) throw std::runtime_error("Failed to open MatrixMarket file: " + matrixPath);
         string line;
         while (getline(in, line)) {
-            while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
-                line.pop_back();
-            }
+            while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
             processLine(line);
         }
+        if (in.bad()) throw std::runtime_error("Failed while reading MatrixMarket file: " + matrixPath);
     }
-    if (!shapeSeen) {
-        throw std::runtime_error("Missing MatrixMarket dimensions in " + matrixPath);
-    }
+    if (!shapeSeen || entries != expected)
+        throw std::runtime_error("Missing MatrixMarket dimensions or truncated entries in " + matrixPath);
 }
 
 struct RoutedMexGroup {
@@ -455,6 +454,10 @@ static void finalizeMatrixBodyToGz(const string& bodyPath,
             throw std::runtime_error("Failed writing output matrix body: " + outputPath);
         }
     }
+    if (body.bad()) {
+        gzclose(gz);
+        throw std::runtime_error("Failed reading matrix body: " + bodyPath);
+    }
     if (gzclose(gz) != Z_OK) {
         throw std::runtime_error("Failed closing output matrix: " + outputPath);
     }
@@ -466,7 +469,9 @@ static void streamMexMatrixToGroups(const string& inputMexDir,
                                     const vector<RoutedMexGroup>& groups,
                                     const string& tempDir,
                                     const string& label,
-                                    Parameters& P) {
+                                    Parameters& P,
+                                    bool nativeCounts = true,
+                                    uint64_t expectedRows = UINT64_MAX) {
     if (groups.empty()) {
         return;
     }
@@ -474,6 +479,10 @@ static void streamMexMatrixToGroups(const string& inputMexDir,
     const string matrixPath = PfMultiMerge::resolveMexFile(inputMexDir, matrixName);
     vector<ofstream> bodies(groups.size());
     vector<string> bodyPaths(groups.size());
+    struct Cleanup {
+        const vector<string>& paths;
+        ~Cleanup() { for (const auto& path : paths) std::remove(path.c_str()); }
+    } cleanup{bodyPaths};
     vector<uint64_t> nnz(groups.size(), 0);
     for (size_t i = 0; i < groups.size(); ++i) {
         string safeMatrix = matrixName;
@@ -490,6 +499,8 @@ static void streamMexMatrixToGroups(const string& inputMexDir,
     streamMtxEntries(
         matrixPath,
         [&](uint64_t rows, uint64_t cols, uint64_t) {
+            if (expectedRows != UINT64_MAX && rows != expectedRows)
+                throw std::runtime_error("OCM matrix rows disagree with feature axis: " + matrixPath);
             nRows = rows;
             nCols = cols;
             for (const auto& group : groups) {
@@ -507,10 +518,8 @@ static void streamMexMatrixToGroups(const string& inputMexDir,
                 return;
             }
             const uint32_t oldCol = col - 1;
-            const uint32_t intValue = value < 0.0 ? 0 : static_cast<uint32_t>(value + 0.5);
-            if (intValue == 0) {
-                return;
-            }
+            const uint32_t intValue = ocmCountValue(value, nativeCounts);
+            if (nativeCounts && intValue == 0) return;
             char line[96];
             for (size_t i = 0; i < groups.size(); ++i) {
                 const vector<uint32_t>& remap = groups[i].layout.sourceColToSorted;
@@ -523,11 +532,13 @@ static void streamMexMatrixToGroups(const string& inputMexDir,
                     throw std::runtime_error("Failed formatting routed matrix line");
                 }
                 bodies[i].write(line, n);
+                if (!bodies[i]) throw std::runtime_error("Failed writing matrix body: " + bodyPaths[i]);
                 nnz[i]++;
             }
         });
     for (auto& body : bodies) {
         body.close();
+        if (body.fail()) throw std::runtime_error("Failed closing OCM matrix body");
     }
     for (size_t i = 0; i < groups.size(); ++i) {
         finalizeMatrixBodyToGz(bodyPaths[i],
@@ -543,9 +554,11 @@ static void streamMexToGroups(const string& inputMexDir,
                               const vector<RoutedMexGroup>& groups,
                               const string& tempDir,
                               const string& label,
-                              Parameters& P) {
+                              Parameters& P,
+                              bool nativeCounts = true) {
     writeMexMetadataForGroups(groups, featureLinesFromAxes(axes), P);
-    streamMexMatrixToGroups(inputMexDir, "matrix.mtx", groups, tempDir, label, P);
+    streamMexMatrixToGroups(inputMexDir, "matrix.mtx", groups, tempDir, label, P,
+                             nativeCounts, axes.features.size());
 }
 
 static PfMultiMerge::CrBarcodeLayout buildLayoutFromDesiredBarcodes(
@@ -624,124 +637,198 @@ static void addLayoutCellsPerTag(const PfMultiMerge::CrBarcodeLayout& layout,
     }
 }
 
-static void readSparseMatrixForEmptyDrops(const string& matrixPath,
-                                          vector<uint32_t>& umiCounts,
-                                          vector<uint32_t>& sparseGeneIds,
-                                          vector<uint32_t>& sparseCounts,
-                                          vector<uint32_t>& sparseCellIndex,
-                                          vector<uint32_t>& nGenesPerCell,
-                                          uint32_t& nRowsOut,
-                                          uint32_t& nColsOut,
-                                          size_t& nnzOut) {
-    uint64_t nRows64 = 0;
-    uint64_t nCols64 = 0;
-    uint64_t declaredNnz = 0;
-    streamMtxEntries(
-        matrixPath,
-        [&](uint64_t rows, uint64_t cols, uint64_t nnz) {
-            nRows64 = rows;
-            nCols64 = cols;
-            declaredNnz = nnz;
-            if (rows > std::numeric_limits<uint32_t>::max() ||
-                cols > std::numeric_limits<uint32_t>::max()) {
-                throw std::runtime_error("EmptyDrops matrix dimensions exceed uint32 range");
-            }
-            nGenesPerCell.assign(static_cast<size_t>(cols), 0);
-        },
-        [&](uint32_t, uint32_t col, double) {
-            if (col > 0 && col <= nCols64) {
-                nGenesPerCell[col - 1]++;
-            }
-        });
+// Counts enter the caller directly from routed records. The first pass counts
+// entries and removes zero-UMI columns before allocating the sparse arrays;
+// the second fills them in the same within-column order as the original MEX.
+struct OcmSparseCounts {
+    vector<string> barcodes;
+    vector<uint32_t> umiCounts, geneIds, counts, cellIndex, nGenes, rawEntries;
+    uint32_t nRows = 0;
+};
 
-    nRowsOut = static_cast<uint32_t>(nRows64);
-    nColsOut = static_cast<uint32_t>(nCols64);
-    nnzOut = static_cast<size_t>(declaredNnz);
-    sparseCellIndex.assign(static_cast<size_t>(nColsOut) + 1, 0);
-    for (uint32_t i = 0; i < nColsOut; ++i) {
-        sparseCellIndex[i + 1] = sparseCellIndex[i] + nGenesPerCell[i];
+static OcmSparseCounts prepareOcmCounts(ocm::CountStore& records,
+                                       const vector<string>& rawBarcodes,
+                                       uint32_t nRows) {
+    if (records.size() > UINT32_MAX || rawBarcodes.size() > UINT32_MAX)
+        throw std::overflow_error("OCM caller sparse matrix exceeds uint32 offsets");
+    OcmSparseCounts out;
+    out.nRows = nRows;
+    out.rawEntries.assign(rawBarcodes.size(), 0);
+    vector<uint32_t> rawUmis(rawBarcodes.size(), 0);
+    records.forEach([&](const ocm::CountRecord& record) {
+        if (record.gene >= nRows || record.cell >= rawBarcodes.size())
+            throw std::runtime_error("OCM count coordinate outside matrix axes");
+        if (rawUmis[record.cell] > UINT32_MAX - record.count)
+            throw std::overflow_error("OCM per-barcode UMI total exceeds uint32 range");
+        rawUmis[record.cell] += record.count;
+        ++out.rawEntries[record.cell];
+    });
+    vector<uint32_t> remap(rawBarcodes.size(), UINT32_MAX);
+    out.cellIndex.push_back(0);
+    for (size_t cell = 0; cell < rawBarcodes.size(); ++cell) {
+        if (rawUmis[cell] == 0) continue;
+        remap[cell] = static_cast<uint32_t>(out.barcodes.size());
+        out.barcodes.push_back(rawBarcodes[cell]);
+        out.umiCounts.push_back(rawUmis[cell]);
+        out.nGenes.push_back(out.rawEntries[cell]);
+        out.cellIndex.push_back(out.cellIndex.back() + out.rawEntries[cell]);
     }
-    sparseGeneIds.assign(nnzOut, 0);
-    sparseCounts.assign(nnzOut, 0);
-    umiCounts.assign(nColsOut, 0);
-    vector<uint32_t> offsets(nColsOut, 0);
-
-    streamMtxEntries(
-        matrixPath,
-        [&](uint64_t, uint64_t, uint64_t) {},
-        [&](uint32_t row, uint32_t col, double value) {
-            if (row == 0 || col == 0 || row > nRowsOut || col > nColsOut) {
-                return;
-            }
-            const uint32_t cell = col - 1;
-            const uint32_t pos = sparseCellIndex[cell] + offsets[cell];
-            if (pos >= sparseGeneIds.size()) {
-                throw std::runtime_error("EmptyDrops sparse fill overflow");
-            }
-            const uint32_t count = value < 0.0 ? 0 : static_cast<uint32_t>(value + 0.5);
-            sparseGeneIds[pos] = row - 1;
-            sparseCounts[pos] = count;
-            umiCounts[cell] += count;
-            offsets[cell]++;
-        });
+    out.geneIds.resize(out.cellIndex.back());
+    out.counts.resize(out.cellIndex.back());
+    vector<uint32_t> cursor = out.cellIndex;
+    records.forEach([&](const ocm::CountRecord& record) {
+        const uint32_t cell = remap[record.cell];
+        if (cell == UINT32_MAX) return;
+        const uint32_t pos = cursor[cell]++;
+        out.geneIds[pos] = record.gene;
+        out.counts[pos] = record.count;
+    });
+    return out;
 }
 
-static void dropZeroUmiCellsForEmptyDrops(vector<string>& barcodes,
-                                          vector<uint32_t>& umiCounts,
-                                          vector<uint32_t>& sparseGeneIds,
-                                          vector<uint32_t>& sparseCounts,
-                                          vector<uint32_t>& sparseCellIndex,
-                                          vector<uint32_t>& nGenesPerCell,
-                                          size_t& nnz) {
-    const uint32_t oldCols = static_cast<uint32_t>(barcodes.size());
-    vector<uint32_t> oldToNew(oldCols, UINT32_MAX);
-    vector<string> barcodesOut;
-    vector<uint32_t> umiOut;
-    barcodesOut.reserve(barcodes.size());
-    umiOut.reserve(umiCounts.size());
-    for (uint32_t old = 0; old < oldCols; ++old) {
-        if (umiCounts[old] == 0) {
-            continue;
+// Buffered formatting/compression, with the coordinate order retained. Publish
+// a matrix only after the promised number of entries and gzip close succeed.
+class OcmMatrixWriter {
+public:
+    OcmMatrixWriter(const string& path, uint64_t rows, uint64_t cols, uint64_t nnz)
+        : path_(path), temporary_(path + ".tmp"), expected_(nnz) {
+        file_ = gzopen(temporary_.c_str(), "wb");
+        if (!file_) throw std::runtime_error("Cannot write OCM matrix " + path);
+        gzbuffer(file_, 1 << 20);
+        gzsetparams(file_, kGzLevel, Z_DEFAULT_STRATEGY);
+        try {
+            buffer_.reserve(1 << 20);
+            buffer_ = "%%MatrixMarket matrix coordinate integer general\n%\n"
+                + std::to_string(rows) + " " + std::to_string(cols) + " "
+                + std::to_string(nnz) + "\n";
+        } catch (...) {
+            gzclose(file_); file_ = nullptr;
+            std::remove(temporary_.c_str());
+            throw;
         }
-        oldToNew[old] = static_cast<uint32_t>(barcodesOut.size());
-        barcodesOut.push_back(barcodes[old]);
-        umiOut.push_back(umiCounts[old]);
     }
-    if (barcodesOut.empty()) {
-        throw std::runtime_error("All barcodes have zero UMIs; cannot run OCM EmptyDrops");
+    OcmMatrixWriter(const OcmMatrixWriter&) = delete;
+    OcmMatrixWriter& operator=(const OcmMatrixWriter&) = delete;
+    ~OcmMatrixWriter() {
+        if (file_) gzclose(file_);
+        if (!committed_) std::remove(temporary_.c_str());
     }
+    void append(uint32_t row, uint32_t col, uint32_t count) {
+        char line[96];
+        const int n = snprintf(line, sizeof(line), "%u %u %u\n", row, col, count);
+        if (n <= 0 || static_cast<size_t>(n) >= sizeof(line))
+            throw std::runtime_error("Cannot format OCM matrix count");
+        buffer_.append(line, n);
+        ++written_;
+        if (buffer_.size() >= (1 << 20)) flush();
+    }
+    void finish() {
+        if (written_ != expected_) throw std::runtime_error("OCM matrix entry count mismatch: " + path_);
+        flush();
+        const int rc = gzclose(file_); file_ = nullptr;
+        if (rc != Z_OK) throw std::runtime_error("Cannot close OCM matrix " + path_);
+        if (std::rename(temporary_.c_str(), path_.c_str()) != 0)
+            throw std::runtime_error("Cannot publish OCM matrix " + path_);
+        committed_ = true;
+    }
+private:
+    void flush() {
+        if (!buffer_.empty() && gzwrite(file_, buffer_.data(), buffer_.size()) != static_cast<int>(buffer_.size()))
+            throw std::runtime_error("Cannot write OCM matrix " + path_);
+        buffer_.clear();
+    }
+    string path_, temporary_, buffer_;
+    gzFile file_ = nullptr;
+    uint64_t expected_, written_ = 0;
+    bool committed_ = false;
+};
 
-    vector<uint32_t> sparseGeneOut;
-    vector<uint32_t> sparseCountOut;
-    vector<uint32_t> sparseIndexOut(barcodesOut.size() + 1, 0);
-    vector<uint32_t> nGenesOut(barcodesOut.size(), 0);
-    sparseGeneOut.reserve(sparseGeneIds.size());
-    sparseCountOut.reserve(sparseCounts.size());
-    size_t outPos = 0;
-    for (uint32_t old = 0; old < oldCols; ++old) {
-        const uint32_t next = oldToNew[old];
-        if (next == UINT32_MAX) {
-            continue;
-        }
-        sparseIndexOut[next] = static_cast<uint32_t>(outPos);
-        const uint32_t start = sparseCellIndex[old];
-        const uint32_t nGenes = nGenesPerCell[old];
-        nGenesOut[next] = nGenes;
-        for (uint32_t k = 0; k < nGenes; ++k) {
-            const size_t pos = static_cast<size_t>(start + k);
-            sparseGeneOut.push_back(sparseGeneIds[pos]);
-            sparseCountOut.push_back(sparseCounts[pos]);
-            outPos++;
-        }
+static void writeOcmAxes(const string& dir, const vector<string>& features,
+                         const vector<string>& barcodes) {
+    if (!writeGzLinesLocal(dir + "/features.tsv.gz", features) ||
+        !writeGzLinesLocal(dir + "/barcodes.tsv.gz", barcodes))
+        throw std::runtime_error("Cannot write OCM MEX axes in " + dir);
+}
+
+static uint32_t ocmCountValue(double value, bool round) {
+    if (!std::isfinite(value) || value < 0)
+        throw std::runtime_error("Invalid negative or nonfinite OCM count");
+    const double converted = std::floor(value + (round ? 0.5 : 0.0));
+    if (converted > UINT32_MAX) throw std::overflow_error("OCM count exceeds uint32 range");
+    return static_cast<uint32_t>(converted);
+}
+
+static PfMultiMerge::CrBarcodeLayout ocmPoolLayout(const PfMultiMerge::MexAxes& axes,
+                                                   std::ostream& log) {
+    if (axes.barcodes.size() > UINT32_MAX || axes.features.size() > UINT32_MAX)
+        throw std::overflow_error("OCM matrix axes exceed uint32 range");
+    vector<uint32_t> columns(axes.barcodes.size());
+    std::iota(columns.begin(), columns.end(), 0);
+    return PfMultiMerge::buildCrBarcodeLayoutForColumns(axes.barcodes, columns,
+                                                        "1", "TRU", "TRU", log);
+}
+
+static void routeOcmCounts(const string& rawDir, const string& poolDir,
+                           const PfMultiMerge::MexAxes& axes,
+                           const vector<RoutedMexGroup>& groups,
+                           vector<std::unique_ptr<ocm::CountStore>>& stores,
+                           Parameters& P) {
+    const auto poolLayout = ocmPoolLayout(axes, P.inOut->logMain);
+    createDirectory(poolDir + "/", P.runDirPerm, "OCM pooled MEX output", P);
+    writeOcmAxes(poolDir, featureLinesFromAxes(axes), poolLayout.sortedBarcodes);
+    std::unique_ptr<OcmMatrixWriter> pool;
+    streamMtxEntries(PfMultiMerge::resolveMexFile(rawDir, "matrix.mtx"),
+        [&](uint64_t rows, uint64_t cols, uint64_t nnz) {
+            if (rows != axes.features.size() || cols != axes.barcodes.size())
+                throw std::runtime_error("OCM raw matrix dimensions disagree with axes");
+            pool.reset(new OcmMatrixWriter(poolDir + "/matrix.mtx.gz", rows,
+                                           poolLayout.sortedBarcodes.size(), nnz));
+        },
+        [&](uint32_t row, uint32_t col, double value) {
+            const uint32_t source = col - 1;
+            // Preserve the pooled export's truncation and the native caller's
+            // existing rounding/zero exclusion; counts normally are integers.
+            pool->append(row, poolLayout.sourceColToSorted[source] + 1, ocmCountValue(value, false));
+            const uint32_t count = ocmCountValue(value, true);
+            if (!count) return;
+            for (size_t i = 0; i < groups.size(); ++i) {
+                const uint32_t cell = groups[i].layout.sourceColToSorted[source];
+                if (cell != UINT32_MAX) stores[i]->append({row - 1, cell, count});
+            }
+        });
+    for (auto& store : stores) store->finish();
+    pool->finish();
+}
+
+static void writeOcmSampleCounts(ocm::CountStore& records,
+                                 const RoutedMexGroup& rawGroup,
+                                 const string& filteredDir,
+                                 const vector<string>& features,
+                                 const vector<string>& calledBarcodes,
+                                 const vector<uint32_t>& rawEntries) {
+    const auto& rawBarcodes = rawGroup.layout.sortedBarcodes;
+    std::unordered_map<string, uint32_t> rawIndex;
+    for (size_t i = 0; i < rawBarcodes.size(); ++i) rawIndex.emplace(rawBarcodes[i], i);
+    vector<uint32_t> filteredIndex(rawBarcodes.size(), UINT32_MAX);
+    uint64_t filteredNnz = 0;
+    for (size_t i = 0; i < calledBarcodes.size(); ++i) {
+        const auto found = rawIndex.find(calledBarcodes[i]);
+        if (found == rawIndex.end() || filteredIndex[found->second] != UINT32_MAX)
+            throw std::runtime_error("Invalid or duplicate OCM called barcode");
+        filteredIndex[found->second] = static_cast<uint32_t>(i);
+        filteredNnz += rawEntries[found->second];
     }
-    sparseIndexOut[barcodesOut.size()] = static_cast<uint32_t>(outPos);
-    nnz = outPos;
-    barcodes.swap(barcodesOut);
-    umiCounts.swap(umiOut);
-    sparseGeneIds.swap(sparseGeneOut);
-    sparseCounts.swap(sparseCountOut);
-    sparseCellIndex.swap(sparseIndexOut);
-    nGenesPerCell.swap(nGenesOut);
+    writeOcmAxes(rawGroup.outputDir, features, rawBarcodes);
+    writeOcmAxes(filteredDir, features, calledBarcodes);
+    OcmMatrixWriter raw(rawGroup.outputDir + "/matrix.mtx.gz", features.size(), rawBarcodes.size(), records.size());
+    OcmMatrixWriter filtered(filteredDir + "/matrix.mtx.gz", features.size(), calledBarcodes.size(), filteredNnz);
+    records.forEach([&](const ocm::CountRecord& record) {
+        raw.append(record.gene + 1, record.cell + 1, record.count);
+        const uint32_t cell = filteredIndex[record.cell];
+        if (cell != UINT32_MAX) filtered.append(record.gene + 1, cell + 1, record.count);
+    });
+    raw.finish();
+    filtered.finish();
 }
 
 static void configureOcmEmptyDrops(const Parameters& P, scrna_ed_config* config) {
@@ -777,48 +864,26 @@ static void configureOcmEmptyDrops(const Parameters& P, scrna_ed_config* config)
     if (P.pSolo.flexFilterEdFdrThreshold > 0.0) config->fdr = P.pSolo.flexFilterEdFdrThreshold;
 }
 
-static vector<string> runOcmEmptyDropsOnRawMex(const string& rawMexDir,
+static vector<string> runOcmEmptyDropsOnCounts(OcmSparseCounts& counts,
+                                               size_t beforeCells,
                                                const string& edOutDir,
                                                const string& sampleId,
                                                Parameters& P, std::ostream& log) {
-    const string matrixPath = PfMultiMerge::resolveMexFile(rawMexDir, "matrix.mtx");
-    vector<string> barcodes = PfMultiMerge::readLines(PfMultiMerge::resolveMexFile(rawMexDir, "barcodes.tsv"));
-    vector<uint32_t> umiCounts;
-    vector<uint32_t> sparseGeneIds;
-    vector<uint32_t> sparseCounts;
-    vector<uint32_t> sparseCellIndex;
-    vector<uint32_t> nGenesPerCell;
-    uint32_t nRows = 0;
-    uint32_t nCols = 0;
-    size_t nnz = 0;
-    readSparseMatrixForEmptyDrops(matrixPath,
-                                  umiCounts,
-                                  sparseGeneIds,
-                                  sparseCounts,
-                                  sparseCellIndex,
-                                  nGenesPerCell,
-                                  nRows,
-                                  nCols,
-                                  nnz);
-    if (nCols != barcodes.size()) {
-        throw std::runtime_error("OCM EmptyDrops barcode count mismatch for " + sampleId);
-    }
-    const size_t beforeCells = barcodes.size();
-    if (std::none_of(umiCounts.begin(), umiCounts.end(), [](uint32_t n) { return n != 0; })) {
-        createDirectory(edOutDir + "/", P.runDirPerm, "OCM EmptyDrops output", P);
+    auto& barcodes = counts.barcodes;
+    auto& umiCounts = counts.umiCounts;
+    auto& sparseGeneIds = counts.geneIds;
+    auto& sparseCounts = counts.counts;
+    auto& sparseCellIndex = counts.cellIndex;
+    auto& nGenesPerCell = counts.nGenes;
+    const uint32_t nRows = counts.nRows;
+    const size_t nnz = sparseCounts.size();
+    if (barcodes.empty()) {
         scrna_ed_result empty{};
         if (scrna_emptydrops_write_outputs(&empty, edOutDir.c_str()) != 0)
             throw std::runtime_error("Failed writing empty OCM sample " + sampleId);
         log << "OCM EmptyDrops sample=" << sampleId << " nonzero_barcodes=0\n";
         return {};
     }
-    dropZeroUmiCellsForEmptyDrops(barcodes,
-                                  umiCounts,
-                                  sparseGeneIds,
-                                  sparseCounts,
-                                  sparseCellIndex,
-                                  nGenesPerCell,
-                                  nnz);
 
     vector<char*> barcodePtrs;
     barcodePtrs.reserve(barcodes.size());
@@ -868,7 +933,6 @@ static vector<string> runOcmEmptyDropsOnRawMex(const string& rawMexDir,
             filtered.push_back(result.barcodes[i]);
         }
     }
-    createDirectory(edOutDir + "/", P.runDirPerm, "OCM EmptyDrops output", P);
     if (scrna_emptydrops_write_outputs(&result, edOutDir.c_str()) != 0) {
         log << "WARNING: OCM EmptyDrops detailed output failed for " << sampleId
                          << " at " << edOutDir << "\n";
@@ -1118,16 +1182,6 @@ static int runOcmMultiMaterializeNativeEmptyDrops(Parameters& P,
     createDirectory(multiMuxDir + "/", P.runDirPerm, "OCM multi multiplexing_analysis", P);
     createDirectory(tempDir + "/", P.runDirPerm, "OCM native materialization temp", P);
 
-    if (PfMultiMerge::writeStreamedPoolMexGzCrCompat(rawOut,
-                                                     multiRawDir,
-                                                     rawOutputAxes,
-                                                     P,
-                                                     P.inOut->logMain) != 0) {
-        P.inOut->logMain << "EXITING because of fatal OCM MATERIALIZATION error: "
-                         << "failed writing pooled raw_feature_bc_matrix\n";
-        return 1;
-    }
-
     vector<RoutedMexGroup> rawGroups;
     vector<vector<uint32_t>> rawColsBySample;
     map<string, size_t> perSampleRawCounts;
@@ -1151,8 +1205,15 @@ static int runOcmMultiMaterializeNativeEmptyDrops(Parameters& P,
         rawGroups.push_back(group);
     }
 
-    streamMexToGroups(rawOut, rawOutputAxes, rawGroups, tempDir, "GeneFull.raw", P);
-    soloMemoryProfileCheckpoint(P.inOut->logMain, "ocm_native_ed_raw_written");
+    // Reserve at most one quarter of the matrix budget for retained records.
+    // Every other record spills in binary blocks; no per-sample MEX is an input.
+    ocm::CountBufferBudget recordBudget(P.pfMulti.ocmCellCallMaxMemory / 4);
+    vector<std::unique_ptr<ocm::CountStore>> stores;
+    stores.reserve(rawGroups.size());
+    for (size_t i = 0; i < rawGroups.size(); ++i)
+        stores.emplace_back(new ocm::CountStore(recordBudget, tempDir));
+    routeOcmCounts(rawOut, multiRawDir, rawOutputAxes, rawGroups, stores, P);
+    soloMemoryProfileCheckpoint(P.inOut->logMain, "ocm_native_ed_counts_routed");
 
     vector<RoutedMexGroup> filteredGroups;
     vector<vector<uint32_t>> filteredColsBySample;
@@ -1162,38 +1223,57 @@ static int runOcmMultiMaterializeNativeEmptyDrops(Parameters& P,
     const string filteredBarcodeGenomeLabel = resolveFilteredBarcodeGenomeLabel(config);
 
     vector<uint64_t> sampleBytes(config.samples.size());
+    size_t spilledSamples = 0;
     for (size_t i = 0; i < rawGroups.size(); ++i) {
-        const string path = PfMultiMerge::resolveMexFile(rawGroups[i].outputDir, "matrix.mtx");
-        gzFile file = gzopen(path.c_str(), "rb");
-        if (!file) throw std::runtime_error("Cannot read OCM matrix header " + path);
-        char line[4096]; bool found = false;
-        while (gzgets(file, line, sizeof(line))) {
-            if (line[0] == '%') continue;
-            uint64_t rows, cols, nnz; std::istringstream header(line);
-            if (!(header >> rows >> cols >> nnz) || nnz > UINT64_MAX / 16 || cols > UINT64_MAX / 128 || rows > UINT64_MAX / 16) break;
-            const uint64_t sparse = nnz * 16, axes = cols * 128;
-            if (axes > UINT64_MAX - sparse || rows * 16 > UINT64_MAX - sparse - axes) break;
-            sampleBytes[i] = sparse + axes + rows * 16;
-            found = true; break;
-        }
-        gzclose(file);
-        if (!found) throw std::runtime_error("Invalid or overflowing OCM matrix header " + path);
+        const uint64_t nnz = stores[i]->size();
+        const uint64_t cols = rawGroups[i].layout.sortedBarcodes.size();
+        const uint64_t rows = rawOutputAxes.features.size();
+        if (nnz > UINT64_MAX / 16 || cols > UINT64_MAX / 128 || rows > UINT64_MAX / 16 ||
+            cols * 128 > UINT64_MAX - nnz * 16 || rows * 16 > UINT64_MAX - nnz * 16 - cols * 128)
+            throw std::overflow_error("OCM sample memory estimate overflow");
+        sampleBytes[i] = nnz * 16 + cols * 128 + rows * 16;
+        if (stores[i]->spilled()) ++spilledSamples;
+    }
+    const uint64_t retainedBytes = recordBudget.used;
+    const uint64_t ioBytes = stores.size() * ocm::CountStore::blockBytes;
+    const uint64_t reservedBytes = retainedBytes + ioBytes;
+    const uint64_t callBudget = P.pfMulti.ocmCellCallMaxMemory > reservedBytes
+        ? P.pfMulti.ocmCellCallMaxMemory - reservedBytes : 0;
+    const vector<string> featureLines = featureLinesFromAxes(rawOutputAxes);
+    // createDirectory writes the shared STAR log. Keep it on the coordinator;
+    // workers only write sample-owned streams and return buffered messages.
+    for (size_t i = 0; i < rawGroups.size(); ++i) {
+        const string countDir = outsDir + "/per_sample_outs/" + config.samples[i].sample_id + "/count";
+        createDirectory(rawGroups[i].outputDir + "/", P.runDirPerm, "OCM raw MEX output", P);
+        createDirectory(countDir + "/sample_filtered_feature_bc_matrix/", P.runDirPerm, "OCM filtered MEX output", P);
+        createDirectory(countDir + "/emptydrops/", P.runDirPerm, "OCM EmptyDrops output", P);
     }
     vector<vector<string>> sampleCalls(config.samples.size());
     vector<string> sampleLogs(config.samples.size());
     const auto scheduling = scrna::boundedSampleTasks(sampleBytes, std::max(1, P.runThreadN),
-        P.pfMulti.ocmCellCallMaxMemory, [&](size_t i) {
+        callBudget, [&](size_t i) {
             const auto& sample = config.samples[i];
+            const string countDir = outsDir + "/per_sample_outs/" + sample.sample_id + "/count";
             std::ostringstream log;
-            sampleCalls[i] = runOcmEmptyDropsOnRawMex(rawGroups[i].outputDir,
-                outsDir + "/per_sample_outs/" + sample.sample_id + "/count/emptydrops",
+            auto counts = prepareOcmCounts(*stores[i], rawGroups[i].layout.sortedBarcodes,
+                                            static_cast<uint32_t>(rawOutputAxes.features.size()));
+            sampleCalls[i] = runOcmEmptyDropsOnCounts(counts,
+                rawGroups[i].layout.sortedBarcodes.size(), countDir + "/emptydrops",
                 sample.sample_id, P, log);
+            writeOcmSampleCounts(*stores[i], rawGroups[i], countDir + "/sample_filtered_feature_bc_matrix",
+                                  featureLines, sampleCalls[i], counts.rawEntries);
             sampleLogs[i] = log.str();
         });
     P.inOut->logMain << "OCM caller scheduling: peak_workers=" << scheduling.peakWorkers
         << " permits_returned=" << scheduling.permitsReturned
         << " peak_estimated_matrix_bytes=" << scheduling.peakEstimatedBytes
-        << " memory_budget=" << P.pfMulti.ocmCellCallMaxMemory << "\n";
+        << " memory_budget=" << P.pfMulti.ocmCellCallMaxMemory
+        << " count_buffer_bytes=" << retainedBytes
+        << " peak_retained_count_bytes=" << recordBudget.peak
+        << " count_io_buffer_bytes=" << ioBytes
+        << " spilled_samples=" << spilledSamples
+        << " source_matrix_passes=1 caller_mex_reads=0\n";
+    stores.clear(); // joined tasks no longer borrow count blocks or spill handles
 
     for (size_t i = 0; i < config.samples.size(); ++i) {
         const auto& sample = config.samples[i];
@@ -1234,7 +1314,6 @@ static int runOcmMultiMaterializeNativeEmptyDrops(Parameters& P,
     }
     soloMemoryProfileCheckpoint(P.inOut->logMain, "ocm_native_ed_cell_calls_done");
 
-    streamMexToGroups(rawOut, rawOutputAxes, filteredGroups, tempDir, "GeneFull.filtered", P);
     writeCellsPerTagJson(multiMuxDir + "/cells_per_tag.json", globalCellsPerTag);
 
     for (size_t i = 0; i < config.samples.size(); ++i) {
@@ -1549,13 +1628,23 @@ int runOcmMultiMaterialize(Parameters& P) {
 
         const string filteredBarcodeGenomeLabel = resolveFilteredBarcodeGenomeLabel(config);
 
-        if (PfMultiMerge::writeStreamedPoolMexGzCrCompat(rawOut,
-                                                         multiRawDir,
-                                                         rawOutputAxes,
-                                                         P,
-                                                         P.inOut->logMain) != 0) {
-            throw std::runtime_error("Failed to write outs/multi/count/raw_feature_bc_matrix");
+        const string tempDir = outsDir + "/multi/count/.ocm_route_tmp";
+        vector<RoutedMexGroup> rawGroups, filteredGroups;
+        rawGroups.push_back({"pool", multiRawDir, ocmPoolLayout(rawOutputAxes, P.inOut->logMain)});
+        for (const auto& sample : config.samples) {
+            const string countDir = outsDir + "/per_sample_outs/" + sample.sample_id + "/count";
+            const auto ids = sample.resolvedOcmIds();
+            rawGroups.push_back({"raw." + sample.sample_id, countDir + "/sample_raw_feature_bc_matrix",
+                PfMultiMerge::buildCrBarcodeLayoutForColumns(rawOutputAxes.barcodes,
+                    unionColumnIndices(rawTagIndices, ids), "1", "TRU", "TRU", P.inOut->logMain)});
+            filteredGroups.push_back({"filtered." + sample.sample_id, countDir + "/sample_filtered_feature_bc_matrix",
+                PfMultiMerge::buildCrBarcodeLayoutForColumns(filteredOutputAxes.barcodes,
+                    unionColumnIndices(filteredTagIndices, ids), "1", "TRU", "TRU", P.inOut->logMain)});
         }
+        streamMexToGroups(rawOut, rawOutputAxes, rawGroups, tempDir, "GeneFull.raw", P, false);
+        streamMexToGroups(filteredOut, filteredOutputAxes, filteredGroups, tempDir, "GeneFull.filtered", P, false);
+        P.inOut->logMain << "OCM existing calls: raw_matrix_passes=1 filtered_matrix_passes=1 samples="
+                         << config.samples.size() << "\n";
         writeCellsPerTagJson(multiMuxDir + "/cells_per_tag.json", cellsPerTag);
         soloMemoryProfileCheckpoint(P.inOut->logMain, "ocm_materialize_multi_raw_copied");
 
@@ -1577,7 +1666,8 @@ int runOcmMultiMaterialize(Parameters& P) {
 
         map<string, size_t> perSampleRawCounts;
         map<string, size_t> perSampleFilteredCounts;
-        for (const auto& sample : config.samples) {
+        for (size_t sampleIndex = 0; sampleIndex < config.samples.size(); ++sampleIndex) {
+            const auto& sample = config.samples[sampleIndex];
             const vector<string> ocmIds = sample.resolvedOcmIds();
             const vector<uint32_t> rawCols = unionColumnIndices(rawTagIndices, ocmIds);
             const vector<uint32_t> filteredCols = unionColumnIndices(filteredTagIndices, ocmIds);
@@ -1592,36 +1682,8 @@ int runOcmMultiMaterialize(Parameters& P) {
 
             soloMemoryProfileCheckpoint(P.inOut->logMain,
                                         "ocm_materialize_sample_begin:" + sample.sample_id);
-            const PfMultiMerge::CrBarcodeLayout rawLayout =
-                PfMultiMerge::buildCrBarcodeLayoutForColumns(rawOutputAxes.barcodes,
-                                                             rawCols,
-                                                             "1",
-                                                             "TRU",
-                                                             "TRU",
-                                                             P.inOut->logMain);
-            const PfMultiMerge::CrBarcodeLayout filteredLayout =
-                PfMultiMerge::buildCrBarcodeLayoutForColumns(filteredOutputAxes.barcodes,
-                                                             filteredCols,
-                                                             "1",
-                                                             "TRU",
-                                                             "TRU",
-                                                             P.inOut->logMain);
-            if (PfMultiMerge::writeColumnSubsetMexGz(rawOut,
-                                                   sampleRawDir,
-                                                   rawOutputAxes,
-                                                   rawLayout,
-                                                   P,
-                                                   P.inOut->logMain) != 0) {
-                throw std::runtime_error("Failed to stream per-sample raw MEX for " + sample.sample_id);
-            }
-            if (PfMultiMerge::writeColumnSubsetMexGz(filteredOut,
-                                                   sampleFilteredDir,
-                                                   filteredOutputAxes,
-                                                   filteredLayout,
-                                                   P,
-                                                   P.inOut->logMain) != 0) {
-                throw std::runtime_error("Failed to stream per-sample filtered MEX for " + sample.sample_id);
-            }
+            const auto& rawLayout = rawGroups[sampleIndex + 1].layout;
+            const auto& filteredLayout = filteredGroups[sampleIndex].layout;
 
             const vector<string>& filteredBarcodeLines = filteredLayout.sortedBarcodes;
             if (!filteredBarcodeLines.empty()) {
