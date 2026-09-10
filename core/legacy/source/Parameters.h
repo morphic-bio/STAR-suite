@@ -796,6 +796,7 @@ class Parameters {
             int crAssignConsumerThreads;    // Optional: pass --consumer_threads_per_set (default: unset)
             int crAssignSearchThreads;      // Optional: pass --search_threads (default: unset)
             int crAssignReadBufferLines;    // Optional: PF reader queue lines (default: unset)
+            string crAssignBgzfMode;        // auto|off|range for PF FASTQ, independent of GEX input
             string crAssignCbqMode;         // auto|stream|range for CBQ feature assignment
             double crAssignMinPosterior;    // Optional: pass --min_posterior (default: unset)
             int crAssignLegacyCbRescue;     // Optional: pass legacy order-dependent pending CB rescue mode

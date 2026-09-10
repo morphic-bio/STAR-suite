@@ -1,3 +1,5 @@
+.DEFAULT_GOAL := all
+
 CC=gcc
 CXX=g++
 AR=ar
@@ -44,7 +46,9 @@ LDFLAGS=-lm -lpthread -lz -fopenmp -lstdc++ $(HTS_LIBS)
 
 # Object files
 OBJS=$(SRCS:.c=.o)
-CORE_OBJS=$(CORE_SRCS:.c=.o)
+CORE_OBJS=$(CORE_SRCS:.c=.o) pf_bgzf_input.o pf_BgzfRangeReader.o pf_BgzfBlockReader.o
+BGZF_SOURCE = ../../legacy/source
+BGZF_CXXFLAGS = $(CFLAGS) -std=c++17 -I$(BGZF_SOURCE) -pthread
 
 # Executable names
 TARGET=assignBarcodes
@@ -78,6 +82,10 @@ TEST_PREHASH_MEMORY_TARGET=tests/test_prehash_memory_safety
 TEST_CATATAC_SPLIT_TARGET=tests/test_catatac_split_read
 TEST_FEATURE_DUPLICATES_TARGET=tests/test_feature_duplicate_names
 
+PF_BGZF_TEST = ../../../tests/pf_bgzf_harness
+$(PF_BGZF_TEST): ../../../tests/pf_bgzf_harness.cpp $(LIB_TARGET) $(LIBSCRNA)
+	$(CXX) $(BGZF_CXXFLAGS) $< $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS) -o $@
+
 .PHONY: all clean lib tools test test-adt-mex
 
 all: lib tools
@@ -91,6 +99,8 @@ tools: $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET)
 # Build libscrna first
 $(LIBSCRNA):
 	$(MAKE) -C $(LIBSCRNA_DIR) lib
+
+$(CORE_OBJS) main.o: include/common.h include/pf_api.h include/pf_bgzf_input.h
 
 $(LIB_TARGET): $(CORE_OBJS)
 	$(AR) rcs $@ $^
@@ -110,6 +120,12 @@ $(CALL_FEATURES_TARGET): call_features_main.o $(LIB_TARGET) $(LIBSCRNA)
 # plot_histogram.o is needed by assignBarcodes but not in core lib
 plot_histogram.o: plot_histogram.c
 	$(CC) $(CFLAGS) -c $< -o $@
+
+pf_bgzf_input.o: src/pf_bgzf_input.cpp include/pf_bgzf_input.h $(BGZF_SOURCE)/input/BgzfRangeReader.h
+	$(CXX) $(BGZF_CXXFLAGS) -c $< -o $@
+
+pf_Bgzf%.o: $(BGZF_SOURCE)/input/Bgzf%.cpp $(BGZF_SOURCE)/input/BgzfRangeReader.h $(BGZF_SOURCE)/input/BgzfBlockReader.h
+	$(CXX) $(BGZF_CXXFLAGS) -c $< -o $@
 
 # The implicit rule will now use VPATH to find the .c files in src/
 %.o: %.c
@@ -195,4 +211,4 @@ test-hash-demux-mex: $(TARGET)
 	@./tests/test_hash_demux_mex.sh
 
 clean:
-	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) $(TEST_CATATAC_SPLIT_TARGET) $(TEST_FEATURE_DUPLICATES_TARGET) tests/*.o
+	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) $(TEST_CATATAC_SPLIT_TARGET) $(TEST_FEATURE_DUPLICATES_TARGET) tests/*.o $(PF_BGZF_TEST)
