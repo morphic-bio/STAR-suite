@@ -1,3 +1,4 @@
+#include "input/BgzfPipeGroup.h"
 #include "mapThreadsSpawn.h"
 #include "FlexPipeline.h"
 #include "FlexHashScreen.h"
@@ -1001,7 +1002,8 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
         mapThreadsSpawnFlexPipeline(P, RAchunk);
         return;
     }
-    if (P.readFilesBgzfMode == "range" && !P.bgzfCoreActive) {
+    if (P.bgzfPipes) P.bgzfPipes->enablePermits();
+    if (P.readFilesBgzfMode == "range" && !P.bgzfCoreActive && !P.bgzfPipes) {
         fatalBgzfRangeMode(P, flexActivationReason.empty()
             ? "command is not a supported fused Flex run"
             : flexActivationReason);

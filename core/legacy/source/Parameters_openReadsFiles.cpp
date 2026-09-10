@@ -3,6 +3,9 @@
 #include "input/CbqInputModule.h"
 #include "input/FastxInputModule.h"
 #include "input/BgzfBlockReader.h"
+#include "input/BgzfPipeGroup.h"
+#include "ThreadControl.h"
+#include "GlobalVariables.h"
 #include <fstream>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -381,6 +384,7 @@ void Parameters::openReadsFiles()
 {
     // Reset FIFO list to avoid stale entries when reopening (e.g. SLAM auto-trim detection pass)
     readFilesInTmp.clear();
+    bgzfPipes.reset();
     // Check number of mates BEFORE opening files
     // Use readNends if available (set during readFilesInit), otherwise count readFilesIn
     uint readFilesNmates = readNends;
@@ -412,6 +416,40 @@ void Parameters::openReadsFiles()
                        << readFilesN << " lane" << (readFilesN == 1 ? "" : "s")
                        << "; no index or prescan)\n";
         return;
+    }
+    vector<vector<bool>> bgzfNative(readFilesNames.size());
+    bool anyNative = false;
+    if (readFilesTypeN == 1 && readFilesBgzfMode != "off" && readFilesUseInternalGzip && !readFilesLegacyZcat) {
+        for (size_t mate = 0; mate < readFilesNames.size(); ++mate) {
+            for (const auto& path : readFilesNames[mate]) {
+                star::input::BgzfDetection detection;
+                string error;
+                struct stat st;
+                bool regular = stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+                if (regular && !star::input::detect_bgzf(path, &detection, &error))
+                    exitWithError(error + "\n", std::cerr, inOut->logMain, EXIT_CODE_INPUT_FILES, *this);
+                bgzfNative[mate].push_back(detection.isBgzf);
+                anyNative |= detection.isBgzf;
+                if (readFilesBgzfMode == "range" && !detection.isBgzf)
+                    exitWithError("Forced BGZF range requires regular BGZF input: " + path + "\n", std::cerr, inOut->logMain, EXIT_CODE_INPUT_FILES, *this);
+            }
+        }
+    }
+    if (readFilesBgzfMode == "range" && !anyNative)
+        exitWithError("Forced BGZF range requires internal BGZF input; remove an explicit read command or select auto/off.\n", std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    if (anyNative) {
+        star::input::BgzfWorkPermitHooks hooks;
+        if (dynamicThreadInterface == 1) {
+            hooks.acquire = [](void*) -> uint64_t {
+                return g_threadChunks.mapPermitEnabled() ? g_threadChunks.mapPermitAcquire() : UINT64_MAX;
+            };
+            hooks.release = [](void*, uint64_t wait, uint64_t units, uint64_t bytes, uint64_t ns) {
+                if (wait != UINT64_MAX) g_threadChunks.mapPermitRelease(wait, units, bytes, ns);
+            };
+        }
+        bgzfPipes.reset(new star::input::BgzfPipeGroup(hooks));
+        inOut->logMain << "BGZF raw input: active; established STAR chunk parser, " << readFilesNames.size()
+                       << " mates, " << readFilesN << " lanes, ordered FILE markers, shared decode permits\n";
     }
     const bool bgzfCoreCandidate = readFilesTypeN == 1 &&
         (pSolo.flexMode || lowerCopyLocal(pSolo.flexModeStr) == "yes") &&
@@ -600,6 +638,17 @@ void Parameters::openReadsFiles()
                 rftry.close();
             }
 
+            if (bgzfPipes) {
+                const unsigned total = bgzfReaderThreads > 0 ? bgzfReaderThreads :
+                    (dynamicThreadInterface == 1 ? runThreadN : std::max(0, runThreadN - int(readFilesNames.size())));
+                const unsigned workers = total / readFilesNames.size() + (imate < total % readFilesNames.size());
+                readFilesCommandPID[imate] = 0;
+                bgzfPipes->start(readFilesNames[imate], bgzfNative[imate], readFilesInTmp[imate], workers, bgzfCrcCheck != 0);
+                inOut->readIn[imate].open(readFilesInTmp[imate].c_str());
+                if (inOut->readIn[imate].fail())
+                    exitWithError("Could not open BGZF FIFO for reading\n", std::cerr, inOut->logMain, EXIT_CODE_INPUT_FILES, *this);
+                continue;
+            }
             if (readFilesUseInternalGzip) {
                 inOut->logMain << "NOTE: mate " << (imate + 1)
                                << " using internal gzip FIFO helper: " << readFilesInTmp.at(imate) << "\n";
