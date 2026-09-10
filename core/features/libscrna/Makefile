@@ -34,6 +34,8 @@ PUBLIC_HEADERS := include/scrna_types.h \
                   include/EmptyDropsCRSampler.h \
                   include/EmptyDropsMultinomial.h \
                   include/OrdMagStage.h \
+                  include/ParallelTasks.h \
+                  include/ThreadPermits.h \
                   include/OrdMagRank.h \
                   include/SimpleEDCaller.h \
                   include/MitochondrialRankMask.h \
@@ -105,9 +107,9 @@ clean:
 	rm -f $(SIMPLEED_TOOL) $(ARC_TABLE_TOOL) $(MULTIOME_COMPARE_TOOL) $(MULTIOME_COMBINE_TOOL) $(GEX_EVIDENCE_TOOL) $(ATAC_EVIDENCE_TOOL)
 
 # Dependency on headers
-src/EmptyDropsCRSampler.o: include/EmptyDropsCRSampler.h include/scrna_types.h include/pcg_random.hpp
+src/EmptyDropsCRSampler.o: include/EmptyDropsCRSampler.h include/scrna_types.h include/pcg_random.hpp include/ParallelTasks.h include/ThreadPermits.h
 src/EmptyDropsMultinomial.o: include/EmptyDropsMultinomial.h include/EmptyDropsCRSampler.h include/CRLogProb.h include/scrna_types.h include/SimpleGoodTuring/sgt.h
-src/OrdMagStage.o: include/OrdMagStage.h include/OrdMagRank.h include/scrna_types.h include/pcg_random.hpp
+src/OrdMagStage.o: include/OrdMagStage.h include/OrdMagRank.h include/ParallelTasks.h include/ThreadPermits.h include/scrna_types.h include/pcg_random.hpp
 src/scrna_api.o: include/scrna_api.h include/OrdMagStage.h include/OrdMagRank.h include/EmptyDropsMultinomial.h include/scrna_types.h
 src/OccupancyGuard.o: include/OccupancyGuard.h include/scrna_types.h include/pcg_random.hpp
 

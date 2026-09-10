@@ -17,10 +17,24 @@
 #include <numeric>
 #include <iostream>
 #include <thread>
+#include "ParallelTasks.h"
 #include <vector>
 #include <stdexcept>
 
 using namespace std;
+
+namespace {
+// The estimator evaluates many baseline indices on the same bootstrap draw.
+// Keep its rounding and inclusive threshold rule, but reuse one sorted copy.
+uint32 findWithinSortedOrdmag(const vector<uint32>& sorted, uint32 baselineIdx) {
+    if (sorted.empty()) return 0;
+    const uint32 n = sorted.size();
+    if (baselineIdx >= n) baselineIdx = n - 1;
+    const uint32 baseline = sorted[n - baselineIdx - 1];
+    const uint32 cutoff = max((uint32)1, (uint32)round(0.1 * baseline));
+    return n - (lower_bound(sorted.begin(), sorted.end(), cutoff) - sorted.begin());
+}
+}
 
 // Find number of cells within order of magnitude of baseline
 // Matches Python: find_within_ordmag(x, baseline_idx)
@@ -34,21 +48,7 @@ uint32 SimpleEmptyDropsStage::findWithinOrdmag(
     vector<uint32> sorted = counts;
     sort(sorted.begin(), sorted.end());
     
-    // Get baseline from the high end (like Python x_ascending[-(baseline_idx + 1)])
-    uint32 n = sorted.size();
-    if (baselineIdx >= n) baselineIdx = n - 1;
-    uint32 baselinePos = n - baselineIdx - 1;
-    uint32 baseline = sorted[baselinePos];
-    
-    // Cutoff = max(1, round(0.1 * baseline))
-    uint32 cutoff = max((uint32)1, (uint32)round(0.1 * baseline));
-    
-    // Count cells >= cutoff (like Python: len(x) - np.searchsorted(x_ascending, cutoff))
-    // searchsorted finds first position where cutoff would be inserted
-    auto it = lower_bound(sorted.begin(), sorted.end(), cutoff);
-    uint32 countAbove = n - (it - sorted.begin());
-    
-    return countAbove;
+    return findWithinSortedOrdmag(sorted, baselineIdx);
 }
 
 // Estimate recovered cells by minimizing loss
@@ -62,6 +62,8 @@ pair<uint32, double> SimpleEmptyDropsStage::estimateRecoveredCellsOrdmag(
     if (nonzeroCounts.empty()) return make_pair(0, 0.0);
     
     uint32 n = nonzeroCounts.size();
+    vector<uint32> sorted = nonzeroCounts;
+    sort(sorted.begin(), sorted.end());
     
     // Generate log2-spaced range of recovered_cells values (1 to maxExpectedCells)
     // Python: recovered_cells = np.linspace(1, np.log2(max_expected_cells), 2000)
@@ -87,7 +89,7 @@ pair<uint32, double> SimpleEmptyDropsStage::estimateRecoveredCellsOrdmag(
         if (baselineIdx >= n) baselineIdx = n - 1;
         
         // Get filtered cells count
-        uint32 filteredCells = findWithinOrdmag(nonzeroCounts, baselineIdx);
+        uint32 filteredCells = findWithinSortedOrdmag(sorted, baselineIdx);
         
         // Loss = (filtered - recovered)^2 / recovered (float precision)
         float diff = (float)filteredCells - (float)recoveredCells;
@@ -198,7 +200,6 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
         }
         nThreads = min(nThreads, nBoot);
         if (trace) trace->bootstrapThreads = nThreads;
-        vector<thread> threads;
         
         uint32 baseSeed = (params.bootstrapSeed > 0) ? params.bootstrapSeed : 1;
         
@@ -219,14 +220,15 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
         };
         
         uint32 chunkSize = (nBoot + nThreads - 1) / nThreads;
-        for (uint32 t = 0; t < nThreads; t++) {
+        const uint32 workers = params.maxConcurrentThreads
+            ? std::min(params.maxConcurrentThreads, nThreads) : nThreads;
+        scrna::parallelFor(nThreads, workers, [&](size_t t, size_t) {
             uint32 startIdx = t * chunkSize;
             uint32 endIdx = min(startIdx + chunkSize, nBoot);
             if (startIdx < endIdx) {
-                threads.emplace_back(bootstrapWorker, startIdx, endIdx, baseSeed + t * 1000);
+                bootstrapWorker(startIdx, endIdx, baseSeed + t * 1000);
             }
-        }
-        for (auto& th : threads) th.join();
+        });
         
         // Sum results
         double sumRecovered = 0.0, sumLoss = 0.0;
@@ -275,7 +277,6 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
         }
         nThreads = min(nThreads, nBoot);
         if (trace) trace->bootstrapThreads = nThreads;
-        vector<thread> threads;
         uint32 baseSeed2 = (params.bootstrapSeed > 0) ? (params.bootstrapSeed + 10000) : 100;
         
         auto topNWorker = [&nonzeroCounts, nNonzero, baselineIdx, &topNBoot](uint32 startIdx, uint32 endIdx, uint32 seed) {
@@ -292,14 +293,15 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
         };
         
         uint32 chunkSize = (nBoot + nThreads - 1) / nThreads;
-        for (uint32 t = 0; t < nThreads; t++) {
+        const uint32 workers = params.maxConcurrentThreads
+            ? std::min(params.maxConcurrentThreads, nThreads) : nThreads;
+        scrna::parallelFor(nThreads, workers, [&](size_t t, size_t) {
             uint32 startIdx = t * chunkSize;
             uint32 endIdx = min(startIdx + chunkSize, nBoot);
             if (startIdx < endIdx) {
-                threads.emplace_back(topNWorker, startIdx, endIdx, baseSeed2 + t * 1000);
+                topNWorker(startIdx, endIdx, baseSeed2 + t * 1000);
             }
-        }
-        for (auto& th : threads) th.join();
+        });
     } else {
         // No bootstrap - just run once on actual data
         uint32 topN = findWithinOrdmag(nonzeroCounts, baselineIdx);

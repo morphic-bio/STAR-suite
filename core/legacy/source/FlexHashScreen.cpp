@@ -59,18 +59,16 @@ bool FlexHashScreenCache::ensureLoaded(const ParametersSolo& pSolo, std::string*
     initialized_ = true;
     enabled_ = false;
     loadedPath_.clear();
-    records_.clear();
     cacheVersion_ = 0;
     regionMetadataComplete_ = false;
     hasH1X2_ = false;
-    offset0MapsUseCbqOrder_ = pSolo.pP != nullptr && pSolo.pP->readFilesTypeN == 20;
 
     if (!pSolo.hashScreenEnabled || pSolo.hashScreenFile.empty()) {
         return false;
     }
 
     enabled_ = loadFile(pSolo.hashScreenFile, errorOut);
-    if (enabled_ && hasH1X2_ && !buildH1X2ProbeIndex(errorOut)) {
+    if (enabled_ && hasH1X2_ && !pair_.ready() && !buildH1X2ProbeIndex(errorOut)) {
         enabled_ = false;
     }
     if (enabled_) {
@@ -80,67 +78,27 @@ bool FlexHashScreenCache::ensureLoaded(const ParametersSolo& pSolo, std::string*
 }
 
 bool FlexHashScreenCache::loadFile(const std::string& path, std::string* errorOut) {
-    std::ifstream in(path.c_str(), std::ios::binary);
-    if (!in.good()) {
-        if (errorOut != nullptr) {
-            *errorOut = "cannot open cache";
-        }
-        return false;
+    if (FlexProbePairKhash::isSnapshot(path)) {
+        if (!pair_.open(path,errorOut)) return false;
+        cacheVersion_ = 3; regionMetadataComplete_ = true; hasH1X2_ = true;
+        return true;
     }
-
-    CacheHeaderRaw header {};
-    in.read(reinterpret_cast<char*>(&header), sizeof(header));
-    if (!in.good()) {
-        if (errorOut != nullptr) {
-            *errorOut = "cannot read cache header";
-        }
-        return false;
-    }
-
-    if (!std::equal(header.magic, header.magic + 8, kCacheMagic)) {
-        if (errorOut != nullptr) {
-            *errorOut = "cache magic mismatch";
-        }
-        return false;
-    }
-    if ((header.version != 1 && header.version != kCacheVersionSampleAware
-         && header.version != kCacheVersionProbeRegion) ||
-        header.kmerLength != kCacheKmerLength || header.recordSize != kCacheRecordSize) {
-        if (errorOut != nullptr) {
-            *errorOut = "cache format mismatch";
-        }
-        return false;
-    }
-
-    records_.resize(static_cast<size_t>(header.recordCount));
-    for (size_t i = 0; i < records_.size(); ++i) {
-        CacheRecordRaw raw {};
-        in.read(reinterpret_cast<char*>(&raw), sizeof(raw));
-        if (!in.good()) {
-            records_.clear();
-            if (errorOut != nullptr) {
-                *errorOut = "cache truncated";
-            }
-            return false;
-        }
-        Record rec;
-        rec.seqLo = raw.seqLo;
-        rec.seqHi = raw.seqHi;
-        rec.resolvedGeneIdx15 = raw.resolvedGeneIdx15 & 0x7FFFu;
-        rec.probeRegion = header.version >= kCacheVersionProbeRegion
-            ? static_cast<FlexGdnaRegion>((raw.resolvedGeneIdx15 >> 30) & 0x3u)
-            : FlexGdnaUnknown;
-        rec.cacheClass = raw.cacheClass;
-        rec.negativeCode = raw.negativeCode;
-        rec.sampleIdx = (header.version >= kCacheVersionSampleAware) ? raw.reserved : 0;
-        records_[i] = rec;
-    }
-
-    cacheVersion_ = header.version;
-    regionMetadataComplete_ = header.version >= kCacheVersionProbeRegion;
-    std::sort(records_.begin(), records_.end(), recordLess);
-    buildTieredVectors();
+    if (!storage_.open(path, errorOut)) return false;
+    cacheVersion_ = storage_.sourceVersion();
+    regionMetadataComplete_ = cacheVersion_ >= kCacheVersionProbeRegion;
+    hasH1X2_ = storage_.hasH1X2();
     return true;
+}
+
+FlexHashScreenCache::Record FlexHashScreenCache::decodeStorageRecord(const FlexProbeRecord& raw) const {
+    Record rec;
+    rec.seqLo = raw.key.lo; rec.seqHi = raw.key.hi;
+    rec.resolvedGeneIdx15 = raw.value.geneAndRegion & 0x7fffu;
+    rec.probeRegion = regionMetadataComplete_
+        ? static_cast<FlexGdnaRegion>((raw.value.geneAndRegion >> 30) & 3u) : FlexGdnaUnknown;
+    rec.cacheClass = raw.value.cacheClass; rec.negativeCode = raw.value.negativeCode;
+    rec.sampleIdx = cacheVersion_ >= kCacheVersionSampleAware ? raw.value.sample : 0;
+    return rec;
 }
 
 bool FlexHashScreenCache::encodeWindow(const char* readSeq, uint32_t offset, uint64_t& seqLo, uint64_t& seqHi) const {
@@ -177,27 +135,13 @@ bool FlexHashScreenCache::encodeWindow(const char* readSeq, uint32_t offset, uin
     return true;
 }
 
-bool FlexHashScreenCache::findRecord(uint64_t seqLo, uint64_t seqHi, uint16_t sampleIdx, Record& out) const {
-    Record needle;
-    needle.seqLo = seqLo;
-    needle.seqHi = seqHi;
-    needle.sampleIdx = sampleIdx;
-    auto it = std::lower_bound(records_.begin(), records_.end(), needle, recordLess);
-    if (it != records_.end() && it->seqLo == seqLo && it->seqHi == seqHi && it->sampleIdx == sampleIdx) {
-        out = *it;
-        return true;
-    }
-
-    if (sampleIdx == 0) {
-        return false;
-    }
-
-    needle.sampleIdx = 0;
-    it = std::lower_bound(records_.begin(), records_.end(), needle, recordLess);
-    if (it == records_.end() || it->seqLo != seqLo || it->seqHi != seqHi || it->sampleIdx != 0) {
-        return false;
-    }
-    out = *it;
+bool FlexHashScreenCache::findRecord(uint64_t seqLo, uint64_t seqHi, uint16_t sampleIdx,
+                                      Record& out, bool h0Only) const {
+    FlexProbeRecord raw;
+    if (pair_.ready()) {
+        if (!pair_.find(SeqKeyNoSample{seqLo,seqHi}, sampleIdx, h0Only, raw)) return false;
+    } else if (!storage_.find(SeqKeyNoSample{seqLo, seqHi}, sampleIdx, h0Only, raw)) return false;
+    out = decodeStorageRecord(raw);
     return true;
 }
 
@@ -307,28 +251,6 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
     return out;
 }
 
-void FlexHashScreenCache::buildTieredVectors() {
-    h0Records_.clear();
-    h1DenyRecords_.clear();
-    hasH1X2_ = false;
-    for (const Record& rec : records_) {
-        if (rec.cacheClass == FlexHashCacheH1X2)
-            hasH1X2_ = true;
-        if (rec.cacheClass == FlexHashCacheH0 && rec.resolvedGeneIdx15 > 0) {
-            h0Records_.push_back(rec);
-        } else if (((rec.cacheClass == FlexHashCacheH1 ||
-                     rec.cacheClass == FlexHashCacheH1X2) &&
-                    rec.resolvedGeneIdx15 > 0) ||
-                   rec.resolvedGeneIdx15 == 0) {
-            h1DenyRecords_.push_back(rec);
-        }
-    }
-    std::sort(h0Records_.begin(), h0Records_.end(), recordLess);
-    std::sort(h1DenyRecords_.begin(), h1DenyRecords_.end(), recordLess);
-    buildH0NoSampleMap();
-    buildH1DenyNoSampleMap();
-}
-
 std::string FlexHashScreenCache::decodeCacheSequence(uint64_t seqLo,
                                                       uint64_t seqHi)
 {
@@ -355,12 +277,13 @@ bool FlexHashScreenCache::buildH1X2ProbeIndex(std::string* errorOut)
     // dependency from this probe-only classifier. H0 is sample-specific, so
     // adjacent copies of the same packed probe are collapsed here.
     std::vector<FlexProbeHalfIndex::Probe> probes;
-    probes.reserve(h0Records_.size());
+    probes.reserve(storage_.h0Count());
     uint64_t previousLo = 0;
     uint64_t previousHi = 0;
     uint16_t previousGene = 0;
     bool havePrevious = false;
-    for (const Record& record : h0Records_) {
+    for (uint64_t i = 0; i < storage_.h0Count(); ++i) {
+        const Record record = decodeStorageRecord(storage_.h0Record(i));
         if (havePrevious && record.seqLo == previousLo &&
             record.seqHi == previousHi) {
             if (record.resolvedGeneIdx15 != previousGene) {
@@ -426,6 +349,17 @@ FlexHashScreenDecision probeSeedDecision(
 FlexHashScreenDecision FlexHashScreenCache::classifyReadH1X2SeedExtend(
     const char* readSeq, uint32_t readLen) const
 {
+    if (pair_.ready()) {
+        FlexHashScreenDecision pass; pass.action=FlexHashScreenDecision::Pass;
+        if (!readSeq || readLen<50) { pass.action=FlexHashScreenDecision::Deny; pass.negativeCode=FlexHashNegHalfNoAnchor; return pass; }
+        uint64_t lo=0,hi=0,nmask=0;
+        for (unsigned i=0;i<50;++i) {
+            const char c=readSeq[i]; unsigned b=0;
+            switch(c) { case 'A':case 'a':break;case 'C':case 'c':b=1;break;case 'G':case 'g':b=2;break;case 'T':case 't':b=3;break;default:nmask|=UINT64_C(1)<<i; }
+            if(i<32)lo|=uint64_t(b)<<(2*i);else hi|=uint64_t(b)<<(2*(i-32));
+        }
+        return pair_.seedOnly({lo,hi},nmask).decision;
+    }
     if (!hasH1X2_ || !probeSeedIndex_.ready()) {
         FlexHashScreenDecision decision;
         decision.action = FlexHashScreenDecision::Pass;
@@ -437,6 +371,7 @@ FlexHashScreenDecision FlexHashScreenCache::classifyReadH1X2SeedExtend(
 FlexHashScreenDecision FlexHashScreenCache::classifyCbqH1X2SeedExtend(
     uint64_t seqLo, uint64_t seqHi, uint64_t nMask) const
 {
+    if (pair_.ready()) return pair_.seedOnly({seqLo,seqHi},nMask).decision;
     if (!hasH1X2_ || !probeSeedIndex_.ready()) {
         FlexHashScreenDecision decision;
         decision.action = FlexHashScreenDecision::Pass;
@@ -496,12 +431,7 @@ static inline uint64_t reverseTwoBitGroups(uint64_t value) {
 
 FlexHashScreenCache::SeqKeyNoSample FlexHashScreenCache::cacheKeyToCbqKey(
     uint64_t seqLo, uint64_t seqHi) {
-    const uint64_t first18 = reverseTwoBitGroups(seqHi) >> 28;
-    const uint64_t last32 = reverseTwoBitGroups(seqLo);
-    SeqKeyNoSample out;
-    out.lo = first18 | ((last32 & UINT64_C(0x0FFFFFFF)) << 36);
-    out.hi = (last32 >> 28) & UINT64_C(0xFFFFFFFFF);
-    return out;
+    return FlexHashCacheStorage::cbqKey(SeqKeyNoSample{seqLo, seqHi});
 }
 
 FlexHashScreenCache::SeqKeyNoSample FlexHashScreenCache::cbqKeyToCacheKey(
@@ -517,28 +447,7 @@ FlexHashScreenCache::SeqKeyNoSample FlexHashScreenCache::cbqKeyToCacheKey(
 
 FlexHashScreenCache::SeqKeyNoSample FlexHashScreenCache::offset0MapKeyFromCacheKey(
     uint64_t seqLo, uint64_t seqHi) const {
-    if (offset0MapsUseCbqOrder_) {
-        return cacheKeyToCbqKey(seqLo, seqHi);
-    }
-    return SeqKeyNoSample{seqLo, seqHi};
-}
-
-void FlexHashScreenCache::buildH0NoSampleMap() {
-    h0NoSampleMap_.clear();
-    h0NoSampleMap_.reserve(h0Records_.size() * 2);
-    for (const Record& r : h0Records_) {
-        const SeqKeyNoSample key = offset0MapKeyFromCacheKey(r.seqLo, r.seqHi);
-        h0NoSampleMap_.emplace(key, r);
-    }
-}
-
-void FlexHashScreenCache::buildH1DenyNoSampleMap() {
-    h1DenyNoSampleMap_.clear();
-    h1DenyNoSampleMap_.reserve(h1DenyRecords_.size() * 2);
-    for (const Record& r : h1DenyRecords_) {
-        const SeqKeyNoSample key = offset0MapKeyFromCacheKey(r.seqLo, r.seqHi);
-        h1DenyNoSampleMap_.emplace(key, r);
-    }
+    return cacheKeyToCbqKey(seqLo, seqHi);
 }
 
 FlexHashScreenDecision FlexHashScreenCache::classifyReadH0Offset0(const char* readSeq, uint32_t readLen) const {
@@ -573,9 +482,7 @@ FlexHashScreenDecision FlexHashScreenCache::classifyReadH0Offset0(const char* re
 
 FlexHashScreenDecision FlexHashScreenCache::classifyCbqH0Offset0(
     uint64_t seqLo, uint64_t seqHi) const {
-    const SeqKeyNoSample key = offset0MapsUseCbqOrder_
-        ? SeqKeyNoSample{seqLo, seqHi}
-        : cbqKeyToCacheKey(seqLo, seqHi);
+    const SeqKeyNoSample key{seqLo, seqHi};
     return classifyH0Offset0MapKey(key);
 }
 
@@ -587,14 +494,14 @@ FlexHashScreenDecision FlexHashScreenCache::classifyH0Offset0MapKey(
         return out;
     }
 
-    auto it = h0NoSampleMap_.find(key);
-    if (it == h0NoSampleMap_.end()) {
+    const auto* value = pair_.ready() ? pair_.lookupH0(key) : storage_.lookup(0, key);
+    if (!value) {
         FlexHashScreenDecision out;
         out.action = FlexHashScreenDecision::Pass;
         return out;
     }
 
-    const Record& rec = it->second;
+    const Record rec = decodeStorageRecord(FlexProbeRecord{key, *value});
     FlexHashScreenDecision out;
     if (rec.negativeCode == FlexHashNegProbeAmbig) {
         out.action = FlexHashScreenDecision::Deny;
@@ -711,9 +618,7 @@ FlexHashScreenDecision FlexHashScreenCache::classifyReadH0H1Offset0SingleN(const
 
 FlexHashScreenDecision FlexHashScreenCache::classifyCbqH0H1Offset0(
     uint64_t seqLo, uint64_t seqHi) const {
-    const SeqKeyNoSample key = offset0MapsUseCbqOrder_
-        ? SeqKeyNoSample{seqLo, seqHi}
-        : cbqKeyToCacheKey(seqLo, seqHi);
+    const SeqKeyNoSample key{seqLo, seqHi};
     return classifyH0H1Offset0MapKey(key);
 }
 
@@ -725,10 +630,12 @@ FlexHashScreenDecision FlexHashScreenCache::classifyH0H1Offset0MapKey(
         return out;
     }
 
+    if (pair_.ready()) return pair_.primaryOnly(key).decision;
+
     // H0 check
-    auto it = h0NoSampleMap_.find(key);
-    if (it != h0NoSampleMap_.end()) {
-        const Record& rec = it->second;
+    const auto* value = storage_.lookup(0, key);
+    if (value) {
+        const Record rec = decodeStorageRecord(FlexProbeRecord{key, *value});
         FlexHashScreenDecision out;
         if (rec.negativeCode == FlexHashNegProbeAmbig) {
             out.action = FlexHashScreenDecision::Deny;
@@ -747,9 +654,9 @@ FlexHashScreenDecision FlexHashScreenCache::classifyH0H1Offset0MapKey(
     }
 
     // H1+Deny check (same key, different tier)
-    it = h1DenyNoSampleMap_.find(key);
-    if (it != h1DenyNoSampleMap_.end()) {
-        const Record& rec = it->second;
+    value = storage_.lookup(1, key);
+    if (value) {
+        const Record rec = decodeStorageRecord(FlexProbeRecord{key, *value});
         FlexHashScreenDecision out;
         if (rec.cacheClass == 2 && rec.negativeCode == FlexHashNegProbeAmbig) {
             out.action = FlexHashScreenDecision::Deny;
@@ -797,28 +704,6 @@ const char* flexHashScreenDenyReason(uint8_t negativeCode)
     }
 }
 
-bool FlexHashScreenCache::findRecordInVec(const std::vector<Record>& vec, uint64_t seqLo, uint64_t seqHi, uint16_t sampleIdx, Record& out) const {
-    Record needle;
-    needle.seqLo = seqLo;
-    needle.seqHi = seqHi;
-    needle.sampleIdx = sampleIdx;
-    auto it = std::lower_bound(vec.begin(), vec.end(), needle, recordLess);
-    if (it != vec.end() && it->seqLo == seqLo && it->seqHi == seqHi && it->sampleIdx == sampleIdx) {
-        out = *it;
-        return true;
-    }
-    if (sampleIdx == 0) {
-        return false;
-    }
-    needle.sampleIdx = 0;
-    it = std::lower_bound(vec.begin(), vec.end(), needle, recordLess);
-    if (it == vec.end() || it->seqLo != seqLo || it->seqHi != seqHi || it->sampleIdx != 0) {
-        return false;
-    }
-    out = *it;
-    return true;
-}
-
 FlexHashScreenDecision FlexHashScreenCache::classifyReadH0Only(const char* readSeq, uint32_t readLen, uint16_t sampleIdx) const {
     if (!initialized_ || !enabled_) {
         FlexHashScreenDecision out;
@@ -848,7 +733,7 @@ FlexHashScreenDecision FlexHashScreenCache::classifyReadH0Only(const char* readS
         if (!encodeWindow(readSeq, offset, seqLo, seqHi)) {
             continue;
         }
-        if (findRecordInVec(h0Records_, seqLo, seqHi, sampleIdx, hits[idx])) {
+        if (findRecord(seqLo, seqHi, sampleIdx, hits[idx], true)) {
             hitPtr[idx] = &hits[idx];
         }
     }
@@ -971,4 +856,20 @@ FlexHashScreenDecision FlexHashScreenCache::classifyRead(const char* readSeq, ui
     }
 
     return classifyHits(hitPtr, kRelativeProbeOffsets, sizeof(hitPtr) / sizeof(hitPtr[0]), sampleIdx);
+}
+
+FlexHashScreenDecision FlexHashScreenCache::classifyReadComplete(const char* read,uint32_t len,bool singleN) const {
+    if (pair_.ready() && read && len>=50) return pair_.classifyRead(read,singleN).decision;
+    auto d=classifyReadH0H1Offset0(read,len);
+    if(d.action==FlexHashScreenDecision::Pass && singleN) d=classifyReadH0H1Offset0SingleN(read,len);
+    if(d.action==FlexHashScreenDecision::Pass && h1x2ProbeIndexReady())d=classifyReadH1X2SeedExtend(read,len);
+    return d;
+}
+FlexHashScreenDecision FlexHashScreenCache::classifyCbqComplete(uint64_t lo,uint64_t hi,uint64_t nmask,bool singleN) const {
+    if(pair_.ready())return pair_.classify({lo,hi},nmask,singleN).decision;
+    FlexHashScreenDecision d;d.action=FlexHashScreenDecision::Pass;
+    if(!nmask)d=classifyCbqH0H1Offset0(lo,hi);
+    else if(singleN)d=classifyCbqH0H1Offset0SingleN(lo,hi,nmask);
+    if(d.action==FlexHashScreenDecision::Pass && h1x2ProbeIndexReady())d=classifyCbqH1X2SeedExtend(lo,hi,nmask);
+    return d;
 }
