@@ -1,6 +1,6 @@
 # STAR Suite 1.9.0: full 320K benchmarks, release, and instance retirement
 
-**Status: approved by the user on 2026-09-10; execution in progress.**
+**Status: COMPLETE on 2026-09-10. Release published; both full benchmarks validated; archive verified; instance stopped, snapshotted, and terminated.**
 
 Authorization: “Go ahead with the runbook and the archive job.” The review gate is open.
 
@@ -16,11 +16,14 @@ again.
    checkout. Freeze the release's compiled source and version metadata.
 3. In parallel with the subagent's release packaging and checks, benchmark that
    frozen source on the **entire 320K dataset**, first CBQ, then FASTQ-BGZF.
-4. Validate both runs, finish release publication, and save the important new
-   and existing files to S3. Verify the completed archive.
+4. Validate both runs and save the important new and existing SSD files to S3.
+   Verify the completed archive. Release publication continues independently
+   on GitHub/local packaging infrastructure, with no EC2 dependency.
 5. Stop the instance and wait until EC2 reports `stopped`.
 6. Snapshot its EBS volume(s) and wait until every snapshot reports `completed`.
 7. Terminate the instance and verify EC2 reports `terminated`.
+8. Verify the published release assets, mirror them and final local records to
+   S3, and close the overall runbook only when both release and retirement finish.
 
 The release can be prepared while the benchmarks run. Publish the final
 immutable `v1.9.0` tag only after its checks and the full-set validation pass.
@@ -41,7 +44,7 @@ checksum sweep, upload, build, or other benchmark competing on that instance.
 | AWS profile / region | `uw` / `us-west-2` |
 | Instance | `i-06de289faa5d78117` |
 | Instance type | `m6id.12xlarge`, 48 vCPUs |
-| Root EBS volume currently attached | `vol-059ae86ad14651d0b`, 30 GiB, `/dev/sda1` |
+| Original root EBS volume (deleted on termination) | `vol-059ae86ad14651d0b`, 30 GiB, `/dev/sda1` |
 | Local SSD storage | `/scratch`, RAID0 across two instance-store NVMe devices |
 | Full dataset | 4 lanes, L001–L004, **7,303,142,230 read pairs** |
 | Grouping | 8 samples, 16 probe tags; retain the existing fused-tag mapping |
@@ -273,8 +276,9 @@ failed attempts and their status instead of overwriting them.
 
 Once benchmark validation and release checks pass, complete the release
 merge/tag/publication and verify the published artifacts. If a correctness
-regression, missing artifact, or failed release check remains unresolved,
-record it and retain the instance; do not declare the sequence complete.
+regression or missing SSD artifact remains unresolved, retain the instance.
+Independent hosted publication can continue after verified SSD archival and
+retirement; do not declare the overall sequence complete until it also passes.
 
 ## 5. Finish and verify S3 preservation
 
@@ -313,15 +317,16 @@ restore of the new small metadata/diagnostics bundle before shutdown. Record
 all dependencies on the two original buckets; delta archives alone do not
 constitute a complete restore.
 
-Write a **final archive completion manifest only after the new full-set results
-are included**. Save that manifest locally and to S3. This is the prerequisite
-for stopping the instance, because instance-store data can be lost on stop.
+Write **`CLOUD_ARCHIVE_COMPLETE.json` only after the new full-set results
+are included**. Save it locally and to S3 before stopping, because instance-store
+data can be lost on stop. `FINAL_ARCHIVE_COMPLETE.json` adds the independently
+published release assets and final local records once publication completes.
 
 ## 6. Stop → snapshot → terminate
 
-Owner: primary agent, after all earlier gates pass.
+Owner: primary agent, after benchmark acceptance and verified cloud archival.
 
-1. Verify no required process or upload remains, the final archive is complete,
+1. Verify no required cloud process or upload remains, the cloud archive is complete,
    and the exact instance ID still matches this runbook. Save its current
    attached-volume list locally and to S3.
 2. Request a normal stop of `i-06de289faa5d78117`. Record the API response and
@@ -336,7 +341,8 @@ Owner: primary agent, after all earlier gates pass.
 5. Terminate the exact instance. Poll until EC2 reports **`terminated`**.
    Confirm the snapshots remain available and record remaining volumes, if any;
    do not delete snapshots or unrelated resources.
-6. Write and upload `retirement_complete.json` containing the final state,
+6. Write and upload `instance_retirement_complete.json` containing the cloud state.
+   After release verification, write combined `retirement_complete.json` with
    snapshot IDs, archive locations, release URL/tag/commit, benchmark results,
    and UTC timestamps. Update this runbook's ledger and give the user the
    final timing table, release link, archive location, and snapshot ID(s).
@@ -352,20 +358,20 @@ Update after each phase; do not mark queued work complete.
 | Gate / phase | Status | Evidence to fill in |
 | --- | --- | --- |
 | User review of this runbook | **APPROVED** | User: “Go ahead with the runbook and the archive job.” |
-| Earlier archive suspended or finished | **COMPLETE** | 90 bundles / 126,765,224,602 bytes independently verified; existing-object references also retained. New benchmarks still require supplemental archive. |
+| Earlier archive suspended or finished | **COMPLETE** | 90 bundles / 126,765,224,602 bytes independently verified; existing-object references also retained. Both new benchmark arms are covered by the verified supplemental archive. |
 | Scoped implementation committed | **DONE** | `60fbe8cf6425596f10c1008ea5db7bd6c44ccf2e`; 47 scoped files matched tested manifests |
-| Integration merged and pushed | **DONE** | Implementation and packaging fix on `master` at `3b6e758597342a80631b94a3cdc246458231e982`; candidate and master build/Tier A checks passed; unrelated local edits preserved |
-| Release subagent assigned | **ACTIVE** | `release_v190`; isolated `analysis/release_v190_20260910/release_agent` |
+| Integration merged and pushed | **DONE** | Release implementation and notes merged/pushed; tag at `fc59b1b20b9fd34c1176acebd7e1688d4a82c1ec`; compiled-ancestor CI and release checks passed |
+| Release subagent assigned | **COMPLETE** | `release_v190`; published release, verified downloads, and both container platforms |
 | Versioned source frozen and clean-built | **DONE** | Build `a6c1c546cbb53403c542bb9819706631801c935b`; STAR 1.9.0 SHA `54311642da84160e2dd75321d1ea6306ef0a5724b32727b402216748a5707d67`; unit/cache tests and both input fixtures passed |
 | New full CBQ benchmark | **COMPLETE; exact parity passed** | Exit 0; 7,303,142,230 pairs; 628.033 s; 103.968 GiB; 333,439 cells |
 | New full FASTQ-BGZF benchmark | **COMPLETE; exact parity passed** | Exit 0; 7,303,142,230 pairs; 867.680 s; 93.794 GiB; 333,439 cells |
 | Count/caller validation | **PASSED** | All 18 raw/filtered matrices, 114 caller diagnostic files, sample summaries and read classifications exact; 333,439 cells in both arms |
-| v1.9.0 published and verified | **LOCAL CHECKS PASSED; final publication in preparation** | All 16 package build/check stages passed; full-set acceptance passed |
-| Final S3 archive includes new runs | **SUPPLEMENT RUNNING** | SSM `75b152c7-b49c-46f1-8e02-bae87d7a865e`; original 5,520 distinct existing S3 objects reverified |
-| Instance stopped | Not started | EC2 state and UTC |
-| EBS snapshot(s) completed | Not started | Snapshot IDs / source volumes |
-| Instance terminated | Not started | EC2 state and UTC |
-| Final report and restore records saved | Not started | Local and S3 paths |
+| v1.9.0 published and verified | **COMPLETE** | [v1.9.0](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.9.0); tag `fc59b1b20b9fd34c1176acebd7e1688d4a82c1ec`; published checksums/versions/source commits and both container platforms verified |
+| Final S3 archive includes new runs | **COMPLETE** | Original 90 + supplemental 3 bundles; restore test passed; 5,520 existing object references reverified; local records and 20 published assets also saved |
+| Instance stopped | **COMPLETE** | Normal EC2 stop confirmed; `lifecycle/instance_stopped.json` |
+| EBS snapshot(s) completed | **COMPLETE** | `snap-0428a020b3a0fbbd4`; completed before termination |
+| Instance terminated | **COMPLETE** | `i-06de289faa5d78117` verified `terminated`; completed snapshots retained |
+| Final report and restore records saved | **COMPLETE** | Local retirement records plus `s3://star-suite-320k-benchmark-alt-171440768238-us-west-2-20260904/instance-retirement/20260910/` |
 
 ## Supporting records
 
@@ -408,8 +414,8 @@ unchanged; failed package artifacts and the corrected build checks are retained.
 
 Master CI `34453932378` passed build/Tier A and secret checks. Its image
 publication encountered Docker Hub HTTP 502 during login, before any image
-build. The packaging-fix candidate has its own CI and the final release will
-validate publication separately.
+build. The packaging-fix candidate passed its checks; final artifact and container
+publication were verified separately as recorded below.
 
 ### Full-set benchmark acceptance
 
@@ -420,3 +426,54 @@ and filtered matrix, caller statistical diagnostic, sample summary and read
 classification matched exactly. See the [full report](benchmarks/FULL320K_V190_20260910.md).
 The validated 1.9.0 binary was atomically installed locally; the previous
 binary is backed up in `analysis/full320k_v190_20260910/`.
+
+### Execution scheduling update: independent release publication
+
+After full-set validation and verified SSD archival, the remaining release
+pipeline consists of hosted package/image builds and local download verification.
+The release agent confirmed these have no dependency on the EC2 instance.
+To avoid leaving the instance idle through those builds, instance retirement
+now runs alongside publication. No release acceptance check is waived.
+`CLOUD_ARCHIVE_COMPLETE.json` gates the stop and preserves all instance data;
+`instance_retirement_complete.json` records cloud completion. Final published
+assets and local records are mirrored afterward, then `FINAL_ARCHIVE_COMPLETE.json`
+and `retirement_complete.json` close the combined task. The required cloud
+order remains normal stop, completed EBS snapshot(s), then termination.
+
+### Release asset filename compatibility
+
+GitHub stored the six Debian asset filenames with `.ubuntu` where the CI
+files used `~ubuntu`. Package contents and internal Debian versions stayed
+unchanged. The public `SHA256SUMS` was corrected to the actual public names;
+all 20 downloaded release assets were verified, and the 19 payload files
+matched their accepted CI artifact hashes. The original checksum manifest
+and `public_filename_mapping.json` are preserved in the release records.
+
+Follow-up for the release workflow: generate checksum entries using GitHub's
+normalized public filenames before upload. This operational correction did
+not change the immutable v1.9.0 source tag.
+
+### Container publication
+
+The final multiarchitecture image was built with the existing local
+`rmbuilder` from a fresh archive of the immutable release commit
+`fc59b1b20b9fd34c1176acebd7e1688d4a82c1ec`. The image build and its checks
+succeeded for `linux/amd64` and `linux/arm64`. The accepted image index is
+`sha256:9c744f7a83ca96d76dc72d44c76ce3c4e1869cd752aaacaa6da07080e1ef0b99`.
+
+After the staging image passed registry verification, the redundant hosted
+image workflows `34455225261`, `34456618393`, and `34456680980` were canceled
+and reached terminal states before promotion to `biodepot/star-suite:v1.9.0`
+and `latest`. Their completed build/Tier A or artifact checks passed; the
+canceled image stages are not reported as successful hosted executions.
+The local build, guarded promotion, registry platforms, and binary identities
+are recorded in `local_image_build.json`, `image_publication_selection.json`,
+and `image_verification.json` under the archived release provenance.
+
+### Retirement completion
+
+Verified terminal state: `terminated`. Completed retained snapshot(s): `snap-0428a020b3a0fbbd4`.
+Root EBS was stopped before snapshotting. `/scratch` is preserved through the
+verified original and supplemental S3 manifests, not by the EBS snapshots.
+The published release assets, source/build records, exact matrices, and
+restore/lifecycle evidence are retained. No further instance work remains.
