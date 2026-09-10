@@ -803,6 +803,9 @@ void ParametersSolo::initialize(Parameters *pPin)
                                        << " (" << FlexHashScreenCache::instance().recordCount()
                                        << " records, format v"
                                        << FlexHashScreenCache::instance().cacheVersion() << ")\n";
+                    if (FlexHashScreenCache::instance().hasHalfTables()) {
+                        pP->inOut->logMain << "H1X2 half khash: mapped stored H0 and two 25-base tables; no runtime table construction\n";
+                    }
                     pP->inOut->logMain << "H0/H1 hash screen: single N in the probe window " << (probeMismatch >= 1 ? "resolved through the cache" : "not resolved (soloProbeMismatch 0)") << "\n";
                     if (FlexHashScreenCache::instance().hasH1X2()) {
                         pP->inOut->logMain

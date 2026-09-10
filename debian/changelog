@@ -1,3 +1,20 @@
+star-suite (1.9.0-1) unstable; urgency=medium
+
+  * Add grouped sample-tag Flex calling with deterministic quality ranking,
+    an inclusive UMI floor, complete probe modeling, filtered feature export,
+    and joint observed-tag occupancy after cell calling.
+  * Persist Flex khash lookup tables and compact paired 25-base probe hashes;
+    map completed tables directly without loading-time sorting or rebuilding.
+  * Sort each OrdMag bootstrap replicate once and share bounded thread permits
+    across grouped calling, bootstrap estimation, and EmptyDrops simulation.
+  * Unify exact-probe and fixed-offset sample-tag decisions across Flex input
+    paths; retain explicit experimental H1X2 seed-and-extend support.
+  * Add optional read-decision diagnostics and native count/read audit tools;
+    improve the paired FASTQ lane reader while honoring readFilesCommand.
+  * Report STAR Suite 1.9.0 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Thu, 10 Sep 2026 08:30:00 +0000
+
 star-suite (1.8.4-1) unstable; urgency=medium
 
   * Feed paired BGZF FASTQ directly into existing STAR mapping chunks for

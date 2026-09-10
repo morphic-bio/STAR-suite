@@ -597,7 +597,7 @@ static void processFastqBatch(
         if (sampleOK) {
             decision = flexHashH0OnlyDiagnostic()
                     ? cache.classifyReadH0Offset0(seq0, readLen0)
-                    : cache.classifyReadH0H1Offset0(seq0, readLen0);
+                    : cache.classifyReadComplete(seq0, readLen0, P.pSolo.probeMismatch >= 1);
             if (decision.action == FlexHashScreenDecision::Pass && !flexHashH0OnlyDiagnostic() && P.pSolo.probeMismatch >= 1) {
                 decision = cache.classifyReadH0H1Offset0SingleN(seq0, readLen0);   // one N in the probe window
             }
@@ -934,7 +934,7 @@ static uint64_t processOneBgzfRange(
         if (sampleOK) {
             decision = flexHashH0OnlyDiagnostic()
                     ? cache.classifyReadH0Offset0(seq0, readLen0)
-                    : cache.classifyReadH0H1Offset0(seq0, readLen0);
+                    : cache.classifyReadComplete(seq0, readLen0, P.pSolo.probeMismatch >= 1);
             if (decision.action == FlexHashScreenDecision::Pass && !flexHashH0OnlyDiagnostic() && P.pSolo.probeMismatch >= 1) {
                 decision = cache.classifyReadH0H1Offset0SingleN(seq0, readLen0);   // one N in the probe window
             }
@@ -1114,7 +1114,9 @@ static uint64_t processCbqModuleRecords(
                 probeWindowPacked = star::input::cbq_pack_segment_window_lsb_pair(
                         record.segments[0], 0, cache.probeWindowLength(),
                         &seqLo, &seqHi, &nMask);
-                if (probeWindowPacked && nMask == 0) {
+                if (probeWindowPacked && !flexHashH0OnlyDiagnostic()) {
+                    decision = cache.classifyCbqComplete(seqLo, seqHi, nMask, P.pSolo.probeMismatch >= 1);
+                } else if (probeWindowPacked && nMask == 0) {
                     decision = flexHashH0OnlyDiagnostic()
                         ? cache.classifyCbqH0Offset0(seqLo, seqHi)
                         : cache.classifyCbqH0H1Offset0(seqLo, seqHi);
@@ -1766,8 +1768,8 @@ void *flexTriageThread(void *arg) {
     ReadPacket rpkt;
     while (st->readerQ.pop(rpkt)) {
 
-        FlexHashScreenDecision decision = cache.classifyReadH0H1Offset0(
-            rpkt.seq[0], rpkt.readLen[0]);
+        FlexHashScreenDecision decision = cache.classifyReadComplete(
+            rpkt.seq[0], rpkt.readLen[0], false);
         if (decision.action == FlexHashScreenDecision::Pass &&
             cache.h1x2ProbeIndexReady()) {
             decision = cache.classifyReadH1X2SeedExtend(
