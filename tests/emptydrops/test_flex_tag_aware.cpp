@@ -4,6 +4,9 @@
 #include <iostream>
 #include <set>
 #include <stdexcept>
+#include <cmath>
+
+static bool sameNumber(double a, double b) { return a == b || (std::isnan(a) && std::isnan(b)); }
 
 static void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
 static std::string cb(uint32_t index) {
@@ -70,6 +73,8 @@ int main(int argc, char** argv) {
     features.close();barcodes.close();matrix.close();mt.close();
     FlexFilter::Config config;
     config.tagAwareCaller = true;
+    config.useThreadPermits = false;
+    config.totalThreads = 1;
     config.emptydropsParams.simN = 128;
     config.emptydropsParams.FDR = .01;
     config.emptydropsParams.mcThreads = 2;
@@ -94,6 +99,40 @@ int main(int argc, char** argv) {
         require(group.nSimpleCells > 0, "OrdMag is primary");
         require(group.nTailTested > 0, "fixture exercises EmptyDrops tail");
     }
+    // Vary group scheduling and MC workers while preserving bootstrap streams.
+    const auto serial = result;
+    for (uint32_t budget : {7u, 2u}) {
+        config.totalThreads = budget;
+        config.useThreadPermits = true;
+        config.debugOutputDir = root + "/parallel_" + std::to_string(budget);
+        require(filter.runFromMemory(input, &result, config) == 0, "parallel grouped caller succeeds");
+        require(result.tagResults.size() == serial.tagResults.size(), "same ordered groups");
+        for (size_t i = 0; i < result.tagResults.size(); ++i) {
+            const auto& a = serial.tagResults[i]; const auto& b = result.tagResults[i];
+            require(a.sampleLabel == b.sampleLabel && a.tag == b.tag && a.expectedCells == b.expectedCells &&
+                a.nRetainWindow == b.nRetainWindow && a.nSimpleCells == b.nSimpleCells &&
+                a.nTailTested == b.nTailTested && a.nTailPassers == b.nTailPassers &&
+                a.occupancyRemoved == b.occupancyRemoved, "identical stage counts and occupancy");
+            require(a.tagBarcodes == b.tagBarcodes && a.retainBarcodes == b.retainBarcodes &&
+                a.passingBarcodes == b.passingBarcodes && a.filteredBarcodes == b.filteredBarcodes &&
+                a.edPasserBarcodes == b.edPasserBarcodes, "identical ordered stage identities");
+            require(a.emptydropsResults.size() == b.emptydropsResults.size(), "same candidate ledger size");
+            for (size_t j = 0; j < a.emptydropsResults.size(); ++j) {
+                const auto& x = a.emptydropsResults[j]; const auto& y = b.emptydropsResults[j];
+                require(x.cellIndex == y.cellIndex && sameNumber(x.pValue, y.pValue) &&
+                    sameNumber(x.pAdjusted, y.pAdjusted) && sameNumber(x.obsLogProb, y.obsLogProb) &&
+                    x.passesRawP == y.passesRawP && x.passesFDR == y.passesFDR,
+                    "identical candidate p-values, probabilities and decisions");
+            }
+        }
+    }
+    // A worker failure must clear partial results after joining all groups.
+    const auto validGene = m.countCellGeneUMI[0];
+    m.countCellGeneUMI[0] = m.nGenes;
+    config.debugOutputDir.clear();
+    require(filter.runFromMemory(input, &result, config) != 0 && result.tagResults.empty(),
+        "parallel malformed-matrix error clears partial results");
+    m.countCellGeneUMI[0] = validGene;
     // Duplicate tag assignments are rejected before starting a caller.
     input.sampleTags[2] = input.sampleTags[1];
     require(filter.runFromMemory(input, &result, config) != 0, "reject duplicate tags");

@@ -4,7 +4,9 @@
 #include "MitochondrialRankMask.h"
 #include "FlexTagGroup.h"
 #include "ObservedTagOccupancy.h"
+#include "ParallelTasks.h"
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -12,6 +14,7 @@
 #include <memory>
 #include <set>
 #include <stdexcept>
+#include <omp.h>
 
 int FlexFilter::runTagAware(const SampleMatrixData& matrix,
     const std::vector<std::string>& labels, const std::vector<std::string>& tags,
@@ -52,11 +55,29 @@ int FlexFilter::runTagAware(const SampleMatrixData& matrix,
             if (!annotations) throw std::runtime_error("Cannot write feature rank mask");
         }
 
-        // Groups run serially. Bootstrap receives the declared worker budget;
-        // EmptyDrops uses the same eight-worker default as the external caller.
-        for (const std::string& label : groups) {
+        const uint32_t totalThreads = config.totalThreads ? config.totalThreads
+            : static_cast<uint32_t>(std::max(1, omp_get_max_threads()));
+        const size_t groupWorkers = std::min<size_t>(groups.size(), totalThreads);
+        const uint32_t threadsPerGroup = totalThreads / groupWorkers;
+        const uint32_t extraThreads = totalThreads % groupWorkers;
+        // Keep paired tags in one sample model. Workers share a bounded CPU
+        // budget and write disjoint, ordered result slots.
+        // Bootstrap RNG partitions remain unchanged when execution is capped.
+        outputs->tagResults.resize(groups.size());
+        struct GroupTiming { double prepare = 0, call = 0; uint32_t workers = 0, mc = 0; };
+        std::vector<GroupTiming> timings(groups.size());
+        const auto started = std::chrono::steady_clock::now();
+        std::cerr << "[Flex tag-aware parallel] groups=" << groups.size()
+            << " group_workers=" << groupWorkers << " total_threads=" << totalThreads
+            << " scheduling=" << (config.useThreadPermits ? "permits" : "fixed")
+            << " bootstrap_streams=" << config.simpleEmptyDropsParams.maxThreads << "\n";
+        auto callGroup = [&](size_t group, size_t worker) {
+            const auto groupStarted = std::chrono::steady_clock::now();
+            const std::string& label = groups[group];
+            const uint32_t workerBudget = config.useThreadPermits ? totalThreads
+                : threadsPerGroup + (worker < extraThreads ? 1 : 0);
+            timings[group].workers = workerBudget;
             const auto& sampleTags = groupTags.at(label);
-            std::cerr << "[Flex tag-aware] sample=" << label << " tags=" << sampleTags.size() << "\n";
             if (sampleTags.size() > std::numeric_limits<uint32_t>::max() / 90000u)
                 throw std::runtime_error("Too many tags for caller rank limits");
             const uint32_t nTags = static_cast<uint32_t>(sampleTags.size());
@@ -83,16 +104,14 @@ int FlexFilter::runTagAware(const SampleMatrixData& matrix,
                 if (config.enableInvariantChecks && summed != umi.back())
                     throw std::runtime_error("Sparse counts do not match total UMIs for " + barcodes.back());
             }
-            Outputs::TagResults output;
+            auto& output = outputs->tagResults[group];
             output.sampleLabel = label;
             output.tag = sampleTags.front();
             output.expectedCells = 0;
             output.tagBarcodes = barcodes;
             output.retainBarcodes = barcodes; // ED cell indices refer to this group matrix.
             if (barcodes.empty()) {
-                std::cerr << "[Flex tag-aware] " << label << ": no nonzero barcodes\n";
-                outputs->tagResults.push_back(std::move(output));
-                continue;
+                return;
             }
             std::unique_ptr<scrna_ed_config, decltype(&scrna_ed_config_destroy)> ed(
                 scrna_ed_config_create(), &scrna_ed_config_destroy);
@@ -105,7 +124,9 @@ int FlexFilter::runTagAware(const SampleMatrixData& matrix,
             ed->cand_max_n = 100000;
             ed->sim_n = config.emptydropsParams.simN ? config.emptydropsParams.simN : 10000;
             ed->fdr = config.emptydropsParams.FDR > 0 ? config.emptydropsParams.FDR : .01;
-            ed->mc_threads = config.emptydropsParams.mcThreads ? config.emptydropsParams.mcThreads : 8;
+            ed->mc_threads = std::min(workerBudget, config.emptydropsParams.mcThreads
+                ? config.emptydropsParams.mcThreads : workerBudget);
+            timings[group].mc = ed->mc_threads;
             ed->use_fdr_gate = 1;
             ed->apply_bh_correction = 1;
             SimpleEDOptions options;
@@ -113,10 +134,13 @@ int FlexFilter::runTagAware(const SampleMatrixData& matrix,
             options.maxExpectedCells = 22500u * nTags;
             options.ambientUmiTarget = 0; // Fixed tag-scaled ambient ranks.
             options.bootstrapThreads = config.simpleEmptyDropsParams.maxThreads;
+            options.bootstrapWorkers = workerBudget;
             options.invariantChecks = config.enableInvariantChecks;
             if (!config.debugOutputDir.empty()) options.diagnosticsDir = config.debugOutputDir + "/" + label;
             scrna_ed_result result = {};
             SimpleEDRunInfo info;
+            const auto callStarted = std::chrono::steady_clock::now();
+            timings[group].prepare = std::chrono::duration<double>(callStarted - groupStarted).count();
             try {
                 const int rc = runSimpleEDWithAmbient(barcodes, umi, genes, counts, starts, nGenes,
                     matrix.nGenes, ed.get(), options, mt, &result, &info);
@@ -147,8 +171,42 @@ int FlexFilter::runTagAware(const SampleMatrixData& matrix,
                 }
                 scrna_ed_result_free(&result);
             } catch (...) { scrna_ed_result_free(&result); throw; }
-            outputs->tagResults.push_back(std::move(output));
+            timings[group].call = std::chrono::duration<double>(std::chrono::steady_clock::now() - callStarted).count();
+        };
+        if (config.useThreadPermits) {
+            scrna::ThreadPermitPool permits(totalThreads);
+            // Reserve one base worker per coordinator before any group can
+            // borrow helpers. Unstarted/error-path reservations release by RAII.
+            std::vector<std::unique_ptr<scrna::ThreadPermit>> bases;
+            for (size_t i = 0; i < groupWorkers; ++i)
+                bases.emplace_back(new scrna::ThreadPermit(permits));
+            std::atomic<size_t> nextGroup(0);
+            scrna::parallelFor(groupWorkers, groupWorkers, [&](size_t slot, size_t worker) {
+                auto base = std::move(bases[slot]);
+                scrna::ScopedThreadPermits context(&permits);
+                for (;;) {
+                    const size_t group = nextGroup.fetch_add(1);
+                    if (group >= groups.size()) break;
+                    callGroup(group, worker);
+                }
+            });
+            bases.clear();
+            std::cerr << "[Flex caller permits] capacity=" << totalThreads
+                << " peak_reserved=" << permits.peakUsed() << " acquisitions=" << permits.acquisitions()
+                << " returned=" << permits.available() << "\n";
+        } else {
+            scrna::parallelFor(groups.size(), groupWorkers, callGroup);
         }
+        for (size_t group = 0; group < groups.size(); ++group) {
+            const auto& timing = timings[group];
+            std::cerr << "[Flex tag-aware timing] sample=" << groups[group]
+                << " tags=" << groupTags.at(groups[group]).size() << " worker_limit=" << timing.workers
+                << " mc_threads=" << timing.mc << " prepare_seconds=" << timing.prepare
+                << " caller_seconds=" << timing.call << "\n";
+        }
+        std::cerr << "[Flex tag-aware timing] groups_wall_seconds="
+            << std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() << "\n";
+        // Occupancy is a joint fit: wait for every independent sample model.
         if (!config.disableOccupancyFilter) {
             std::vector<std::string> calls;
             for (const auto& group : outputs->tagResults)

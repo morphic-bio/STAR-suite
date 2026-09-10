@@ -1021,6 +1021,375 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
 - Status: untracked. The fixture was executed once; do not rerun it without new
   authorization and do not commit FASTQs, cache binaries, MEX files, or logs.
 
+## Flex 400K-read regression and OrdMag sensitivity (2026-09-08)
+
+- Report, run scripts, and verifiers:
+  `/mnt/pikachu/star_suite_paper/analysis/control_400k_reads_recheck_20260908/`
+- AWS benchmark output: `/scratch/control_400k_reads_recheck_20260908_v1`
+  on `i-06de289faa5d78117` (`uw`, `us-west-2`).
+- Inputs: original 100K read pairs per L001–L004 under
+  `/scratch/cr9_320k_100k_per_lane_tag_fusion_20260907/fastqs`.
+- Current STAR raw MEX exactly matches the historical H1X2 control. All 48
+  external caller executions completed; current/prototype callsets agree in
+  every paired arm. The separate OrdMag robustness reproducer fails: a
+  76-UMI colorectal perturbation changes 4,561 calls, including 4,538 barcodes
+  with identical UMI totals. The count-target sensitivity remains unresolved;
+  the later quality-ranking change below fixes input-order tie behavior.
+- `verify_regression.py` checks completed artifacts without launching a run;
+  `check_ordmag_tie_robustness.py` reproduces the known count-only tie failure.
+- Keep FASTQs, matrices, ledgers, and binary outputs untracked. A new benchmark
+  execution remains subject to the local repeat-authorization policy.
+
+## OrdMag quality ranking and MT score validation (2026-09-08)
+
+- Report, saved source, clean build hashes, unit tests, C API/CLI fixtures, and
+  collected regression summaries:
+  `/mnt/pikachu/star_suite_paper/analysis/ordmag_quality_ties_20260908/`.
+- Remote: `/scratch/ordmag_quality_ties_20260908_v1` on
+  `i-06de289faa5d78117` (`uw`, `us-west-2`); eight serial caller runs COMPLETE.
+- Both gene-only and MT/gene variants preserve final calls on matched CR L004
+  and current full STAR lymph-node controls. Barcode-axis reversal changes zero
+  calls; the old caller changed 9,490. Bootstrap count-target sensitivity remains.
+- Protocol: `docs/ORDMAG_QUALITY_RANKING.md`. `verify_results.py` validates saved
+  results without launching another caller.
+- Rejected nearest-whole-tie candidate and its midpoint cliff evidence:
+  `/mnt/pikachu/star_suite_paper/analysis/ordmag_ties_20260908/`; remote
+  `/scratch/ordmag_ties_20260908_v1`. Do not use it as the accepted fix.
+- MT gene IDs were derived from the actual reference GTF; its hash, gene list,
+  and exact feature matches are saved with the final results.
+- Large matrices, binaries, and barcode ledgers remain untracked. No FDR policy
+  or persistent binary matrix cache was changed by this work.
+
+### Native Flex quality-caller integration and L004 (2026-09-08)
+
+- Local report/provenance: `/mnt/pikachu/star_suite_paper/analysis/flex_internal_l004_20260908/`.
+- Isolated clean build: `/tmp/flex_internal_l004_20260908_v1`.
+- Remote L004 run: `/scratch/flex_internal_l004_20260908_v1`, instance `i-06de289faa5d78117`.
+- Valid integration fixture: `fixture_v4` (exact internal/external ledgers, frozen quality caller numerical parity). Earlier `fixture_v1`/`fixture_v2`/`fixture_v3` have degenerate synthetic ambient profiles and are preserved failed fixtures, not L004 executions.
+- Exact source snapshot, patch, source/binary hashes, build logs, all five unit tests, fixture logs, SSM payload and execution IDs are retained. Full L004 completed with STAR exit 0. All eight MEX/ledger checks pass and lymph-node internal/external replay is exact. Original wrapper tail-only postcondition was corrected in read-only postprocessing; STAR was not repeated. See README.md and results/.
+
+### Read-to-molecule audit after native L004 validation (2026-09-08)
+
+- Local report, read ledger, all discordant UMI families, production source
+  replay and exact coordinate comparison:
+  `/mnt/pikachu/star_suite_paper/analysis/l004_read_count_audit_20260908/`.
+- Remote: `/scratch/l004_read_count_audit_20260908_v2` on the same instance.
+- Scope: existing 400K control (100K read pairs per L001–L004), not full-depth
+  L004 read decisions. No STAR execution was repeated.
+- Production UMI replay reproduces every actual STAR MEX coordinate/count;
+  CR counted read families reproduce the CR MEX. The BAM-enabled and original
+  CR controls also have identical count coordinates.
+- Net STAR excess 322 = 343 molecules from UMI read-count ties + 33 other
+  STAR-only molecules − 54 unmatched-tag CR-only molecules. This audit does
+  not change the UMI corrector or cell-caller thresholds.
+- Preserve ledgers, matrices, copied source, build identities and archive
+  manifests outside git. See `coordinate_replay_validation.json` for the
+  exact validation and `README.md` for scope and source trace.
+
+### Full-depth L004 barcode-stage audit (2026-09-08)
+
+- Local: `/mnt/pikachu/star_suite_paper/analysis/l004_barcode_stage_audit_20260908/`.
+- Remote: `/scratch/l004_barcode_stage_audit_20260908_v1`, instance
+  `i-06de289faa5d78117`; SSM `f7f18a58-06a1-4fa6-9fe0-cd057b7e790a` Success.
+- Saved call/rank ledgers plus one streaming CR-MEX totals pass; no caller,
+  bootstrap, Monte Carlo, or STAR read-processing rerun.
+- Retain `summary.json`, paired `candidate_decisions.tsv.gz`, complete input
+  `barcode_membership.tsv.gz`, cached `cr_barcode_totals.tsv.gz`, input hashes,
+  source/build identity and archive manifest outside git.
+- Candidate sets Jaccard 0.991097; common tested tail has 2,969 CR-input-only
+  rescues versus 44 STAR-input-only. Final arm-to-arm Jaccard 0.811365 is a
+  different comparator from STAR versus official CR calls (0.833996).
+
+### L004 stage restrictions on unchanged STAR counts (2026-09-09)
+
+- Report and exact restriction lists:
+  `/mnt/pikachu/star_suite_paper/analysis/l004_stage_restriction_replay_20260909/`.
+- Main remote: `/scratch/l004_stage_restriction_replay_20260909_v2`; SSM
+  `a44c08bd-d3c9-4c16-8129-46c6a2704bf9`, Success/exit 0.
+- Independent ambient-only control:
+  `/scratch/l004_stage_restriction_replay_20260909_ambient_only_v1`; SSM
+  `c9865867-7c10-41b3-8a1f-5e8e57985944`, Success/exit 0.
+- Existing STAR library functions receive explicit primary, candidate and
+  ambient sets. Baseline callset, probabilities and profile reproduce saved
+  STAR results exactly. No production caller source or STAR counts changed.
+- Ambient-only change improves official-CR Jaccard 0.833996 -> 0.892115.
+  Cumulative CR primary/candidate restrictions and logged ambient window reach
+  0.911886; reconstructed CR-count-ranked ambient membership reaches 0.919928.
+  Native ambient tie-selected identities are unavailable; see report limits.
+- `counts_cache/star_l004_ln_raw.h5ad`: raw 707,278-barcode x 18,129-feature
+  STAR LN counts; 40,638,363 nonzero coordinates and 54,293,016 UMIs. Complete
+  sparse arrays and axes validated after round trip. Hash/S3 provenance is in
+  `counts_cache/h5ad_manifest.json`.
+- Keep main and ambient-only result archives, full candidate/profile ledgers,
+  source/build manifests, and restriction files outside git. The failed v1
+  adapter validation used a different RNG seed, stopped before restricted
+  arms, and is preserved separately; v2 matches the existing API seed 1.
+
+### L004 OrdMag controls with fixed ambient (2026-09-09)
+
+- Report, exact primary restrictions, candidate ledgers and paired transition
+  analysis: `/mnt/pikachu/star_suite_paper/analysis/l004_ordmag_fixed_ambient_20260909/`.
+- Two serial primary-set controls completed at
+  `/scratch/l004_ordmag_fixed_ambient_20260909_v1`, SSM
+  `9089bde5-7106-424d-8960-d3e4814ae8fe`, Success/exit 0. Same STAR counts,
+  ambient [90,000,180,000), 38,404 candidates and FDR 0.01 throughout.
+- STAR-ranked 5,773 primaries: final 17,373, shared official CR 16,887,
+  missed 1,286, extras 486, Jaccard 0.905032. This removes 352 extras and
+  73 official cells from the saved fixed-ambient baseline. Reconstructed
+  CR-ranked 5,773 primaries reach 0.906398. The target is a diagnostic control,
+  not a production default. See README for native primary tie ambiguity.
+- New count-only OrdMag trace on CR totals restricted to STAR features:
+  `/scratch/l004_ordmag_projected_counts_20260909_v1`, SSM
+  `10f71a2b-929c-4bf3-8525-da1b34adc555`, Success/exit 0; recovered estimate
+  6,210, retained target 6,513. Reuses unchanged STAR estimator, 180,000 input
+  barcodes and 48 bootstrap workers; no final-cell calling on this input.
+- `archive.json`, `projected_archive.json`, source/build manifests and
+  `projected_trace_execution.json` retain hashes, S3 locations and completion
+  evidence. `paired_effects.json` and transition TSVs isolate primary demotion
+  from BH changes with unchanged common-tail raw p-values. No production
+  caller source changed or identical benchmark was repeated.
+
+### CR OrdMag parameter distribution and final-cell reconciliation (2026-09-09)
+
+- Report: `/mnt/pikachu/star_suite_paper/analysis/l004_umi_expected_cells_20260909/`.
+- Read-only audit of all eight native CR raw H5 matrices, runtime logs and
+  public documentation. Remote `/scratch/l004_cr_ordmag_distribution_20260909_v2`,
+  SSM `8f3e52e9-1c26-4189-b418-b2451c7c85dc`, Success/exit 0 and COMPLETE.
+- All-eight filtered-H5 count reconciliation SSM
+  `7e2bccb0-917f-4493-a630-f4351c9811a9`, Success: final L004 CR count 253,873,
+  exactly matching the saved oracle. Logged OrdMag parameters sum to 128,053;
+  those parameters must not be labeled the final recovered-cell total.
+- `cr_distributions_completed/` stores complete barcode-axis and UMI-total
+  `.npy` caches, matrix hashes, sample log mappings and statistics. All
+  717,686 nonzero lymph-node totals exactly match the earlier cached CR MEX.
+- `cr_stage_reconciliation.json`, `cr_distribution_comparison.tsv`, rank-curve
+  PNG/PDF and `distribution_summary.json` separate parameter, initial-call,
+  tail-rescue and final-cell comparisons. Initial counts remain unavailable
+  for two samples; do not substitute final counts or approximations.
+- No production source or expected-cell allocation policy changed. Prepared
+  STAR raw-MEX counter was not executed. Preserve execution/setup records,
+  result archive and `cr_distribution_archive.json` outside git.
+
+### L004 median-budget OrdMag-only experiment (2026-09-09)
+
+- Report and results: `/mnt/pikachu/star_suite_paper/analysis/l004_median_budget_ordmag_20260909/`.
+- User-defined expected inputs sum to 48,000, proportional to median UMI among
+  all >=500-UMI barcodes, separately calculated from each matrix. This is only
+  an OrdMag input budget; it does not cap primary or final calls.
+- Sixteen distinct serial arms completed once at
+  `/scratch/l004_median_budget_ordmag_20260909_v1`; SSM
+  `c64dc360-48d5-41d4-9bab-36a44944b62f`, Success/exit 0, with root and per-arm
+  COMPLETE files. Eight STAR quality inputs and eight CR-count controls use
+  the unchanged STAR OrdMag library. No tail rescue or production source edits.
+- LN primary STAR/CR-count calls: old 6,912/5,222; new 4,747/4,673. Primary
+  Jaccard improves 0.747156 -> 0.950714. Native CR logged 5,773 primaries and
+  remains a separate comparator. Total new primaries: STAR 82,563, CR-count
+  83,306; pooled Jaccard bounds 0.980525–0.980927. No final-cell inference.
+- `summary.json`, `primary_comparison.tsv`, `primary_jaccards.tsv`, all eight
+  STAR primary lists, allocations, input/build hashes, execution logs,
+  driver/wrapper/analysis scripts and unchanged-source validation are retained.
+  CR quality keys are unavailable; reported overlap bounds cover every UMI
+  boundary-tie choice. LN's new overlap is exact because its boundary is unique.
+- Result archive SHA-256:
+  `086022dffa87c50613310f41e03417895d2fa64023e265e9e88c4e1ba2058c10`.
+  S3 location is recorded in `archive.json`; review files in
+  `review_archive.json`. Reuse saved results instead of repeating a caller run.
+
+### L004 LN final calls with median-budget STAR primaries (2026-09-09)
+
+- Report and transition ledgers:
+  `/mnt/pikachu/star_suite_paper/analysis/l004_median_budget_final_20260909/`.
+- One new final-cell arm uses the exact saved 4,747 STAR primaries, cached STAR
+  LN counts, unchanged 38,404-candidate pool, fixed [90,000,180,000) ambient,
+  and the existing 10K MC / seed 1 / 8-thread / BH FDR 0.01 tail caller.
+- Final Jaccard against official CR decreases 0.892115 -> 0.889545: 17,016
+  calls, 16,566 shared, 1,607 missed, 450 extras. The new set removes 394
+  official cells and 388 extras. Of the 394 official losses, 338 are demoted
+  primaries rejected by the tail and 56 are common-tail losses after BH with
+  identical raw p-values. Earlier STAR-quality 5,773-primary control: 0.905032.
+- Remote `/scratch/l004_median_budget_final_20260909_v1`; SSM
+  `8e80e78f-d66a-4b52-97fa-69edaa5406a3`, Success/exit 0 with wrapper COMPLETE.
+  Result archive SHA-256:
+  `25cc5c0101cff4203684a7db1f8fed0db8f10841082e0ef9a587f3bb34770ee6`.
+  Hashes and S3 locations are recorded in `archive.json` and `review_archive.json`.
+- Scope is LN final cells only. Counts/profile/likelihoods and common-tail
+  raw p-values validated unchanged. No production source edit, MEX reread,
+  alignment, OrdMag rerun or baseline caller rerun.
+
+### L004 56,000 median budget: 3,500 per tag hypothesis (2026-09-09)
+
+- Report: `/mnt/pikachu/star_suite_paper/analysis/l004_median_budget_56000_20260909/`.
+- Same candidate-median weights and cached inputs as the 48,000 experiment;
+  expected-input sums change to 56,000. Sixteen new OrdMag arms plus one new
+  STAR LN final-cell arm completed serially once with unchanged caller binaries.
+- LN: STAR/CR-count primaries 5,468/5,308, primary Jaccard 0.941622. Final
+  official-CR Jaccard 0.903060, versus 0.889545 at 48,000 and 0.892115 for
+  original automatic OrdMag with the same fixed ambient. Final STAR cells
+  17,281; shared 16,824; missed 1,349; extras 457. Relative to 48,000: +258
+  official cells and +7 extras. Earlier 5,773-primary restriction remains 0.905032.
+- All-eight primary totals STAR 88,232 / CR-count 88,857; pooled Jaccard
+  bounds 0.978714–0.979400. Final-cell testing covers LN only. Counts, profile,
+  candidates, likelihoods and common-tail raw p-values validated unchanged.
+- Remote `/scratch/l004_median_budget_56000_20260909_v1`; SSM
+  `dfc1fa0f-2614-4738-845e-d02bb2fb6b36`, Success/exit 0 and wrapper COMPLETE.
+  Result archive SHA-256:
+  `b03da78a7d35b727dc159b2b10327bc7f25970be083e1b42805b2c1becfca208`.
+  S3 locations and review archive hashes are in `archive.json` and
+  `review_archive.json`. Preserve exact input allocation, saved lists, metrics
+  and transition ledgers; no identical caller repeat is authorized.
+- This tests a user-defined expected-input scale, not CR internals. No count
+  normalization, production source change or adopted general Flex default.
+
+### L004 LN OrdMag control at native CR expected input 5,718 (2026-09-09)
+
+- Report: `/mnt/pikachu/star_suite_paper/analysis/l004_ordmag_native_expected_control_20260909/`.
+- One new unchanged STAR OrdMag execution on the same top-180K CR totals,
+  with explicit expected input 5,718 from the native runtime log. Returns
+  5,889 primaries versus native CR 5,773 (+2.01%). At the saved 48,000-budget
+  expected input 4,469 it returned 4,673 (-19.05%). Large deficit removed by
+  matching expected input; percentile/divisor/bootstrap settings unchanged.
+- Remote `/scratch/l004_ordmag_native_expected_control_20260909_v1`; SSM
+  `dbb06b95-d19b-429a-a245-52929e57a926`, Success/exit 0 and COMPLETE.
+  `control_result.json` contains full execution/diagnostic/log evidence;
+  SHA-256 `f64f27cd3488523235c29f195fefff644fff390f987f0a2abc79893c7f9d7a15`.
+  S3 locations are in `archive.json` and `review_archive.json`.
+- CR-median allocation maps that expected input to 61,409.48 total budget,
+  or 3,838.09 per tag. This is an LN calibration point, not a universal CR
+  default. No tail execution, new count cache, source change or identical rerun.
+
+### L004 direct OrdMag objective sweep (2026-09-09)
+
+- Report: `/mnt/pikachu/star_suite_paper/analysis/l004_direct_ordmag_formula_20260909/README.md`.
+- Sixteen serial standalone numerical evaluations completed once, exit 0 and
+  wrapper COMPLETE. User formula: every integer N=2..45,000, linear 99th
+  percentile, strict UMI > m/10, no bootstrap. No production caller execution.
+- LN has seven exact zero-loss CR minima (4,682–7,033) and five STAR minima
+  (4,615–7,842), so this formulation does not select a unique expected N.
+  Native logged N remains 5,718; native primary count remains 5,773.
+- Representative smallest-minimum primary sets give LN STAR/CR Jaccard
+  0.975983, with 4,615/4,682 primaries. Pooled all-eight Jaccard 0.985015.
+  No tail run or final-cell improvement claim. Full 24bp identities retained.
+- `results/summary.json`, full `.npz`/`.tsv.gz` curves, primary sets, numerical
+  script, objective PNG/PDF, manifests and wrapper logs are retained. All
+  tested STAR cutoffs exclude omitted ranks beyond the cached top 180,000.
+- All nine previously tracked production/test/doc hashes remain unchanged.
+
+### L004 native OrdMag N/loss parameter audit (2026-09-09)
+
+- Report: `/mnt/pikachu/star_suite_paper/analysis/l004_ordmag_parameter_audit_20260909/README.md`.
+- Native LN log explicitly reports N=5,718 and loss 0.004181068568834495.
+  Direct raw-count loss 24.331759 was not a validated reproduction of that
+  logged quantity; do not infer a contradiction in CR's objective from it.
+- Fresh raw-H5 totals and barcode axis exactly match the cached raw data.
+  Raw totals reproduce native eligible count 38,749 and boundary 1,765.
+  Validated included-feature mask (18,129 genes) gives direct loss 31.440364;
+  percentile/rounding variants do not recover the native N/loss pair.
+- Four generic LN bootstrap/search controls and seven other-sample controls
+  completed once, serially. LN was reused in the all-eight comparison.
+  Mean optimized loss can be small while raw loss at mean N is large. Other
+  seven N estimates are within 0.7% of native; LN 5,127 differs from 5,718.
+  Aggregation is a supported hypothesis, not identified CR internals.
+- Authoritative cached totals: `corrected_feature_totals/`; corrected SSM
+  `198722fc-a248-4bde-8163-2bdb76d8e1db`, Success/exit 0 and COMPLETE.
+  Corrected archive SHA-256:
+  `291106bfe91d5dfd4555f4493cff8c75b099eac9d80835df8f2e8ab3669e3443`.
+  Earlier extraction/recovery artifacts contain superseded target-set metadata;
+  see report for the serialization and byte-encoded index correction.
+- No production caller, tail, alignment, source change or identical caller rerun.
+
+### L004 STAR lymph-node aggregated OrdMag estimate (2026-09-09)
+
+- Report: `/mnt/pikachu/star_suite_paper/analysis/l004_star_aggregation_estimate_20260909/README.md`.
+- One new generic diagnostic on complete STAR LN cached totals: expected
+  N=7,930; mean optimized loss 0.003390498; replicate-N SD 6,491.26. Saved
+  CR same-procedure comparator reused: N=5,127 / loss 0.003740071. Native
+  logged CR N remains 5,718. This does not resolve the expected-count gap.
+- Direct threshold at the new STAR N retains 7,873 barcodes, cutoff 1,455
+  UMIs. This direct F is distinct from an internal count-bootstrap result.
+- `results/summary.json` preserves full replicate traces and input hashes;
+  `star_ln_all_nonzero_totals.npy` caches all 707,278 sorted nonzero totals;
+  `direct_threshold_primary.txt` preserves full 24bp identities.
+- Wrapper exit 0 and COMPLETE. LN only; no tail, alignment, MEX reread,
+  production source change or identical caller repeat.
+
+
+## Full 320K Flex feature-universe / occupancy benchmark (2026-09-09)
+
+- Local source snapshot, build, tests, reports and provenance:
+  `/mnt/pikachu/star_suite_paper/analysis/full320k_feature_occupancy_benchmark_20260909/`
+- Cloud runs and binary count caches:
+  `/scratch/full320k_feature_occupancy_20260909_v1/` on `i-06de289faa5d78117`.
+- Durable results:
+  `s3://star-suite-320k-benchmark-alt-171440768238-us-west-2-20260904/analysis-tools/full320k_feature_occupancy_20260909_v1/results/`
+- Report: `docs/HANDOFF_FULL320K_FLEX_FEATURE_OCCUPANCY_BENCHMARK_20260909.md`.
+- One CBQ and one BGZF full run; no STAR genome-index load, BAM, or decision sidecar.
+- Production source changes remain in the isolated snapshot; `benchmark_only.patch`
+  passes an apply check against the primary checkout.
+
+## JAX Simple-ED primary UMI floor regression (2026-09-09)
+
+- Artifacts and reusable binary matrix cache:
+  `/mnt/pikachu/star_suite_paper/analysis/jax_simpleed_floor_regression_20260909/`.
+- Report: `docs/HANDOFF_JAX_SIMPLE_ED_FLOOR_REGRESSION_FIX_20260909.md`.
+- Fresh baseline and corrected caller builds; one serialized replay each on
+  the complete saved JAX CBQ no-align raw MEX. No reference-index load, read
+  ingestion, BAM, sidecar, deprecated-probe run or performance benchmark.
+- Baseline exactly reproduces all sixteen saved stage counts and final full
+  barcode identities. Corrected real-sample stage diagnostics are byte-identical
+  before occupancy. Unused-tag final calls: 71,677 to 2; real-sample occupancy
+  removals: 588 to 12; 576 real identities restored and no newly lost identities.
+- All six shared caller tests and the expanded internal grouped Flex fixture
+  passed. `primary_floor.patch` contains the narrowly scoped production fix;
+  `baseline_jax/` and `fixed_jax/` contain complete stage diagnostics and calls.
+
+## Full 320K hybrid lymph calls with global occupancy (2026-09-09)
+
+- Report and artifacts:
+  `/mnt/pikachu/star_suite_paper/analysis/full320k_hybrid_occupancy_20260909/`.
+- Fresh floor-corrected caller reconstructs seven missing pre-occupancy sets
+  from the existing raw HDF5 cache; original lymph pre-calls are reused.
+  Original full-library occupancy reproduces all eight final identity sets.
+- Substitute saved hybrid lymph calls and refit production occupancy across
+  all sixteen tags. Lambda changes from 2.295900 to 2.323956/2.325121; cutoff
+  remains 8. Fixed-stage/automatic hybrid lymph post-occupancy Jaccards are
+  0.962084/0.956683; 377/381 lymph removals, none CR-matching.
+- Pooled Jaccards: matched baseline 0.954406, fixed-stage hybrid 0.964547,
+  automatic hybrid 0.964052. Other samples' pre-calls are held fixed.
+- Cloud: `/scratch/full320k_hybrid_occupancy_20260909_v1` on
+  `i-06de289faa5d78117`; successful SSM execution and verified result archive.
+  No read ingest, reference-index load, BAM, sidecar or STAR-only deprecated
+  quantification was run. This remains an explicitly hybrid diagnostic.
+
+## Full 320K deprecated-feature hybrid test across all samples (2026-09-09)
+
+- Report, summaries, exact callsets and verification:
+  `/mnt/pikachu/star_suite_paper/analysis/full320k_all_samples_deprecated_20260909/`.
+- Three matched arms across all eight samples, all at 100K simulations:
+  active-only control, hybrid with fixed starting stages, and hybrid with
+  automatic stages. Seven samples required 21 serial new caller executions;
+  three validated 100K lymph arms were reused. Each arm refits occupancy
+  across the complete sixteen-tag library.
+- Pooled post-occupancy Jaccards: 0.954180 active, 0.965767 hybrid fixed,
+  0.973943 hybrid automatic. Automatic improves all eight samples; fixed
+  stages regress in colorectal. Automatic CR misses fall 7,813 to 337;
+  CR-absent calls rise 7,438 to 8,360. Precision decreases 0.2189 percentage
+  points while recall increases to 99.8964%.
+- Fitted lambda changes 2.296316 to 2.356127 for automatic hybrid; cutoff
+  remains 8. Occupancy removes 4,520 calls, none CR-matching. Minimum final
+  included-export UMIs is 114; no calls below 100 in any arm.
+- All original STAR active counts remain identical. Added 542 deprecated
+  feature rows come from CR output HDF5s and remain excluded from the
+  18,129-feature export universe. This is a labeled hybrid diagnostic,
+  not independent STAR deprecated-probe quantification.
+- Cloud root: `/scratch/full320k_all_samples_deprecated_20260909_v1` on
+  `i-06de289faa5d78117`. Durable S3 prefix:
+  `s3://star-suite-320k-benchmark-alt-171440768238-us-west-2-20260904/analysis-tools/full320k_all_samples_deprecated_20260909_v1`.
+- SSM `c3cc41b9-bb6a-4a1c-8fc2-22144926ebec`, Success/exit 0. Archive SHA-256:
+  `e12a58534f575c9fc51a3de9d19d33cca5ded9840b037dd73287766e543b3bf2`.
+- Source manifest and all pre/post full barcode metrics independently
+  verified locally. No read ingest, genome-index load, BAM, sidecar,
+  production source change or Cell Ranger source inspection.
+
 ## Full 320K STAR deprecated-feature integration (2026-09-09)
 
 - Main source and tested executable updated. Report:
@@ -1060,3 +1429,128 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   `1b7fc3f961fbccae2ef3b84e67bdaec9c20b487b1d162974a764d7657bc622ec`.
 - Existing unrelated edits preserved; no successful dataset/caller execution
   repeated, no commit/merge and no Cell Ranger source inspection.
+
+## Flex cache loader sort removal (2026-09-10)
+
+- Local report, instrumented source, completed cloud profiles, production
+  patch, and FASTQ/CBQ loader verification:
+  `/mnt/pikachu/star_suite_paper/analysis/flex_cache_startup_20260910/`.
+- Serial isolated loader executions on `i-06de289faa5d78117` with the
+  316,072,780-record deprecated-complete cache: removing the three loader
+  sorts reduced instrumented load from 148.479 to 110.745 seconds (25.41%).
+  Both profiles used a warm OS page cache; these are not full STAR timings.
+- H0 hash reserve/populate costs about 0.03 seconds for 54,580 unique keys;
+  H1/DENY map population remains 87.55 seconds for 315,199,500 entries.
+  The persisted file currently stores records, not runtime hash buckets.
+- Sorted writer/loader and classification fixtures passed once each for
+  FASTQ and CBQ modes. The installed STAR binary is unchanged.
+- Completed phase logs, sources, metadata and success markers are under
+  `s3://star-suite-320k-benchmark-alt-171440768238-us-west-2-20260904/analysis-tools/flex_cache_startup_20260910_v1/completed/`
+  and the sibling `flex_cache_startup_20260910_nosort_v1/completed/` prefix.
+
+## Stored Flex khash and half-probe benchmark (2026-09-10)
+
+- Report: `docs/benchmarks/FLEX_KHASH_HALF_PROBE_20260910.md`.
+- Source snapshots, builds, tests, prior binary, completed cloud results and
+  command records: `/mnt/pikachu/star_suite_paper/analysis/flex_khash_20260910/`.
+- Production uses persisted full-probe khash; half-probe replacement remains
+  a benchmark prototype. All 316,072,780 cache records and four million real
+  read windows have zero recorded decision differences between methods.
+- CBQ classification times (4M windows): old 0.596937 s, stored khash
+  0.544574 s, half hashes 0.187824 s. FASTQ: 1.196820 / 1.060840 / 0.566410 s.
+  Warm-cache classifier microbenchmarks, not complete STAR timings.
+- Full STAR CBQ/BGZF fixtures each ran once with the changed binary and
+  packed cache: raw counts and all eight cell calls exactly match prior
+  results, without index loading, BAM or decision sidecars.
+- New installed STAR SHA256:
+  `dca77afeb1d6e57c36d98b24806c2d0962ffb0304a855a7ef0addd9e649e8790`.
+- S3 bucket `star-suite-320k-benchmark-alt-171440768238-us-west-2-20260904`,
+  `analysis-tools/` prefixes: `flex_khash_20260910_v1`,
+  `flex_pair_benchmark_20260910_v2`, `flex_pair_ascii_20260910_v3`, and
+  `flex_khash_star_fixture_20260910_v1`. Each has completed output/metadata.
+
+## Production half-probe khash and L004 regression (2026-09-10)
+
+- Report: `docs/benchmarks/FLEX_HALF_KHASH_L004_20260910.md`.
+- Local source manifests, clean build, unit tests, launch scripts, completed
+  metrics and prior binary: `/mnt/pikachu/star_suite_paper/analysis/flex_half_production_20260910/`.
+- Cloud root: `/scratch/flex_half_production_20260910_v1/` on
+  `i-06de289faa5d78117`. Instance remains running.
+- One execution per arm, 1,823,648,323 L004 read pairs, 48 threads, cold OS
+  cache, deprecated-complete model, no genome index/BAM/decision sidecar:
+  full-khash CBQ 524.44 s / 93.36 GiB; half-khash CBQ 522.28 s / 75.11 GiB;
+  half-khash BGZF 1030.83 s / 75.90 GiB. No full-khash BGZF control was run.
+- All raw and per-sample filtered matrix coordinates, axes, aggregate read
+  classifications and 249,194 called cell identities match across the arms.
+  Global raw matrix: 499,298,264 entries, 809,101,584 UMIs.
+- Cold actual-loader initialization: full 2.36048 s versus half 0.148786 s.
+  Compact cache: 331,268,096 bytes, SHA256
+  `801fc6143a383b6a94c55307f816bf824c7a9c685d3049405b2ffcc4d72db296`.
+  Conversion verified all source records and every generated half-variant pair,
+  then reopened and compared the stored tables byte-for-byte.
+- Existing L004 caller discrepancies are preserved: pooled CR cell Jaccard
+  0.934732, LNReactive 0.821884; pooled UMI Pearson 0.999989 and count-weighted
+  Jaccard 0.994396 on shared calls. Only CR output data were inspected.
+- Installed production STAR SHA256:
+  `6d9a3dd888248eeb7c79af021a0aad7562dd62219054831981a89e3323a4f3d1`.
+  Backup: local artifact `STAR.before_half` (prior full khash).
+- S3 bucket `star-suite-320k-benchmark-alt-171440768238-us-west-2-20260904`,
+  prefix `analysis-tools/flex_half_production_20260910_v1/`: compact cache,
+  paired configuration, binaries/sources, completed reports and matrices.
+  `ARCHIVE_COMPLETE.json` records persistent data artifacts. Filtered STAR/CR
+  matrices have compressed H5 caches; one global raw MEX archive covers the
+  count-identical STAR outputs.
+- The first comparison script expected per-sample raw directories absent from
+  this configuration. It resumed after correcting the path list and retained
+  the successful global-raw comparison. No STAR execution was repeated.
+
+
+## Parallel tag-aware Flex sample calling (2026-09-10)
+
+- Report: `docs/benchmarks/FLEX_PARALLEL_CALLER_L004_20260910.md`.
+- Local sources, clean build, tests, logs and prior binary:
+  `/mnt/pikachu/star_suite_paper/analysis/flex_caller_parallel_20260910/`.
+- Cloud root: `/scratch/flex_caller_parallel_20260910_v1/` on
+  `i-06de289faa5d78117`; instance retained.
+- Eight sample groups run concurrently with six workers each. Paired tags
+  remain in one model; all groups finish before joint occupancy. Bootstrap
+  random streams are preserved under a separate execution-worker cap.
+- Five local test executables and fresh full-STAR CBQ/BGZF fixtures passed.
+- L004 CBQ (1,823,648,323 pairs, 48 threads, cold cache): 428.95 s / 75.73 GiB
+  versus the saved serial 522.28 s / 75.11 GiB. Caller phase: 328 -> 244 s.
+- All nine matrices, 249,194 cell identities, read classifications and stage
+  summaries match exactly. All 57 caller diagnostic files match, excluding
+  only the changed `mc_threads` JSON field. Occupancy still removes 3,348 calls.
+- No BAM, per-read sidecar, alignment or reference loading. Caller diagnostics
+  enabled. No whole-L004 BGZF repetition for this caller-only change.
+- Completion: `BENCHMARK_COMPLETE.json`, `VALIDATION_COMPLETE.json`.
+- S3: existing bucket `star-suite-320k-benchmark-alt-171440768238-us-west-2-20260904`,
+  prefix `analysis-tools/flex_caller_parallel_20260910_v1/`. Identical matrices
+  reuse the durable `flex_half_production_20260910_v1` archive; new logs,
+  diagnostics, manifests, source, binary and hashes are archived separately.
+- The validated binary is installed. `STAR.before_parallel` preserves its
+  predecessor. Source changes remain uncommitted.
+
+
+## OrdMag sort reuse and shared caller permits (2026-09-10)
+
+- Report: `docs/benchmarks/FLEX_ORDMAG_SORT_PERMITS_L004_20260910.md`.
+- Local: `/mnt/pikachu/star_suite_paper/analysis/flex_ordmag_sort_permits_20260910/`.
+- Cloud: `/scratch/flex_ordmag_sort_permits_20260910_v1/`, instance retained.
+- Sorting once preserves trial arithmetic and bootstrap draws. Shared permits
+  let active samplers borrow returned workers within the 48-thread budget.
+- L004 CBQ, 1,823,648,323 pairs: previous fixed caller 428.95 s / caller 244 s;
+  sort-once fixed shares 211.72 s / caller 28 s; sort-once + permits
+  201.90 s / caller 18 s. Final peak RSS 76.02 GiB.
+- Both new arms exactly match all nine matrices, 249,194 cell identities and
+  57 caller diagnostics (only MC worker metadata excluded). Stage summaries,
+  read classifications and occupancy decisions remain identical.
+- Five sort-only and seven final test executables pass. Fresh full-STAR CBQ
+  and BGZF fixtures pass for each binary; no full-L004 BGZF repetition.
+- Cold cache, runs serialized; no BAM, per-read sidecar, alignment or reference
+  loading. Caller diagnostics enabled. No application execution repeated.
+- Completion: each arm's `BENCHMARK_COMPLETE.json`, `VALIDATION_COMPLETE.json`.
+- S3: existing bucket `star-suite-320k-benchmark-alt-171440768238-us-west-2-20260904`,
+  prefix `analysis-tools/flex_ordmag_sort_permits_20260910_v1/`.
+- Validated final binary installed; `STAR.before_sort_permits` preserves the
+  predecessor. Code remains uncommitted.

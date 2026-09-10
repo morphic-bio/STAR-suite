@@ -12,6 +12,8 @@
 #include <random>
 #include <thread>
 #include <numeric>
+#include <iostream>
+#include "ParallelTasks.h"
 
 using namespace std;
 
@@ -181,22 +183,19 @@ vector<uint32_t> EmptyDropsCRSampler::montecarloPval(
         }
     };
     
-    // Launch threads with balanced iteration ranges
-    vector<thread> threads;
-    uint32_t iterPerThread = iterations / actualThreads;
-    uint32_t remainder = iterations % actualThreads;
-    uint32_t startIter = 0;
-    
-    for (uint32_t t = 0; t < actualThreads; ++t) {
-        uint32_t count = iterPerThread + (t < remainder ? 1 : 0);
-        uint32_t endIter = startIter + count;
-        threads.emplace_back(worker, t, startIter, endIter);
-        startIter = endIter;
-    }
-    
-    // Wait for all threads
-    for (auto& th : threads) {
-        th.join();
+    // Iteration seeds and integer tallies are independent of worker assignment.
+    // Small batches let a live sampler borrow permits returned by other groups.
+    const uint32_t batch = 64;
+    const size_t tasks = (uint64_t(iterations) + batch - 1) / batch;
+    size_t launched = 0;
+    scrna::parallelFor(tasks, actualThreads, [&](size_t task, size_t threadId) {
+        const uint32_t start = task * batch;
+        const uint32_t end = std::min<uint64_t>(uint64_t(start) + batch, iterations);
+        worker(threadId, start, end);
+    }, &launched);
+    if (scrna::currentThreadPermitPool()) {
+        std::cerr << "[EmptyDrops MC permits] worker_limit=" << actualThreads
+            << " workers_launched=" << launched << " batch_iterations=" << batch << "\n";
     }
     
     // Merge thread-local results

@@ -55,6 +55,9 @@ struct SimpleEmptyDropsParams {
     
     uint32 bootstrapSeed = 0;        // Seed for bootstrap RNG (0 = use default seeds 1,2,3...)
     uint32 maxThreads = 0;           // Max threads for bootstrap (0 = auto: hardware_concurrency or OMP_NUM_THREADS)
+    // Limit execution workers without changing the legacy maxThreads-based
+    // random streams or chunk boundaries. Zero preserves the existing budget.
+    uint32 maxConcurrentThreads = 0;
 
 };
 

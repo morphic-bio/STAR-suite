@@ -3,7 +3,7 @@
 
 #include <cstdint>
 #include <string>
-#include <unordered_map>
+#include "FlexHashCacheStorage.h"
 #include <vector>
 
 #include "FlexGdna.h"
@@ -11,40 +11,8 @@
 
 class ParametersSolo;
 
-struct FlexHashScreenDecision {
-    enum Action : uint8_t {
-        Disabled = 0,
-        Pass = 1,
-        Keep = 2,
-        Deny = 3
-    };
-
-    Action action = Disabled;
-    uint16_t geneIdx15 = 0;
-    uint8_t cacheClass = 0;
-    uint8_t negativeCode = 0;
-    int8_t offset = 0;
-    FlexGdnaRegion probeRegion = FlexGdnaUnknown;
-    // Diagnostic provenance for the conservative exactly-one-N retry. The
-    // runtime cacheClass remains H1 for compatibility; singleNCacheClass
-    // identifies the underlying cache tier that supplied the unique gene.
-    bool singleN = false;
-    uint8_t singleNCacheClass = 0xFF;
-    // Total fixed-position 50-base probe distance for an H1X2
-    // seed-and-extend decision; 0xFF for other tiers or no scored probe.
-    uint8_t probeHammingDistance = 0xFF;
-    // Legacy diagnostic field for the former residual-alignment gate. New
-    // H1X2 seed-and-extend decisions are terminal and leave this field zero.
-    uint16_t residualAnchorGeneIdx15 = 0;
-};
-
-enum FlexHashScreenCacheClass : uint8_t {
-    FlexHashCacheH0 = 0,
-    FlexHashCacheH1 = 1,
-    FlexHashCacheNegative = 2,
-    FlexHashCacheH2 = 3,
-    FlexHashCacheH1X2 = 4
-};
+#include "FlexHashScreenDecision.h"
+#include "FlexProbePairKhash.h"
 
 class FlexHashScreenCache {
 public:
@@ -60,14 +28,16 @@ public:
 
     static FlexHashScreenCache& instance();
 
+    /** Load a cache already sorted by (seqHi, seqLo, sampleIdx), as emitted
+     *  by the cache writers. Loading does not sort or check record ordering. */
     bool ensureLoaded(const ParametersSolo& pSolo, std::string* errorOut = nullptr);
     FlexHashScreenDecision classifyRead(const char* readSeq, uint32_t readLen, uint16_t sampleIdx) const;
     FlexHashScreenDecision classifyReadH0Only(const char* readSeq, uint32_t readLen, uint16_t sampleIdx) const;
     FlexHashScreenDecision classifyReadH0Offset0(const char* readSeq, uint32_t readLen) const;
     FlexHashScreenDecision classifyReadH0H1Offset0(const char* readSeq, uint32_t readLen) const;
     // Classify a 50-base offset-0 key in CBQ's native LSB-first order. lo
-    // contains bases 0..31 and hi bases 32..49. In CBQ runs the lookup maps
-    // are built in this order once, rather than reordering every read.
+    // contains bases 0..31 and hi bases 32..49. Lookup maps use this order
+    // in both input modes and in persisted khash files.
     FlexHashScreenDecision classifyCbqH0Offset0(uint64_t seqLo, uint64_t seqHi) const;
     FlexHashScreenDecision classifyCbqH0H1Offset0(uint64_t seqLo, uint64_t seqHi) const;
     /** Window with exactly one N (nMask has one bit): try the four bases at that
@@ -80,16 +50,22 @@ public:
     FlexHashScreenDecision classifyCbqH1X2SeedExtend(uint64_t seqLo,
                                                      uint64_t seqHi,
                                                      uint64_t nMask) const;
+    bool hasHalfTables() const { return pair_.ready(); }
+    // Fused primary/single-N/extension path reuses half-match parent lists.
+    FlexHashScreenDecision classifyReadComplete(const char* read, uint32_t len, bool singleN = true) const;
+    FlexHashScreenDecision classifyCbqComplete(uint64_t lo, uint64_t hi, uint64_t nmask, bool singleN = true) const;
     bool hasH1X2() const { return hasH1X2_; }
-    bool h1x2ProbeIndexReady() const { return probeSeedIndex_.ready(); }
-    size_t h1x2ProbeCount() const { return probeSeedIndex_.probeCount(); }
+    bool h1x2ProbeIndexReady() const { return pair_.ready() || probeSeedIndex_.ready(); }
+    size_t h1x2ProbeCount() const { return pair_.ready() ? pair_.probeCount() : probeSeedIndex_.probeCount(); }
     size_t h1x2ProbeKeyCount() const {
-        return probeSeedIndex_.leftKeyCount() + probeSeedIndex_.rightKeyCount();
+        return pair_.ready() ? pair_.keys(0) + pair_.keys(1) :
+            probeSeedIndex_.leftKeyCount() + probeSeedIndex_.rightKeyCount();
     }
     static uint32_t probeWindowLength();
-    size_t recordCount() const { return records_.size(); }
-    size_t h0RecordCount() const { return h0Records_.size(); }
-    size_t h1DenyRecordCount() const { return h1DenyRecords_.size(); }
+    size_t recordCount() const { return pair_.ready() ? pair_.recordCount() : storage_.recordCount(); }
+    size_t h0RecordCount() const { return pair_.ready() ? pair_.h0Count() : storage_.h0Count(); }
+    size_t h1DenyRecordCount() const { return pair_.ready() ? pair_.recordCount()-pair_.h0Count() : storage_.h1Count(); }
+    bool hasPersistedTables() const { return pair_.ready() || storage_.persisted(); }
     uint16_t cacheVersion() const { return cacheVersion_; }
     bool hasRegionMetadata() const { return regionMetadataComplete_; }
 
@@ -104,22 +80,11 @@ private:
 
     bool loadFile(const std::string& path, std::string* errorOut);
     bool encodeWindow(const char* readSeq, uint32_t offset, uint64_t& seqLo, uint64_t& seqHi) const;
-    bool findRecord(uint64_t seqLo, uint64_t seqHi, uint16_t sampleIdx, Record& out) const;
+    bool findRecord(uint64_t seqLo, uint64_t seqHi, uint16_t sampleIdx, Record& out, bool h0Only = false) const;
     FlexHashScreenDecision classifyHits(const Record* const* hits, const int8_t* relativeOffsets, size_t nHits, uint16_t runtimeSampleIdx) const;
 
-    bool findRecordInVec(const std::vector<Record>& vec, uint64_t seqLo, uint64_t seqHi, uint16_t sampleIdx, Record& out) const;
-    void buildTieredVectors();
-
-    struct SeqKeyNoSample {
-        uint64_t lo, hi;
-        bool operator==(const SeqKeyNoSample& o) const { return lo == o.lo && hi == o.hi; }
-    };
-    struct SeqKeyNoSampleHash {
-        size_t operator()(const SeqKeyNoSample& k) const {
-            return k.lo * 0x9E3779B97F4A7C15ULL ^ k.hi * 0xBF58476D1CE4E5B9ULL;
-        }
-    };
-    using H0NoSampleMap = std::unordered_map<SeqKeyNoSample, Record, SeqKeyNoSampleHash>;
+    using SeqKeyNoSample = FlexProbeKey;
+    Record decodeStorageRecord(const FlexProbeRecord& raw) const;
 
     bool encodeWindowLUT(const char* readSeq, uint32_t offset, uint64_t& seqLo, uint64_t& seqHi) const;
     static SeqKeyNoSample cacheKeyToCbqKey(uint64_t seqLo, uint64_t seqHi);
@@ -127,8 +92,6 @@ private:
     SeqKeyNoSample offset0MapKeyFromCacheKey(uint64_t seqLo, uint64_t seqHi) const;
     FlexHashScreenDecision classifyH0Offset0MapKey(const SeqKeyNoSample& key) const;
     FlexHashScreenDecision classifyH0H1Offset0MapKey(const SeqKeyNoSample& key) const;
-    void buildH0NoSampleMap();
-    void buildH1DenyNoSampleMap();
     bool buildH1X2ProbeIndex(std::string* errorOut);
     static std::string decodeCacheSequence(uint64_t seqLo, uint64_t seqHi);
 
@@ -137,26 +100,12 @@ private:
     bool regionMetadataComplete_ = false;
     uint16_t cacheVersion_ = 0;
     std::string loadedPath_;
-    std::vector<Record> records_;
-    std::vector<Record> h0Records_;
-    std::vector<Record> h1DenyRecords_;
-    H0NoSampleMap h0NoSampleMap_;
-    H0NoSampleMap h1DenyNoSampleMap_;
-    bool offset0MapsUseCbqOrder_ = false;
+    FlexHashCacheStorage storage_;
+    FlexProbePairKhash pair_;
     bool hasH1X2_ = false;
     FlexProbeHalfIndex probeSeedIndex_;
     static uint8_t baseLUT_[256];
     static bool lutInitialized_;
-};
-
-// Binary negative class codes from scripts/flex_h01_pilot.py.
-enum FlexHashScreenNegativeCode : uint8_t {
-    FlexHashNegNone = 0,
-    FlexHashNegProbeAmbig = 1,
-    FlexHashNegHalfNoAnchor = 2,
-    FlexHashNegHalfGeneAmbig = 3,
-    FlexHashNegHalfScoreFail = 4,
-    FlexHashNegHalfSplitProbe = 5
 };
 
 const char* flexHashScreenDenyReason(uint8_t negativeCode);

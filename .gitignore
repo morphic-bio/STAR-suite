@@ -36,6 +36,9 @@ source.kdev4
 Log.out
 
 ## Build artifacts
+/flex/tools/hash_screen_replay/flex_hash_cache_pack
+/flex/tools/hash_screen_replay/flex_cache_bench
+/flex/tools/hash_screen_replay/flex_cache_extract_queries
 *.o
 Depend.list
 .depend.with_chromap_*
