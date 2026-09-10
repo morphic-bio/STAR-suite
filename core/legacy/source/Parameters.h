@@ -35,6 +35,7 @@ namespace input {
 class CbqInputModule;
 struct CbqReadBatchView;
 class BgzfStarAdapter;
+class BgzfPipeGroup;
 class FastxInputModule;
 struct InputRecord;
 } // namespace input
@@ -178,6 +179,7 @@ class Parameters {
         // with coordinate-sorted BAM output. The adapter is opened lazily
         // after the mapping thread controller has been initialized.
         std::shared_ptr<star::input::BgzfStarAdapter> bgzfCoreInputAdapter;
+        std::shared_ptr<star::input::BgzfPipeGroup> bgzfPipes;
         bool bgzfCoreActive = false;
         bool bgzfCoreExhausted = false;
         uint32 bgzfCoreLaneIndex = 0;

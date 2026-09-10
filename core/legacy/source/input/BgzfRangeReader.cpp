@@ -401,6 +401,20 @@ bool BgzfRangeReader::claim_and_inflate_sync(InflatedBlock* result,
     return inflate_work_permitted(&syncInflater_, work, result, error);
 }
 
+bool BgzfRangeReader::next_bytes(const char** data, size_t* size, std::string* error) {
+    if (!data || !size) return set_error(error, "null BGZF byte-window output");
+    if (error) error->clear();
+    *data = nullptr; *size = 0;
+    do {
+        if (buffer_) cursor_ = buffer_->size();
+        if (!append_next_block(error)) return false;
+    } while (buffer_->empty());
+    *data = reinterpret_cast<const char*>(buffer_->data());
+    *size = buffer_->size();
+    cursor_ = *size;
+    return true;
+}
+
 bool BgzfRangeReader::append_next_block(std::string* error) {
     InflatedBlock block;
     if (workerCount_ == 0) {

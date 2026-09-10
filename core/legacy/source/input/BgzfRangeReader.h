@@ -136,6 +136,9 @@ public:
     bool next(BgzfFastqRecord* record, std::string* error,
               BgzfBatchLease* lease = nullptr);
 
+    // Borrow the next ordered decompressed byte window, valid until the next
+    // call. Do not mix raw-byte and FASTQ-record iteration on one reader.
+    bool next_bytes(const char** data, size_t* size, std::string* error);
     uint64_t records_read() const;
     uint64_t range_start() const;
     uint64_t range_end() const;
