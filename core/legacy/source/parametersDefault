@@ -2629,3 +2629,6 @@ soloFlexFilteredGeneList      -
 
 ocmCellCallMaxMemory                  1073741824
     int: Estimated matrix bytes admitted concurrently by OCM cell calling. An oversized sample runs alone.
+
+quantVBComponentParallel              0
+    int: 0/1. Assign whole EC components to workers without thread-local transcript accumulators. Keeps global VB convergence.

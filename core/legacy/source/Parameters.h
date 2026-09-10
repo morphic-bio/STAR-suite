@@ -494,6 +494,7 @@ class Parameters {
                 bool vb=true;           // Use VB (true) or EM (false)
                 bool gcBias=false;      // Enable GC bias correction
                 int gcBiasInt=0;        // Command-line flag for gcBias (0/1)
+                int componentParallel=0; // optional one-writer-per-component VB execution
                 int quantVBemInt=0;     // Command-line flag: if 1, use EM instead of VB
                 double vbPrior=0.01;    // Dirichlet prior
                 string outFile;         // Output file path
