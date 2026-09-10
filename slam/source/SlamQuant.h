@@ -292,6 +292,7 @@ public:
     void debugSnpSiteObserve(uint64_t absPos, bool anyMismatch, bool convMismatch,
                              double weight, bool primaryFlag, int mapq);
 
+    const std::vector<SlamFit>& fits(const SlamFitParameters& parameters) const { return fitGenes(parameters); }
     void setFitWorkers(size_t workers) { fitWorkers_ = workers ? workers : 1; }
     size_t fitPasses() const { return fitPasses_; }
     size_t fitResultBytes() const { return fittedGenes_.capacity() * sizeof(SlamFit); }
