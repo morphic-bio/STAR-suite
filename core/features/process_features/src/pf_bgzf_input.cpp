@@ -231,6 +231,7 @@ extern "C" int pf_bgzf_process_batches(const char *const *paths, unsigned lanes,
                         else free.push_back(std::move(batch));
                     }
                     ready.notify_one();
+                    space.notify_one(); // also wake a producer when an EOF batch was recycled
                 }
                 std::lock_guard<std::mutex> lock(mutex);
                 records += count; decode_ns += elapsed;
