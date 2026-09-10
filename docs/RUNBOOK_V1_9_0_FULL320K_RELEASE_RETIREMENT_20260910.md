@@ -5,10 +5,9 @@
 Authorization: “Go ahead with the runbook and the archive job.” The review gate is open.
 
 The user requested this reviewable runbook before committing, merging, pushing,
-delegating the release, running benchmarks, or retiring the instance. Creation
-of this document does not open that gate. Wait for the user's instruction to
-proceed; then carry the approved sequence through without requesting the same
-authorization again.
+delegating the release, running benchmarks, or retiring the instance. The user subsequently opened that gate with the approval recorded above.
+Carry the approved sequence through without requesting the same authorization
+again.
 
 ## Required outcome and order
 
@@ -33,7 +32,7 @@ checksum sweep, upload, build, or other benchmark competing on that instance.
 | Item | Value |
 | --- | --- |
 | Repository | `/mnt/pikachu/STAR-suite` |
-| Current base commit | `4c33c0145c7bd76b2c6f5a915da0bcf0c2fc4998` |
+| Original integration base commit | `4c33c0145c7bd76b2c6f5a915da0bcf0c2fc4998` |
 | Public remote | `origin`: `git@github.com:morphic-bio/STAR-suite.git` |
 | Integration destination | `master`, using `git merge --no-ff` |
 | Release candidate branch | `dev-release-v1.9.0`, subject to checking its remote state |
@@ -70,11 +69,12 @@ Retain them as measured controls; the requested new executions are the two
 STAR full-set arms. Do not label Cyto's gzip timing as BGZF or rerun Cyto
 implicitly.
 
-## Review gate and work already in progress
+## Historical review pause and archive state
 
-No commits, merges, pushes, release delegation, new full-set benchmarks,
-instance stops, snapshots, or termination have been performed under this
-runbook.
+At the initial review pause, no commits, merges, pushes, release delegation,
+new full-set benchmarks, instance stops, snapshots, or termination had been
+performed under this runbook. The execution ledger below records subsequent
+authorized work.
 
 An archive job launched under the earlier instruction was still `InProgress`
 when this document was prepared:
@@ -93,12 +93,11 @@ record, including process start ticks to guard against PID reuse, is at
 This suspension honors the user's review pause; it does not start an execution
 phase of this runbook.
 
-Keep shutdown on hold. Suspend that specific archive process and its children
-for the review pause if it is still active, preserving any existing uploads.
-Record the process identities and suspension outcome. Before benchmarking,
-verify that it is either finished or suspended and consuming no CPU or I/O.
-Do not mistake `InProgress` in SSM for active computation after suspension.
-Do not suspend the SSM agent or unrelated processes.
+After user approval, the validated process identities were resumed at
+07:55:47 UTC. The archive completed and all 90 bundles were independently
+verified before full-set timing began. Those historical PIDs must not be
+signalled again. Shutdown remains gated on the supplemental archive and
+remaining release/validation phases below.
 
 The previous archive script inventories the old SSD tree once. Even a valid
 completion marker from it cannot cover the new full-set runs. A final inventory
@@ -353,16 +352,16 @@ Update after each phase; do not mark queued work complete.
 | Gate / phase | Status | Evidence to fill in |
 | --- | --- | --- |
 | User review of this runbook | **APPROVED** | User: “Go ahead with the runbook and the archive job.” |
-| Earlier archive suspended or finished | **RESUMED** | 2026-09-10 07:55:47 UTC; all four saved process identities matched; SSM 684cdbd1-4805-4096-8c4c-61ccd4b219b0 |
-| Scoped implementation committed | Not started | Commit and source manifest |
-| Integration merged and pushed | Not started | Remote master SHA and CI |
-| Release subagent assigned | Not started | Agent name / isolated checkout |
-| Versioned source frozen and clean-built | Not started | Commit, binary SHA-256, tests |
-| New full CBQ benchmark | Not started | Exit 0; 7,303,142,230 pairs; wall/RSS |
-| New full FASTQ-BGZF benchmark | Not started | Exit 0; 7,303,142,230 pairs; wall/RSS |
-| Count/caller validation | Not started | Exact parity / resolved differences |
-| v1.9.0 published and verified | Not started | Release URL, tag SHA, artifacts/CI |
-| Final S3 archive includes new runs | Not started | Final completion manifest and checksums |
+| Earlier archive suspended or finished | **COMPLETE** | 90 bundles / 126,765,224,602 bytes independently verified; existing-object references also retained. New benchmarks still require supplemental archive. |
+| Scoped implementation committed | **DONE** | `60fbe8cf6425596f10c1008ea5db7bd6c44ccf2e`; 47 scoped files matched tested manifests |
+| Integration merged and pushed | **DONE** | Implementation and packaging fix on `master` at `3b6e758597342a80631b94a3cdc246458231e982`; candidate and master build/Tier A checks passed; unrelated local edits preserved |
+| Release subagent assigned | **ACTIVE** | `release_v190`; isolated `analysis/release_v190_20260910/release_agent` |
+| Versioned source frozen and clean-built | **DONE** | Build `a6c1c546cbb53403c542bb9819706631801c935b`; STAR 1.9.0 SHA `54311642da84160e2dd75321d1ea6306ef0a5724b32727b402216748a5707d67`; unit/cache tests and both input fixtures passed |
+| New full CBQ benchmark | **COMPLETE; exact parity passed** | Exit 0; 7,303,142,230 pairs; 628.033 s; 103.968 GiB; 333,439 cells |
+| New full FASTQ-BGZF benchmark | **COMPLETE; exact parity passed** | Exit 0; 7,303,142,230 pairs; 867.680 s; 93.794 GiB; 333,439 cells |
+| Count/caller validation | **PASSED** | All 18 raw/filtered matrices, 114 caller diagnostic files, sample summaries and read classifications exact; 333,439 cells in both arms |
+| v1.9.0 published and verified | **LOCAL CHECKS PASSED; final publication in preparation** | All 16 package build/check stages passed; full-set acceptance passed |
+| Final S3 archive includes new runs | **SUPPLEMENT RUNNING** | SSM `75b152c7-b49c-46f1-8e02-bae87d7a865e`; original 5,520 distinct existing S3 objects reverified |
 | Instance stopped | Not started | EC2 state and UTC |
 | EBS snapshot(s) completed | Not started | Snapshot IDs / source volumes |
 | Instance terminated | Not started | EC2 state and UTC |
@@ -379,3 +378,45 @@ Update after each phase; do not mark queued work complete.
   `/mnt/pikachu/star_suite_paper/analysis/instance_retirement_20260910/`.
 - September 9 full-set wrappers and completed evidence:
   `/mnt/pikachu/star_suite_paper/analysis/full320k_star_deprecated_20260909/`.
+
+### Execution note: release wrapper compatibility
+
+The prior master and first integration candidate failed the Flex tiny-public
+smoke because the recipe wrapper passed a legacy fixed expected-cell override
+to the default tag-aware caller. Release commit `1b7aa4e08c1da5e8d3a975893a06afd0983705fd`
+selects the tag-aware caller explicitly and removes that incompatible override.
+Its focused wrapper test and official snapshot validation passed. Compiled
+source stayed identical to the benchmark freeze.
+
+The local grouped unit test initially lacked its required artifact-directory
+argument and stopped before executing its fixture; the corrected invocation
+passed. The CBQ fixture comparison initially assumed nine matrices, but the
+small fixture emits three. Existing CBQ output was validated against those
+three control paths, then BGZF executed once and matched. Neither STAR fixture
+was repeated. Corrections and original failure records are preserved in
+`analysis/full320k_v190_20260910/`.
+
+### Execution note: generated parameter defaults
+
+Source-archive packaging exposed a stale tracked `parametersDefault.xxd`
+whose timestamp matched its newer authoritative input. Commit
+`91fdfd52cf5f629f4b61990291b433ff97d5f87a` refreshes that generated file and
+content-checks it atomically during builds. The refreshed bytes have SHA-256
+`033bba5177e252ebfd8bcf6a4067bd6a4eb14e455670af71d11eb6b86a2886d4`, exactly
+matching the clean full-benchmark build. Effective compiled defaults are
+unchanged; failed package artifacts and the corrected build checks are retained.
+
+Master CI `34453932378` passed build/Tier A and secret checks. Its image
+publication encountered Docker Hub HTTP 502 during login, before any image
+build. The packaging-fix candidate has its own CI and the final release will
+validate publication separately.
+
+### Full-set benchmark acceptance
+
+CBQ completed in 628.033 seconds (103.968 GiB peak RSS), versus the
+1,217.150-second control. FASTQ-BGZF completed in 867.680 seconds (93.794 GiB),
+versus 1,452.071 seconds. Each processed all 7,303,142,230 read pairs. Every raw
+and filtered matrix, caller statistical diagnostic, sample summary and read
+classification matched exactly. See the [full report](benchmarks/FULL320K_V190_20260910.md).
+The validated 1.9.0 binary was atomically installed locally; the previous
+binary is backed up in `analysis/full320k_v190_20260910/`.
