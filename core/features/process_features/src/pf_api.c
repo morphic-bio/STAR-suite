@@ -48,6 +48,9 @@ struct pf_config {
     int search_threads;
     int consumer_threads;
     int read_buffer_lines;
+    pf_bgzf_mode bgzf_mode;
+    unsigned bgzf_threads;
+    int bgzf_crc_check;
     pf_permit_acquire_fn permit_acquire_cb;
     pf_permit_release_fn permit_release_cb;
     void *permit_hook_ctx;
@@ -298,6 +301,9 @@ pf_config* pf_config_create(void) {
     config->search_threads = 4;
     config->consumer_threads = 1;
     config->read_buffer_lines = READ_BUFFER_LINES;
+    config->bgzf_mode = PF_BGZF_AUTO;
+    config->bgzf_threads = 0;
+    config->bgzf_crc_check = 1;
     config->permit_acquire_cb = NULL;
     config->permit_release_cb = NULL;
     config->permit_hook_ctx = NULL;
@@ -427,6 +433,15 @@ void pf_config_set_search_threads(pf_config *config, int threads) {
 
 void pf_config_set_consumer_threads(pf_config *config, int threads) {
     if (config) config->consumer_threads = threads;
+}
+
+int pf_config_set_bgzf_input(pf_config *config, pf_bgzf_mode mode, int threads, int crc) {
+    if (!config || mode < PF_BGZF_AUTO || mode > PF_BGZF_RANGE || threads < 0 || threads > 1024 ||
+        (crc != 0 && crc != 1)) return -1;
+    config->bgzf_mode = mode;
+    config->bgzf_threads = (unsigned)threads;
+    config->bgzf_crc_check = crc;
+    return 0;
 }
 
 void pf_config_set_read_buffer_lines(pf_config *config, int lines) {
@@ -1832,6 +1847,9 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.min_posterior = ctx->config->min_posterior;
         args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
         args.consumer_threads_per_set = ctx->config->consumer_threads;
+        args.bgzf_mode = ctx->config->bgzf_mode;
+        args.bgzf_threads = ctx->config->bgzf_threads;
+        args.bgzf_crc_check = ctx->config->bgzf_crc_check;
         args.permit_acquire_hook = ctx->config->permit_acquire_cb;
         args.permit_release_hook = ctx->config->permit_release_cb;
         args.permit_hook_ctx = ctx->config->permit_hook_ctx;
@@ -2097,6 +2115,9 @@ pf_error pf_process_fastqs(pf_context *ctx,
     args.min_posterior = ctx->config->min_posterior;
     args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
     args.consumer_threads_per_set = ctx->config->consumer_threads;
+    args.bgzf_mode = ctx->config->bgzf_mode;
+    args.bgzf_threads = ctx->config->bgzf_threads;
+    args.bgzf_crc_check = ctx->config->bgzf_crc_check;
     args.permit_acquire_hook = ctx->config->permit_acquire_cb;
     args.permit_release_hook = ctx->config->permit_release_cb;
     args.permit_hook_ctx = ctx->config->permit_hook_ctx;
@@ -3581,6 +3602,12 @@ pf_error pf_process_split_fastq_dir(pf_context *ctx,
     if (!ctx || !fastq_dir || !output_dir) {
         return PF_ERR_INVALID_ARG;
     }
+    if (ctx->config->bgzf_mode == PF_BGZF_RANGE) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Forced BGZF range is not supported by split-read synthesis yet");
+        return PF_ERR_INVALID_ARG;
+    }
+    fprintf(stderr, "[pf-bgzf] effective=gzip reason=split-read synthesis\n");
     pf_split_read_layout *layout = &ctx->config->split_read_layout;
     if (!layout->enabled) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,

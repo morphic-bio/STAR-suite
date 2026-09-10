@@ -1565,3 +1565,28 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   and `stale_parameter_header_evidence.json`. Regenerated defaults match the
   full-set benchmark build's header byte-for-byte (SHA-256
   `033bba5177e252ebfd8bcf6a4067bd6a4eb14e455670af71d11eb6b86a2886d4`).
+
+
+## PF native BGZF (2026-09-10)
+
+- Evidence and isolated branch checkout:
+  `/mnt/pikachu/star_suite_paper/analysis/cross_module_performance_20260910/`.
+- Baseline master: `9e146eef20080108cc075a977938757f90221dbc`.
+- `01_pf_bgzf_tests`, `03_pf_cli_gates`, `04_final_validation`,
+  `06_cli_multisample_failure`: input hashes, per-arm commands/exit status,
+  exact keyed count comparisons, native error/permit tests and CLI coverage.
+- `02_a375_pf_100k`: 200,000 pairs; exact counts, no timing improvement.
+- `05_a375_pf_full`: all 9,748,584 A375 CRISPR feature pairs;
+  exact 3,218,159 UMIs, 110,772 barcodes, 124,871 occupied matrix entries.
+  PF API whole-process 28.2722 s baseline / 25.5696 s native BGZF;
+  max RSS 1,554,892 / 1,593,580 KiB. Same input files and 8-CPU affinity,
+  serialized single runs; conversion excluded. No GEX/BAM/sidecar/cell calling.
+- The failed standalone explicit-lane-list baseline is retained separately
+  and is not a performance result.
+- Reproduction: build `tests/pf_bgzf_harness` with
+  `make -C core/features/process_features ../../../tests/pf_bgzf_harness`;
+  use `tests/run_pf_bgzf_tests.py --binary ... --baseline ... --out FRESH_DIR`
+  and optionally `--cli ...`. The baseline is a harness linked to the frozen
+  PF library with `-DPF_BGZF_BASELINE`; do not substitute the changed library.
+  `--resume` reuses completed logs and never reruns a completed arm.
+- See `docs/HANDOFF_PF_BGZF_PHASE1_20260910.md` and the parent cross-module runbook.

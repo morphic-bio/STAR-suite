@@ -17,6 +17,8 @@
 #ifndef PF_API_H
 #define PF_API_H
 
+#include "pf_bgzf_input.h"
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -163,6 +165,9 @@ void pf_config_set_max_barcode_n(pf_config *config, int max_n);
 void pf_config_set_threads(pf_config *config, int threads);
 void pf_config_set_search_threads(pf_config *config, int threads);
 void pf_config_set_consumer_threads(pf_config *config, int threads);
+/* Native BGZF mode and TOTAL additional inflater workers per sample (0 =
+ * synchronous producer). Returns 0 on success, -1 for invalid settings. */
+int pf_config_set_bgzf_input(pf_config *config, pf_bgzf_mode mode, int threads, int check_crc);
 void pf_config_set_read_buffer_lines(pf_config *config, int lines);
 void pf_config_set_permit_hooks(
     pf_config *config,

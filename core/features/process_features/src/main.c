@@ -1,3 +1,4 @@
+#include "pf_bgzf_input.h"
 #include "../include/common.h"
 #include "../include/globals.h"
 #include "../include/prototypes.h"
@@ -5,6 +6,22 @@
 #include "../include/io.h"
 #include "../include/pf_api.h"
 #include <stdio.h>
+#include <errno.h>
+
+/* Preserve failures from every child, including children reaped to make room
+ * for the next sample under --threads. A later successful sample must not
+ * hide an earlier native input error. */
+static int wait_for_sample(void) {
+    int status = 0;
+    pid_t child;
+    do { child = waitpid(-1, &status, 0); } while (child < 0 && errno == EINTR);
+    if (child < 0) { perror("waitpid"); return 1; }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        fprintf(stderr, "Sample process %d failed (wait status %d)\n", (int)child, status);
+        return 1;
+    }
+    return 0;
+}
 
 static void print_usage(const char *prog){
     fprintf(stderr, "\nUsage: %s [options] <FASTQ directories or files>\n\n", prog);
@@ -13,6 +30,9 @@ static void print_usage(const char *prog){
     fprintf(stderr, "  -f, --featurelist <file>          CSV with 'name' and 'sequence' columns\n");
     fprintf(stderr, "  -d, --directory  <path>           Output directory; one subdir per sample\n\n");
 
+    fprintf(stderr, "      --readFilesBgzfMode auto|off|range  Native BGZF per lane (default auto)\n");
+    fprintf(stderr, "      --bgzfReaderThreads <int>     Total additional inflater workers per sample (default 0: synchronous)\n");
+    fprintf(stderr, "      --bgzfCrcCheck 0|1            Validate BGZF CRC (default 1)\n");
     fprintf(stderr, "Input & Output Files:\n");
     fprintf(stderr, "      --barcode_fastqs    <list>    Comma-separated R1 FASTQ files\n");
     fprintf(stderr, "      --forward_fastqs    <list>    Comma-separated R2 FASTQ files\n");
@@ -159,6 +179,9 @@ int main(int argc, char *argv[])
     pf_namespace_t source_namespace_cli = PF_NS_UNKNOWN;
     pf_namespace_t target_namespace_cli = PF_NS_UNKNOWN;
 
+    int bgzf_mode = PF_BGZF_AUTO;
+    int bgzf_threads = 0;
+    int bgzf_crc_check = 1;
     int max_concurrent_processes=8;
     int consumer_threads_per_set=1;
     int search_threads_per_consumer=4;
@@ -259,6 +282,9 @@ int main(int argc, char *argv[])
         {"hash-min-total", required_argument, 0, 48},
         {"hash-min-top", required_argument, 0, 49},
         {"hash-min-ratio", required_argument, 0, 50},
+        {"readFilesBgzfMode", required_argument, 0, 51},
+        {"bgzfReaderThreads", required_argument, 0, 52},
+        {"bgzfCrcCheck", required_argument, 0, 53},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
@@ -303,6 +329,27 @@ int main(int argc, char *argv[])
             case 'i': min_counts=(uint16_t)atoi(optarg); break;
             case 'd': strcpy(directory, optarg); if (directory[strlen(directory)-1] != '/'){ strcat(directory, "/"); } break;
             case 'o': feature_constant_offset=atoi(optarg); feature_constant_offset_explicit=1; break;
+            case 51:
+                if (!strcmp(optarg, "auto")) bgzf_mode = PF_BGZF_AUTO;
+                else if (!strcmp(optarg, "off")) bgzf_mode = PF_BGZF_OFF;
+                else if (!strcmp(optarg, "range")) bgzf_mode = PF_BGZF_RANGE;
+                else { fprintf(stderr, "readFilesBgzfMode must be auto, off or range\n"); return 1; }
+                break;
+            case 52: {
+                char *end = NULL;
+                long value = strtol(optarg, &end, 10);
+                if (!optarg[0] || *end || value < 0 || value > 1024) {
+                    fprintf(stderr, "bgzfReaderThreads must be in [0,1024]\n"); return 1;
+                }
+                bgzf_threads = (int)value;
+                break;
+            }
+            case 53:
+                if (strcmp(optarg, "0") && strcmp(optarg, "1")) {
+                    fprintf(stderr, "bgzfCrcCheck must be 0 or 1\n"); return 1;
+                }
+                bgzf_crc_check = atoi(optarg);
+                break;
             case 't': max_concurrent_processes=atoi(optarg); break;
             case 'u': umi_length=atoi(optarg); umi_code_length=(umi_length+3)/4; break;
             case 'c': set_consumer_threads_per_set=atoi(optarg); break;
@@ -697,6 +744,7 @@ int main(int argc, char *argv[])
     } 
     fprintf(stderr, "Using %d consumer threads and %d search threads per consumer. Max concurrent processes %d\n", consumer_threads_per_set, search_threads_per_consumer, max_concurrent_processes);
     int concurrent_processes=0;
+    int any_failed=0;
     atomic_int *thread_counter=mmap(NULL, sizeof(atomic_int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     if (thread_counter == MAP_FAILED){
         perror("Failed to allocate memory for thread counter");
@@ -709,7 +757,7 @@ int main(int argc, char *argv[])
         const int i=fastq_files.sorted_index[index];
     
         if (concurrent_processes >= max_concurrent_processes){
-            wait(NULL);
+            any_failed |= wait_for_sample();
             concurrent_processes--;
         }
         pid_t pid=fork();
@@ -763,6 +811,9 @@ int main(int argc, char *argv[])
             args.min_posterior = min_posterior;
             args.legacy_cb_rescue = legacy_cb_rescue;
             args.consumer_threads_per_set = consumer_threads_per_set;
+            args.bgzf_mode = bgzf_mode;
+            args.bgzf_threads = bgzf_threads;
+            args.bgzf_crc_check = bgzf_crc_check;
             args.filtered_barcodes_hash = filtered_barcodes_hash;
             args.min_prediction = min_prediction;
             args.min_heatmap = min_heatmap;
@@ -822,26 +873,12 @@ int main(int argc, char *argv[])
 
     }
     
-    /* Wait for all children and check exit status */
-    int any_failed = 0;
+    /* Wait for all children and retain failures from earlier batches too. */
     while (concurrent_processes > 0) {
-        int status;
-        pid_t child_pid = waitpid(-1, &status, 0);
-        if (child_pid > 0) {
-            if (WIFEXITED(status)) {
-                int exit_code = WEXITSTATUS(status);
-                if (exit_code != 0) {
-                    fprintf(stderr, "Child process %d exited with error code %d\n", child_pid, exit_code);
-                    any_failed = 1;
-                }
-            } else if (WIFSIGNALED(status)) {
-                fprintf(stderr, "Child process %d killed by signal %d\n", child_pid, WTERMSIG(status));
-                any_failed = 1;
-            }
-        }
+        any_failed |= wait_for_sample();
         concurrent_processes--;
     }
-    
+
     kh_destroy(u32ptr, whitelist_hash);
     free(whitelist);
     if (barcodeFastqFilesString) free(barcodeFastqFilesString);

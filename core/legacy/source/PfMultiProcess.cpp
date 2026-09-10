@@ -2408,6 +2408,11 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         assignOpts.searchThreads = P.pfMulti.crAssignSearchThreads;
         assignOpts.readBufferLines = P.pfMulti.crAssignReadBufferLines;
         assignOpts.cbqMode = lowerCopy(P.pfMulti.crAssignCbqMode);
+        assignOpts.bgzfMode = lowerCopy(P.pfMulti.crAssignBgzfMode);
+        if (assignOpts.bgzfMode != "auto" && assignOpts.bgzfMode != "off" && assignOpts.bgzfMode != "range")
+            throw runtime_error("crAssignBgzfMode must be auto, off or range");
+        assignOpts.bgzfThreads = P.bgzfReaderThreads;
+        assignOpts.bgzfCrcCheck = P.bgzfCrcCheck;
         if (assignOpts.cbqMode != "auto" &&
             assignOpts.cbqMode != "stream" &&
             assignOpts.cbqMode != "range") {
@@ -2570,6 +2575,8 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             }
             runAssignOpts.sampleName = sampleName;
             runAssignOpts.consumerThreadsPerSet = pfConsumerThreadsForRun;
+            if (runAssignOpts.bgzfThreads == 0 && P.dynamicThreadInterface)
+                runAssignOpts.bgzfThreads = P.runThreadN;
             runAssignOpts.filteredBarcodesPath.clear();
 
             const bool splitReadLayout = preparedLib.useSplitReadLayout;
@@ -2628,6 +2635,7 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                 detectOpts.autodetectChemistry = true;
                 detectOpts.probeOnly = true;
                 detectOpts.enableStarDynamicPermitHooks = false;
+                if (P.bgzfReaderThreads == 0) detectOpts.bgzfThreads = 0;
                 detectOpts.filteredBarcodesPath.clear();
                 if (detectOpts.maxReads <= 0 ||
                     detectOpts.maxReads > detectOpts.autodetectChemistryReads) {

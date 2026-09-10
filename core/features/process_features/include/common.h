@@ -284,6 +284,9 @@ typedef struct sample_args {
     double min_posterior;
     int legacy_cb_rescue;            /* 1 = use legacy order-dependent pending rescue */
     int consumer_threads_per_set;
+    int bgzf_mode; /* pf_bgzf_mode */
+    unsigned bgzf_threads; /* total inflater workers across all lanes */
+    int bgzf_crc_check;
     uint64_t (*permit_acquire_hook)(void *hook_ctx);
     void (*permit_release_hook)(void *hook_ctx, uint64_t wait_ns, uint64_t work_units, uint64_t work_bytes, uint64_t work_ns);
     void *permit_hook_ctx;
@@ -347,6 +350,11 @@ typedef struct fastq_reader_set {
     char   **buffer;
     char    *buffer_storage;
     size_t   read_buffer_lines;
+    size_t   line_capacity;
+    struct sample_args *input_args;
+    unsigned bgzf_threads;
+    int use_bgzf;
+    int input_error;
     size_t   produce_index;
     size_t   consume_index;
     size_t   filled;

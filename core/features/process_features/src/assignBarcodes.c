@@ -1,4 +1,5 @@
 #include <errno.h>
+#include "pf_bgzf_input.h"
 #include "../include/common.h"
 #include "../include/barcode_match.h"
 #include "../include/globals.h"
@@ -4498,7 +4499,8 @@ fastq_reader* allocate_fastq_reader( char **filenames, int nfiles, int filetype,
     return reader;
 }
 fastq_reader_set *  allocate_fastq_reader_set( char **barcode_filenames, char **forward_filenames, char **reverse_filenames, int nfiles, size_t read_size, size_t read_buffer_lines) {
-    fastq_reader_set *reader_set=malloc(sizeof(fastq_reader_set));
+    fastq_reader_set *reader_set=calloc(1, sizeof(fastq_reader_set));
+    reader_set->line_capacity = read_size + 1;
     fprintf(stderr, "allocating barcode reader\n");
     reader_set->barcode_reader=allocate_fastq_reader(barcode_filenames, nfiles, 1, read_size, read_buffer_lines);
     reader_set->forward_reader=NULL;
@@ -4526,9 +4528,87 @@ fastq_reader_set *  allocate_fastq_reader_set( char **barcode_filenames, char **
     return reader_set;
 }
 
+/* BGZF preserves the existing producer ring and feature kernel. Views are
+ * copied before next() releases their leases. The direct worker path can reuse
+ * the same adapter without these copies in a subsequent change. */
+static void *read_bgzf_by_set(fastq_reader_set *set) {
+    fastq_reader *readers[3] = {set->barcode_reader, NULL, NULL};
+    int n = 1;
+    if (set->forward_reader) readers[n++] = set->forward_reader;
+    if (set->reverse_reader) readers[n++] = set->reverse_reader;
+    const size_t lines = 2 * n;
+    sample_args *args = set->input_args;
+    pf_bgzf_permits permits = {args->permit_hook_ctx,
+                               args->permit_acquire_hook, args->permit_release_hook};
+    char error[1024] = "";
+    pf_bgzf_input *input = NULL;
+    long long count = 0;
+    for (int f = 0; f < readers[0]->nfiles; ++f) {
+        const char *paths[3];
+        for (int i = 0; i < n; ++i) paths[i] = readers[i]->filenames[f];
+        input = pf_bgzf_open(paths, n, set->bgzf_threads, args->bgzf_crc_check,
+                             args->permit_hooks_enabled ? &permits : NULL,
+                             error, sizeof(error));
+        if (!input) goto finish;
+        while (!max_reads || count < max_reads) {
+            if (set->probe_only && set->chem_detect && set->chem_detect->done) goto finish;
+            pf_bgzf_record records[3];
+            int rc = pf_bgzf_next(input, records, error, sizeof(error));
+            if (rc < 0) goto finish;
+            if (!rc) break;
+            for (int i = 0; i < n; ++i) {
+                if (records[i].sequence_length + 2 > set->line_capacity ||
+                    records[i].quality_length + 2 > set->line_capacity) {
+                    snprintf(error, sizeof(error), "BGZF record %llu exceeds PF line capacity %zu",
+                             (unsigned long long)records[i].ordinal, set->line_capacity);
+                    goto finish;
+                }
+            }
+            pthread_mutex_lock(&set->mutex);
+            while (set->filled >= set->read_buffer_lines - lines) {
+                if (set->probe_only && set->chem_detect && set->chem_detect->done) {
+                    pthread_mutex_unlock(&set->mutex);
+                    goto finish;
+                }
+                pthread_cond_wait(&set->can_produce, &set->mutex);
+            }
+            for (int i = 0; i < n; ++i) {
+                char *seq = set->buffer[(set->produce_index + 2*i) % set->read_buffer_lines];
+                char *qual = set->buffer[(set->produce_index + 2*i+1) % set->read_buffer_lines];
+                memcpy(seq, records[i].sequence, records[i].sequence_length);
+                memcpy(qual, records[i].quality, records[i].quality_length);
+                seq[records[i].sequence_length] = '\n';
+                seq[records[i].sequence_length + 1] = '\0';
+                qual[records[i].quality_length] = '\n';
+                qual[records[i].quality_length + 1] = '\0';
+            }
+            set->produce_index = (set->produce_index + lines) % set->read_buffer_lines;
+            set->filled += lines;
+            pthread_cond_signal(&set->can_consume);
+            pthread_mutex_unlock(&set->mutex);
+            ++count;
+        }
+        pf_bgzf_close(input);
+        input = NULL;
+        if (max_reads && count >= max_reads) break;
+    }
+finish:
+    pf_bgzf_close(input);
+    if (error[0]) {
+        fprintf(stderr, "[pf-bgzf] lane=%d error: %s\n", set->thread_id, error);
+        set->input_error = 1; /* Read only after pthread_join. */
+    }
+    pthread_mutex_lock(&set->mutex);
+    set->done = 1;
+    pthread_cond_broadcast(&set->can_consume);
+    pthread_mutex_unlock(&set->mutex);
+    return NULL;
+}
+
 // Producer thread function
 void *read_fastqs_by_set(void *arg) {
     fastq_reader_set *set = (fastq_reader_set *)arg;
+    if (set->use_bgzf) return read_bgzf_by_set(set);
     const int thread_id = set->thread_id;
     long long number_of_reads=0;
     const int number_of_readers = (set->forward_reader != NULL) + (set->reverse_reader != NULL) + 1;
@@ -6090,6 +6170,13 @@ void *consume_reads(void *arg) {
                 break;
             }
         }
+        if (!data_available && permit_hooks_enabled && permit_batch_count > 0) {
+            double elapsed = get_time_in_seconds() - permit_batch_start_sec;
+            permit_release_hook(permit_hook_ctx, permit_batch_wait_ns,
+                                (uint64_t)permit_batch_count, permit_batch_work_bytes,
+                                elapsed > 0 ? (uint64_t)(elapsed * 1e9) : 0);
+            permit_batch_count = 0;
+        }
         if (!done && !data_available) {
             empty_sweeps++;
         }
@@ -6409,6 +6496,46 @@ void process_files_in_sample(sample_args *args) {
     fastq_files_collection *fastq_files=args->fastq_files;
     const int sample_offset=fastq_files->sample_offsets[sample_index];
     const int sample_size=fastq_files->sample_sizes[sample_index];
+    int native_lanes[sample_size];
+    int native_count = 0;
+    /* Preflight every lane before launching producers or counting reads. */
+    for (int i = 0; i < sample_size; ++i) {
+        const char *paths[3] = {fastq_files->barcode_fastq[sample_offset+i],
+            fastq_files->forward_fastq ? fastq_files->forward_fastq[sample_offset+i] : NULL,
+            fastq_files->reverse_fastq ? fastq_files->reverse_fastq[sample_offset+i] : NULL};
+        int native = args->bgzf_mode != PF_BGZF_OFF;
+        char message[1024] = "";
+        for (int j = 0; j < 3 && native; ++j) {
+            if (!paths[j]) continue;
+            int detected = pf_bgzf_detect(paths[j], message, sizeof(message));
+            if (detected < 0) {
+                fprintf(stderr, "[pf-bgzf] %s\n", message);
+                if (args->error_out) *args->error_out = 1;
+                return;
+            }
+            if (!detected) native = 0;
+        }
+        if (!native && args->bgzf_mode == PF_BGZF_RANGE) {
+            fprintf(stderr, "[pf-bgzf] forced range requires regular BGZF files for every stream (lane %d)\n", i);
+            if (args->error_out) *args->error_out = 1;
+            return;
+        }
+        int streams = 1 + (paths[1] != NULL) + (paths[2] != NULL);
+        if (native && (streams < 2 || args->read_buffer_lines <= 2*streams)) {
+            fprintf(stderr, "[pf-bgzf] invalid stream count or insufficient reader queue capacity\n");
+            if (args->error_out) *args->error_out = 1;
+            return;
+        }
+        native_lanes[i] = native;
+        native_count += native;
+        fprintf(stderr, "[pf-bgzf] lane=%d effective=%s reason=%s\n", i,
+                native ? "range" : "gzip", native ? "BGZF headers" :
+                args->bgzf_mode == PF_BGZF_OFF ? "disabled" : "non-BGZF stream in lane");
+    }
+    fprintf(stderr, "[pf-bgzf] inflater_workers=%u producer_threads=%d consumer_threads=%d search_threads=%d permits=%s\n",
+            native_count ? args->bgzf_threads : 0, sample_size, nconsumers, args->nThreads,
+            args->permit_hooks_enabled ? "shared" : "none; inflater workers are additional to producers/consumers");
+
     
 
     if (args->filtered_barcodes_name && !args->filtered_barcodes_hash) {
@@ -6442,6 +6569,7 @@ void process_files_in_sample(sample_args *args) {
 
     // Initialize the data structures
     fastq_reader_set *reader_sets[sample_size];
+    unsigned native_index = 0;
     for (int i = 0; i < sample_size; ++i) {
         char **barcode_files = fastq_files->barcode_fastq + sample_offset + i;
         char **forward_files = (fastq_files->forward_fastq)
@@ -6458,6 +6586,12 @@ void process_files_in_sample(sample_args *args) {
                                                    args->average_read_length,
                                                    args->read_buffer_lines);
         reader_sets[i]->thread_id = i;
+        reader_sets[i]->input_args = args;
+        reader_sets[i]->use_bgzf = native_lanes[i];
+        if (native_lanes[i]) {
+            reader_sets[i]->bgzf_threads = args->bgzf_threads / native_count +
+                (native_index++ < args->bgzf_threads % native_count);
+        }
         reader_sets[i]->chem_detect = args->chem_detect;
         reader_sets[i]->probe_only = args->probe_only;
     }
@@ -6499,6 +6633,9 @@ void process_files_in_sample(sample_args *args) {
     for (int j=0; j<nconsumers; j++){
         pthread_join(consumer_threads[j], NULL);
     }
+    int input_error = 0;
+    for (int i = 0; i < sample_size; ++i) input_error |= reader_sets[i]->input_error;
+    if (input_error && args->error_out) *args->error_out = 1;
     // Merge data from all threads into the first thread's data structures
     for (int i = 1; i < nconsumers; i++) {
         merge_stats(&args->stats[0], &args->stats[i]);
@@ -6534,7 +6671,7 @@ void process_files_in_sample(sample_args *args) {
         free_memory_pool_collection(args->pools[i]);
         //[i] = NULL; // Avoid double-free in later cleanup
     }
-    if (!args->probe_only) {
+    if (!args->probe_only && !input_error) {
         // Since merging is not required, finalize using the first thread's data.
         finalize_processing(args->features, &args->hashes[0], args->directory, args->pools[0], &args->stats[0], args->stringency, args->min_counts, min_posterior, args->legacy_cb_rescue, args->filtered_barcodes_hash, args->skip_emptydrops, args->emptydrops_failure_fatal, args->expected_cells, args->emptydrops_use_fdr, args->skip_qc_outputs, args->error_out, args);
     }

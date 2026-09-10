@@ -776,6 +776,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignSearchThreads", &pfMulti.crAssignSearchThreads));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignReadBufferLines", &pfMulti.crAssignReadBufferLines));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignCbqMode", &pfMulti.crAssignCbqMode));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignBgzfMode", &pfMulti.crAssignBgzfMode));
     parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "crAssignMinPosterior", &pfMulti.crAssignMinPosterior));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignLegacyCbRescue", &pfMulti.crAssignLegacyCbRescue));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignSkipQcOutputs", &pfMulti.crAssignSkipQcOutputs));
@@ -963,6 +964,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         if (p->nameString == "crAssignReadBufferLines" && p->inputLevel < 0) {
             pfMulti.crAssignReadBufferLines = -1;
             p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignBgzfMode" && p->inputLevel < 0) {
+            pfMulti.crAssignBgzfMode = "auto";
         }
         if (p->nameString == "crAssignCbqMode" && p->inputLevel < 0) {
             pfMulti.crAssignCbqMode = "auto";
