@@ -805,6 +805,7 @@ class Parameters {
             int crAssignSkipQcOutputs;      // Skip feature histograms/heatmaps in assignBarcodes outputs
             string crAssignFilteredBarcodes;// Optional filtered barcode file for assignBarcodes
             int crAssignAllowUnionWhitelist; // Accept mixed NXT+TRU filtered barcode sets
+            uint64 ocmCellCallMaxMemory = 1073741824; // bytes admitted for concurrent sample matrices
             string ocmMultiEnable;           // no|yes|auto - OCM per-sample MEX materialization
             string ocmMultiConfig;           // Cell Ranger multi config with [samples]
             string ocmMultiBarcodeMode;      // posthoc|flex - when flex, use CB16+OCM_TAG8 before CB correction

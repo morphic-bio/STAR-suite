@@ -782,6 +782,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignSkipQcOutputs", &pfMulti.crAssignSkipQcOutputs));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignFilteredBarcodes", &pfMulti.crAssignFilteredBarcodes));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignAllowUnionWhitelist", &pfMulti.crAssignAllowUnionWhitelist));
+    parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "ocmCellCallMaxMemory", &pfMulti.ocmCellCallMaxMemory));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiEnable", &pfMulti.ocmMultiEnable));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiConfig", &pfMulti.ocmMultiConfig));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiBarcodeMode", &pfMulti.ocmMultiBarcodeMode));
