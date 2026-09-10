@@ -108,9 +108,9 @@ clean:
 
 # Dependency on headers
 src/EmptyDropsCRSampler.o: include/EmptyDropsCRSampler.h include/scrna_types.h include/pcg_random.hpp include/ParallelTasks.h include/ThreadPermits.h
-src/EmptyDropsMultinomial.o: include/EmptyDropsMultinomial.h include/EmptyDropsCRSampler.h include/CRLogProb.h include/scrna_types.h include/SimpleGoodTuring/sgt.h
+src/EmptyDropsMultinomial.o: include/SparseCountView.h include/EmptyDropsMultinomial.h include/EmptyDropsCRSampler.h include/CRLogProb.h include/scrna_types.h include/SimpleGoodTuring/sgt.h
 src/OrdMagStage.o: include/OrdMagStage.h include/OrdMagRank.h include/ParallelTasks.h include/ThreadPermits.h include/scrna_types.h include/pcg_random.hpp
-src/scrna_api.o: include/scrna_api.h include/OrdMagStage.h include/OrdMagRank.h include/EmptyDropsMultinomial.h include/scrna_types.h
+src/scrna_api.o: include/ScrnaTrace.h include/SparseCountView.h include/scrna_api.h include/OrdMagStage.h include/OrdMagRank.h include/EmptyDropsMultinomial.h include/scrna_types.h
 src/OccupancyGuard.o: include/OccupancyGuard.h include/scrna_types.h include/pcg_random.hpp
 
 # Test targets (tests are in ../../../tests/emptydrops/)

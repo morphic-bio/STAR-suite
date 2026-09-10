@@ -255,7 +255,8 @@ vector<EmptyDropsResult> EmptyDropsMultinomial::computePValues(
     uint32 nTotalCells,
     const string& debugOutputDir,
     const string& tagName,
-    bool enableInvariantChecks
+    bool enableInvariantChecks,
+    const SparseCountView* matrixView
 ) {
     vector<EmptyDropsResult> results;
     
@@ -311,21 +312,22 @@ vector<EmptyDropsResult> EmptyDropsMultinomial::computePValues(
     vector<double> obsLogProb(candidateIndices.size());
     for (uint32 icand = 0; icand < candidateIndices.size(); icand++) {
         uint32 icell = candidateIndices[icand];
-        if (icell >= countCellGeneUMIindex.size()) {
+        if (icell >= (matrixView ? matrixView->cells : countCellGeneUMIindex.size())) {
             obsLogProb[icand] = -1e10;
             continue;
         }
-        uint64_t startIdx = countCellGeneUMIindex[icell];
-        uint32 nGenes = (icell < nGenePerCB.size()) ? nGenePerCB[icell] : 0;
+        uint64_t startIdx = matrixView ? matrixView->start(icell) : countCellGeneUMIindex[icell];
+        uint32 nGenes = matrixView ? matrixView->entries[icell] : ((icell < nGenePerCB.size()) ? nGenePerCB[icell] : 0);
         
         // Extract cell gene IDs (already compact) and counts
         vector<uint32_t> cellGeneIds;
         vector<uint32_t> cellCounts;
         for (uint32 g = 0; g < nGenes; g++) {
             uint64_t geneOffset = startIdx + g * countMatStride;
-            if (geneOffset >= countCellGeneUMI.size()) continue;
-            uint32 geneId = countCellGeneUMI[geneOffset];
-            uint32 count = countCellGeneUMI[geneOffset + umiDedupCountIndMain];
+            if (!matrixView && (geneOffset >= countCellGeneUMI.size() || umiDedupCountIndMain >= countCellGeneUMI.size() - geneOffset)) continue;
+            uint32 geneId = matrixView ? matrixView->gene(icell, g) : countCellGeneUMI[geneOffset];
+            uint32 count = matrixView ? matrixView->count(icell, g) : countCellGeneUMI[geneOffset + umiDedupCountIndMain];
+            if (!count) continue;
             cellGeneIds.push_back(geneId);
             cellCounts.push_back(count);
         }
