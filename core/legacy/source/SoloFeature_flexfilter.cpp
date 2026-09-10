@@ -315,10 +315,10 @@ void SoloFeature::runFlexFilterInline(
     if (config.tagAwareCaller) {
         config.simpleEmptyDropsParams.maxThreads = pSolo.cellFilterBootstrapThreads > 0
             ? pSolo.cellFilterBootstrapThreads : config.totalThreads;
-        config.emptydropsParams.mcThreads = std::min<uint32_t>(8, config.totalThreads);
+        config.emptydropsParams.mcThreads = config.totalThreads;
         P.inOut->logMain << "Flex cell caller: tag-aware, grouped sample labels, full CB16+TAG8; "
-            << "bootstrapThreads=" << config.simpleEmptyDropsParams.maxThreads
-            << " mcThreads=" << config.emptydropsParams.mcThreads
+            << "bootstrapStreams=" << config.simpleEmptyDropsParams.maxThreads
+            << " totalCallerThreads=" << config.totalThreads
             << " simulations=" << config.emptydropsParams.simN
             << " FDR=" << config.emptydropsParams.FDR << "\n";
     }

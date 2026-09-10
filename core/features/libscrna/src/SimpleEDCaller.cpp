@@ -215,6 +215,7 @@ int runSimpleEDWithAmbient(const vector<string>& barcodes,
     simple_params.indMax = retain_count;
 
     simple_params.maxThreads = options.bootstrapThreads;
+    simple_params.maxConcurrentThreads = options.bootstrapWorkers;
     OrdMagBootstrapTrace bootstrap_trace;
     SimpleEmptyDropsResult simple_result;
     if (config->use_bootstrap) {

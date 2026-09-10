@@ -17,6 +17,7 @@ struct SimpleEDOptions {
     uint32_t ordmagRetainCount = 0;
     uint64_t ambientUmiTarget = 0;
     uint32_t bootstrapThreads = 0;
+    uint32_t bootstrapWorkers = 0; // Execution cap; bootstrapThreads retains RNG partitioning
     bool invariantChecks = false;
     std::string diagnosticsDir;
 };
