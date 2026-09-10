@@ -1554,3 +1554,14 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   prefix `analysis-tools/flex_ordmag_sort_permits_20260910_v1/`.
 - Validated final binary installed; `STAR.before_sort_permits` preserves the
   predecessor. Code remains uncommitted.
+
+## Release 1.9.0 generated-default header regression (2026-09-10)
+
+- Fixture: `python3 tests/test_parameters_default_generation.py`.
+- Covers stale headers with equal source-archive timestamps, preserving the
+  mtime of matching headers, older-timestamp changed input, and failed-generator
+  atomicity/temporary cleanup.
+- Local evidence: `/mnt/pikachu/star_suite_paper/analysis/release_v190_20260910/parameters_generation_test.log`
+  and `stale_parameter_header_evidence.json`. Regenerated defaults match the
+  full-set benchmark build's header byte-for-byte (SHA-256
+  `033bba5177e252ebfd8bcf6a4067bd6a4eb14e455670af71d11eb6b86a2886d4`).
