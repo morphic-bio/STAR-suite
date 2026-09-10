@@ -8,7 +8,8 @@ RUN_SCRIPT="${REPO_ROOT}/scripts/run_flex_cr_config.sh"
 
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "${tmpdir}"' EXIT
-mkdir -p "${tmpdir}/gex/sample1" "${tmpdir}/out"
+mkdir -p "${tmpdir}/gex/sample1" "${tmpdir}/out" "${tmpdir}/index"
+printf 'ACGTACGTACGTACGT\n' > "${tmpdir}/cb_whitelist.txt"
 
 make_fastq() {
   local path="$1"
@@ -80,6 +81,8 @@ grep -F 'ENSG000002' "${tmpdir}/probe_list.txt" >/dev/null
 STAR_BIN=/bin/true \
   "${RUN_SCRIPT}" \
   --cr-config "${config}" \
+  --genome-dir "${tmpdir}/index" \
+  --cb-whitelist "${tmpdir}/cb_whitelist.txt" \
   --out-base "${tmpdir}/out" \
   --run-id smoke_flex \
   --dry-run
@@ -95,5 +98,11 @@ grep -F -- "--soloSampleWhitelist ${tmpdir}/out/smoke_flex/sample_whitelist.from
 grep -F -- "--soloSampleProbes ${tmpdir}/out/smoke_flex/sample_probes.from_cr.tsv" "${command}" >/dev/null
 grep -F -- "--soloProbeList ${tmpdir}/out/smoke_flex/probe_list.from_cr.txt" "${command}" >/dev/null
 grep -F -- "--soloSampleProbeOffset 71" "${command}" >/dev/null
+
+grep -F -- "--soloFlexCellCaller tag-aware" "${command}" >/dev/null
+if grep -F -- "--soloFlexExpectedCellsPerTag" "${command}" >/dev/null; then
+  echo "FAIL: tag-aware recipe includes a legacy expected-cell override" >&2
+  exit 1
+fi
 
 echo "PASS"
