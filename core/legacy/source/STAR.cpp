@@ -2875,6 +2875,10 @@ int main(int argInN, char *argIn[])
         // 4. Run VB/EM quantification
         EMParams params;
         params.use_vb = P.quant.transcriptVB.vb;
+        params.component_partition = P.quant.transcriptVB.componentParallel != 0;
+        params.per_component_convergence = false;
+        P.inOut->logMain << "TranscriptVB component execution=" << params.component_partition
+            << " global_convergence=1\n";
         params.vb_prior = P.quant.transcriptVB.vbPrior;
         // Use defaults from EMParams (max_iters=10000, min_iters=100, tolerance=0.01)
         // Do NOT override for VB - let VB use same defaults as EM for Salmon parity

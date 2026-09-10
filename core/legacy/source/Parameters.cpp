@@ -487,6 +487,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "quantTranscriptomeSAMoutput", &quant.trSAM.output));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBgcBias", &quant.transcriptVB.gcBiasInt));
     parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "quantVBprior", &quant.transcriptVB.vbPrior));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBComponentParallel", &quant.transcriptVB.componentParallel));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBem", &quant.transcriptVB.quantVBemInt)); // If true, use EM instead of VB
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBgenes", &quant.transcriptVB.geneOutputInt));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBgenesMode", &quant.transcriptVB.genesModeStr));
@@ -3189,6 +3190,11 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
     
+    if (quant.transcriptVB.componentParallel != 0 && quant.transcriptVB.componentParallel != 1)
+        exitWithError("quantVBComponentParallel must be 0 or 1\n", std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    if (quant.transcriptVB.componentParallel && quant.transcriptVB.quantVBemInt)
+        exitWithError("quantVBComponentParallel requires VB (--quantVBem 0)\n", std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+
     // Initialize transcriptVB defaults
     if (quant.transcriptVB.yes) {
         // Convert int flags to bool
