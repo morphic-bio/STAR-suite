@@ -197,6 +197,25 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Performance Release v1.9.1 (2026-09-10)
+
+- Release tag: `v1.9.1`; notes: `docs/RELEASE_NOTES_v1.9.1.md`.
+- Debian source version: `1.9.1-1`; Ubuntu binaries:
+  `1.9.1-1~ubuntu22.04.1` and `1.9.1-1~ubuntu24.04.1`.
+- Scope: shared native BGZF ingestion, bounded feature/caller scheduling,
+  borrowed EmptyDrops count arrays, OCM direct count routing and binary spill,
+  cached and parallel SLAM fitting, and opt-in component-parallel TranscriptVB.
+- `STAR --version` reports `1.9.1`; upstream and genome compatibility remain
+  `2.7.11b` and `2.7.4a`. Existing indexes do not need rebuilding.
+- Native BGZF remains disabled for TranscriptVB online model learning:
+  automatic mode falls back and forced range mode rejects the configuration.
+- Accepted pre-release implementation measurements retain their source and
+  workload labels. The full 320K measurements remain 1.9.0 results; the paper
+  refresh pins new executions to 1.9.1 rather than relabeling old timings.
+- Hosted tarball/Debian packages retain the portable no-Chromap build; local
+  production builds retain the Chromap-enabled default. Published checksums
+  and embedded source revisions identify each platform's build.
+
 ## Feature Release v1.9.0 (2026-09-10)
 
 - Release tag: `v1.9.0`; notes: `docs/RELEASE_NOTES_v1.9.0.md`.
