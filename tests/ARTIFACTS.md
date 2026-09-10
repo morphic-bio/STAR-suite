@@ -1590,3 +1590,16 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   PF library with `-DPF_BGZF_BASELINE`; do not substitute the changed library.
   `--resume` reuses completed logs and never reruns a completed arm.
 - See `docs/HANDOFF_PF_BGZF_PHASE1_20260910.md` and the parent cross-module runbook.
+
+## Cross-module performance runbook (2026-09-10)
+
+- Source: `perf/cross-module-bgzf-callers`, based on `9e146ee`.
+- Report: [cross-module results](../docs/benchmarks/CROSS_MODULE_PERFORMANCE_20260910.md).
+- Evidence root: `/mnt/pikachu/star_suite_paper/analysis/cross_module_performance_20260910`.
+- Full PF library: `05_a375_pf_full` (9,748,584 pairs, raw coordinate/statistic parity).
+- Core reader compatibility: `phase3_tests`, `final_gates` (including expected input errors and saved failed fixture commands).
+- Shared caller: `phase456_tests/a375_detected` contains a one-time detected-column MEX plus `counts.npz`; `detected_runs` holds exact old/MC8/MC3 comparisons on 7,533,915 entries.
+- SLAM caches and component VB: `kernel_gates`, `vb_saved`, `integrated_runs`, `followup_integrated`. Saved full bulk EC input remains at `/storage/fqgzip-public-benchmark/runs/transcriptvb_sidecar_full_3dcbac1_20260806_v1/candidate/SRR4422207.transcriptvb.stvb`.
+- OCM materialization: `kernel_gates/ocm_native_*` and `ocm_large`; the larger fixture uses unchanged real A375 counts with explicitly synthetic OCM tag suffixes, not biological OCM assignments.
+- Full input/reference provenance, frozen binaries and build logs remain under the same evidence root. Failed comparisons are retained alongside corrected source executions. Read each wrapper's completion record and the final acceptance report; a zero process exit alone did not detect the original nonfatal PF pre-MEX failure.
+- No Cell Ranger source was read. No cloud resources or release artifacts were created for this runbook.

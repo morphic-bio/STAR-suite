@@ -2,7 +2,7 @@
 
 Date: 2026-09-10
 
-Status: **ACTIVE; user authorized implementation on 2026-09-10 ("OK - let's start"). Phase 1 PF BGZF implementation and full feature-library comparison are complete; phase 2 is next.**
+Status: **IMPLEMENTED AND VALIDATED; all enabled phases accepted. Native BGZF excludes TranscriptVB online model learning. Final integration is ready.**
 
 The user requested an ordered implementation plan for the performance
 opportunities found after FLEX 1.9.0, including BGZF and an explicit priority
@@ -452,17 +452,17 @@ must be listed explicitly rather than marked implemented.
 | Phase | Status | Commit / evidence / next action |
 | --- | --- | --- |
 | Runbook and source audit | **COMPLETE** | Current source inspected; PF given first BGZF priority |
-| 0 — pin evidence and acceptance | COMPLETE FOR PF; LATER MODULES PENDING | Frozen source, hashed small/full PF inputs and references; pin later-module fixtures before their phases |
+| 0 — pin evidence and acceptance | COMPLETE | Frozen executables; manifests for PF, detected GEX counts, public bulk/SLAM FASTQs, saved full bulk evidence and matching reference metadata |
 | 1 — PF BGZF input | COMPLETE | Full 9,748,584-pair exact parity; 28.2722 → 25.5696 s, RSS +37.8 MiB; see phase-1 handoff |
-| 2 — PF direct worker/copy work | NOT STARTED | Depends on phase 1 exact parity |
-| 3 — general core BGZF modes | NOT STARTED | Bulk/scRNA, then SE/SLAM and complex modes |
-| 4 — scRNA CPU work | NOT STARTED | Separate OrdMag-reuse and MC-threading commits |
-| 5 — scRNA matrix views | NOT STARTED | Owning/view parity and memory measurements |
-| 6 — OCM sample permits | NOT STARTED | CPU and memory bounded |
-| 7 — SLAM cache/result reuse | NOT STARTED | Two separately measured commits |
-| 8 — SLAM gene parallelism | NOT STARTED | Same fits and output order |
-| 9 — bulk component execution | NOT STARTED | Global convergence and numeric acceptance |
-| 10 — combined acceptance/integration | NOT STARTED | Per-module final report and scoped integration |
+| 2 — PF direct worker/copy work | COMPLETE | Full PF/CBQ exact; corrected whole perturb matches six matrices and 19 diagnostics |
+| 3 — general core BGZF modes | COMPLETE WITH EXCLUSION | Reader/layout, real SLAM reopen/per-file, batch, static-budget and FLEX ownership gates pass; TranscriptVB online learning auto-falls back and forced range rejects |
+| 4 — scRNA CPU work | COMPLETE | Exact full detected-MEX comparison, 24.04 → 3.69 s |
+| 5 — scRNA matrix views | COMPLETE | Split/strided exact; caller-harness RSS 380,400 → 296,876 KiB; PF pre-MEX extent fixed |
+| 6 — OCM sample permits | COMPLETE | Tiny and 290,020-column synthetic-tag/real-count materializations exact; CPU/memory admission bounds pass |
+| 7 — SLAM cache/result reuse | COMPLETE | Both-model kernels, mutation/rate invalidation, all biological fixture output/QC gates pass |
+| 8 — SLAM gene parallelism | COMPLETE | One/five-worker fits, one/four-worker requant and integrated modes exact |
+| 9 — bulk component execution | COMPLETE | Full saved ECs exact at eight workers; deterministic integrated transcript/gene/tximport outputs exact |
+| 10 — combined acceptance/integration | ACCEPTANCE COMPLETE; INTEGRATION NEXT | Clean final build, saved execution registry, final capability guard and evidence report |
 
 ## Supporting records
 
@@ -476,7 +476,7 @@ must be listed explicitly rather than marked implemented.
 - [SLAM bounded smoke](RUNBOOK_SLAM_PE_100K_SMOKE.md)
 - [Perturb paper methodology](PAPER_BENCHMARK_METHODOLOGY.md)
 
-## Execution update — 2026-09-10
+## Historical phase-1 execution update — 2026-09-10
 
 Implementation is isolated at
 `/mnt/pikachu/star_suite_paper/analysis/cross_module_performance_20260910/worktree`,
@@ -522,3 +522,129 @@ also include later PF work and should not be assigned entirely to decoding.
 This is the **full feature library**, not a whole perturb GEX benchmark.
 Phase 2 remains the next implementation step; do not rerun the accepted
 baseline merely to establish it again.
+
+## Full-runbook implementation ledger (continued)
+
+The user explicitly authorized the entire runbook after Phase 1. Work continues
+on `perf/cross-module-bgzf-callers` in the isolated checkout. No cloud instance
+or release is involved. Independent source work for the caller and SLAM was
+prepared while the BGZF compatibility tests ran; frozen executables keep the
+measurements attributable to their respective changes.
+
+- **Phase 2 implemented and measured:** leased 512-record batches feed the common
+  worker-owned PF kernel. The temporary record-view arrays were removed from
+  the CBQ path as well. Direct dispatch retains queued fallback for three-stream,
+  chemistry detection and order-sensitive rescue/bootstrap configurations.
+  Full A375 feature input: 9,748,584 pairs; 28.2722 s original, 25.5696 s queued
+  native BGZF, **18.0532 s direct BGZF**. All 3,218,159 UMIs, 110,772 barcodes,
+  11 features and 124,871 nonzero coordinates agree exactly; statistics agree.
+  Direct-path peak RSS is 1,576,536 KiB. Whole perturb overlap is being checked
+  in the combined integration arm.
+- **Phase 3 implemented:** ordered raw BGZF windows feed the existing STAR FIFO
+  chunk parser. The disabled record-at-a-time FASTX implementation stays
+  disabled. This preserves FILE markers and downstream parsing without
+  reformatting every FASTQ record. Decode work shares mapping permits.
+  Frozen old/new tests passed PE, SE, multi-lane, mixed gzip/BGZF, read limits,
+  PairedKeepInputOrder, two-pass, transcriptome BAM, Y/noY output, fixed-trim
+  SLAM SE/PE, scRNA two-read and three-read layouts. CRC corruption and forced
+  mixed input fail. Real-data auto-trim/reopen and batch gates remain in progress.
+- **Phase 4 implemented:** diagnostics reuse the actual OrdMag result; MC uses
+  the post-mapping budget. Logical bootstrap streams stay at their original
+  count and MC seeds stay indexed by simulation.
+- **Phase 5 implemented:** validated immutable split/strided sparse views remove
+  both the STAR adapter conversion and C API interleaving. Existing C structures
+  and entry points retain their ABI. Both 32-bit and 64-bit cell offsets are
+  represented without narrowing; overflow and bounds checks precede access.
+- **Phases 4–5 measured:** the saved A375 GeneFull MEX at
+  `/storage/A375/bench_modern_a375_20260401_092108/Solo.out/GeneFull/raw`
+  contains 7,533,915 entries. Preparatory conversion drops zero-UMI whitelist
+  columns to reproduce STAR's detected-cell input (290,020 cells; 38,606 genes),
+  retaining every count and barcode order. An uncompressed NPZ cache is saved.
+  With 100,000 simulations and four logical bootstrap streams, the old caller
+  took **24.0404 s / 380,400 KiB**, the borrowed view with eight MC workers took
+  **3.68962 s / 296,876 KiB**, and the split view with three workers took
+  **10.5522 s / 296,152 KiB**. All 1,188 cells (1,134 OrdMag + 54 rescues), 233
+  tail candidates, p-values, likelihoods and decisions match exactly.
+  This harness measures the C API conversion saving; its input construction
+  retains both source representations and does not isolate the additional
+  STAR-adapter allocation saving. The initial all-whitelist-column control had
+  no ambient features and is retained as an unsuitable tail-rescue benchmark.
+- **Phase 6 implemented and checked:** OCM admits bounded windows of sample
+  matrices, uses a shared caller permit pool and emits final routing in original
+  sample order. `--ocmCellCallMaxMemory` defaults to 1 GiB of estimated matrix
+  storage; an oversized sample runs alone. This is an admission estimate,
+  not a process RSS cap. Empty samples produce empty callsets. Serial versus
+  four-worker native materialization matched all 60 output files. Peak workers
+  were 1/4, all 1/4 permits returned, estimated peak matrix bytes were 320/704.
+- **Phases 7–8 implemented and checked:** both SLAM solvers cache invariant
+  log-PMF values while retaining arithmetic traversal order. Standard and
+  GRAND-SLAM writers share fits; rate/model changes and histogram mutations
+  invalidate results. Gene fits use the post-mapping worker budget and write
+  in original order. Kernel results, including likelihood and convergence,
+  match the frozen solver exactly; serial/parallel fitting and cache invalidation
+  tests passed. The small 1,500-histogram kernel took 0.3772 s before and 0.0939 s
+  after; integrated biological fixture results are pending.
+- **Phase 9 implemented:** `--quantVBComponentParallel 1` exposes the existing
+  component executor. Default remains 0. Global convergence, priors and GC
+  update behavior are unchanged; per-component stopping stays disabled.
+  Empty-component fallback allocates its needed accumulation storage.
+  Saved full-library evidence and integrated bulk comparisons are running.
+- **Phase 10 in progress:** sampler, tie, floor, shared-permit and no-tag tests
+  passed. CBQ PF adapter regression passed. Integrated runs use the same BGZF
+  files through gzip/native readers, no BAM or sidecar output, eight CPUs and
+  matching reference/configuration. Output-generating BAM modes were confined
+  to explicit reader regression fixtures.
+
+Evidence is under the original evidence root: `phase3_tests`, `phase456_tests`,
+`kernel_gates`, `integrated_inputs`, `vb_saved`, and `integrated_runs`. Each
+execution has a wrapper-written completion record. `phase3_tests/slam_auto_base`
+failed because the error-free synthetic reads had insufficient variance for
+trim estimation; no baseline source defect was inferred and the identical
+command was not repeated. Real SLAM data is used for the auto-trim gate.
+
+Follow-up source audit before final acceptance found two integration issues:
+FLEX could start unused FIFO decoders before selecting its fused reader, and
+native BGZF with dynamic retuning disabled could add decode workers outside
+the mapping budget. The final patch retains FLEX's existing reader ownership
+and enables a shared decode/mapping permit budget for ordinary native BGZF even
+when dynamic retuning is off. Focused regression of those conditions is queued;
+the currently timed non-FLEX arms already use the dynamic interface and do not
+exercise either issue.
+
+The saved full bulk evidence comprises 50,917,353 pairs, 303,009 ECs, 226,005
+transcripts and 24,722 components. Both executors converged at iteration 1,357
+with GC update at iteration 11. Engine wall times were 69.61 s (EC) and 68.52 s
+(component); the component path removed the 14,464,320-byte accumulation buffer.
+Overall times were 95.69/70.37 s, but initial transcriptome loading took
+20.97/1.06 s, so the overall difference cannot be credited to the executor.
+The first integrated bulk arm is also reading a cold 29 GiB index from storage;
+report startup separately from mapping and model computation.
+
+The direct PF API audit also restored its probe-only early-stop check in the
+common view kernel, checks field capacity before inspecting the last byte,
+and releases a held assignment permit before returning a record-validation
+error. EOF batch recycling now signals producers explicitly. These affect
+probe/error/termination handling; the full normal-input timing remains valid.
+Focused PF/CBQ regression accompanies the final build.
+
+The combined comparison found two additional gates requiring action. The PF
+pre-MEX adapter omitted `sparse_nnz`; the validated view rejected its nonempty
+arrays, so the nonfatal PF EmptyDrops stage was missing. The adapter now supplies
+its occupied extent and the corrected integration is queued. Bulk native input
+changed the online fragment-length/EC evidence upstream of VB, despite exact
+alignment summaries. Saved full-EC quantification was byte-identical. Native
+BGZF now falls back for TranscriptVB online learning (forced range rejects);
+component execution is validated separately with deterministic mapping order.
+Pinned numerical bands are unchanged. Detailed results and exclusions are in
+[the cross-module report](benchmarks/CROSS_MODULE_PERFORMANCE_20260910.md).
+
+
+## Final acceptance
+
+All enabled phases passed their final regression gates. The explicit exclusion
+is native BGZF for TranscriptVB online model learning; general bulk alignment
+and GeneCounts retain native BGZF support, and the component executor remains
+opt-in. The corrected perturb outputs, SLAM per-file outputs and larger OCM
+sample outputs match their controls exactly. See the linked final report for
+actual times, memory, unchanged numerical bands, failed attempts and caveats.
+`FINAL_ACCEPTANCE.json` and `execution_registry.jsonl` are in the evidence root.
