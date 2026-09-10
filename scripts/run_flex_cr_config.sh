@@ -171,7 +171,7 @@ CMD=(
   --soloBarcodeReadLength 0
   --soloCBwhitelist "${SOLO_CB_WHITELIST}"
   --flex yes
-  --soloFlexExpectedCellsPerTag 3000
+  --soloFlexCellCaller tag-aware
   --soloSampleWhitelist "${FLEX_SAMPLE_WHITELIST}"
   --soloProbeList "${FLEX_PROBE_LIST}"
   --soloSampleProbes "${FLEX_SAMPLE_PROBES}"
