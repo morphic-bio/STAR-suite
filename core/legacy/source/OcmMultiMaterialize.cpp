@@ -8,6 +8,7 @@
 #include "SoloFeature.h"
 #include "TimeFunctions.h"
 #include "scrna_api.h"
+#include "BoundedSampleTasks.h"
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -758,7 +759,7 @@ static void configureOcmEmptyDrops(const Parameters& P, scrna_ed_config* config)
     config->seed = 1;
     config->lower_testing_bound = 500;
     config->ambient_umi_max = 100;
-    config->mc_threads = 0;
+    config->mc_threads = std::max(1, P.runThreadN);
     config->disable_occupancy_filter = 1;
     config->ed_retain_count = 0;
     config->use_fdr_gate = 1;
@@ -779,7 +780,7 @@ static void configureOcmEmptyDrops(const Parameters& P, scrna_ed_config* config)
 static vector<string> runOcmEmptyDropsOnRawMex(const string& rawMexDir,
                                                const string& edOutDir,
                                                const string& sampleId,
-                                               Parameters& P) {
+                                               Parameters& P, std::ostream& log) {
     const string matrixPath = PfMultiMerge::resolveMexFile(rawMexDir, "matrix.mtx");
     vector<string> barcodes = PfMultiMerge::readLines(PfMultiMerge::resolveMexFile(rawMexDir, "barcodes.tsv"));
     vector<uint32_t> umiCounts;
@@ -803,6 +804,14 @@ static vector<string> runOcmEmptyDropsOnRawMex(const string& rawMexDir,
         throw std::runtime_error("OCM EmptyDrops barcode count mismatch for " + sampleId);
     }
     const size_t beforeCells = barcodes.size();
+    if (std::none_of(umiCounts.begin(), umiCounts.end(), [](uint32_t n) { return n != 0; })) {
+        createDirectory(edOutDir + "/", P.runDirPerm, "OCM EmptyDrops output", P);
+        scrna_ed_result empty{};
+        if (scrna_emptydrops_write_outputs(&empty, edOutDir.c_str()) != 0)
+            throw std::runtime_error("Failed writing empty OCM sample " + sampleId);
+        log << "OCM EmptyDrops sample=" << sampleId << " nonzero_barcodes=0\n";
+        return {};
+    }
     dropZeroUmiCellsForEmptyDrops(barcodes,
                                   umiCounts,
                                   sparseGeneIds,
@@ -834,7 +843,7 @@ static vector<string> runOcmEmptyDropsOnRawMex(const string& rawMexDir,
         throw std::runtime_error("OCM EmptyDrops failed to allocate config");
     }
     configureOcmEmptyDrops(P, config);
-    P.inOut->logMain << "OCM EmptyDrops sample=" << sampleId
+    log << "OCM EmptyDrops sample=" << sampleId
                      << " nonzero_barcodes=" << barcodes.size()
                      << " raw_barcodes=" << beforeCells
                      << " nnz=" << nnz
@@ -861,7 +870,7 @@ static vector<string> runOcmEmptyDropsOnRawMex(const string& rawMexDir,
     }
     createDirectory(edOutDir + "/", P.runDirPerm, "OCM EmptyDrops output", P);
     if (scrna_emptydrops_write_outputs(&result, edOutDir.c_str()) != 0) {
-        P.inOut->logMain << "WARNING: OCM EmptyDrops detailed output failed for " << sampleId
+        log << "WARNING: OCM EmptyDrops detailed output failed for " << sampleId
                          << " at " << edOutDir << "\n";
     }
     scrna_ed_result_free(&result);
@@ -1152,14 +1161,46 @@ static int runOcmMultiMaterializeNativeEmptyDrops(Parameters& P,
     map<string, vector<string>> globalCellsPerTag;
     const string filteredBarcodeGenomeLabel = resolveFilteredBarcodeGenomeLabel(config);
 
+    vector<uint64_t> sampleBytes(config.samples.size());
+    for (size_t i = 0; i < rawGroups.size(); ++i) {
+        const string path = PfMultiMerge::resolveMexFile(rawGroups[i].outputDir, "matrix.mtx");
+        gzFile file = gzopen(path.c_str(), "rb");
+        if (!file) throw std::runtime_error("Cannot read OCM matrix header " + path);
+        char line[4096]; bool found = false;
+        while (gzgets(file, line, sizeof(line))) {
+            if (line[0] == '%') continue;
+            uint64_t rows, cols, nnz; std::istringstream header(line);
+            if (!(header >> rows >> cols >> nnz) || nnz > UINT64_MAX / 16 || cols > UINT64_MAX / 128 || rows > UINT64_MAX / 16) break;
+            const uint64_t sparse = nnz * 16, axes = cols * 128;
+            if (axes > UINT64_MAX - sparse || rows * 16 > UINT64_MAX - sparse - axes) break;
+            sampleBytes[i] = sparse + axes + rows * 16;
+            found = true; break;
+        }
+        gzclose(file);
+        if (!found) throw std::runtime_error("Invalid or overflowing OCM matrix header " + path);
+    }
+    vector<vector<string>> sampleCalls(config.samples.size());
+    vector<string> sampleLogs(config.samples.size());
+    const auto scheduling = scrna::boundedSampleTasks(sampleBytes, std::max(1, P.runThreadN),
+        P.pfMulti.ocmCellCallMaxMemory, [&](size_t i) {
+            const auto& sample = config.samples[i];
+            std::ostringstream log;
+            sampleCalls[i] = runOcmEmptyDropsOnRawMex(rawGroups[i].outputDir,
+                outsDir + "/per_sample_outs/" + sample.sample_id + "/count/emptydrops",
+                sample.sample_id, P, log);
+            sampleLogs[i] = log.str();
+        });
+    P.inOut->logMain << "OCM caller scheduling: peak_workers=" << scheduling.peakWorkers
+        << " permits_returned=" << scheduling.permitsReturned
+        << " peak_estimated_matrix_bytes=" << scheduling.peakEstimatedBytes
+        << " memory_budget=" << P.pfMulti.ocmCellCallMaxMemory << "\n";
+
     for (size_t i = 0; i < config.samples.size(); ++i) {
         const auto& sample = config.samples[i];
         const string sampleCountDir = outsDir + "/per_sample_outs/" + sample.sample_id + "/count";
         const string edOutDir = sampleCountDir + "/emptydrops";
-        vector<string> filteredBarcodes = runOcmEmptyDropsOnRawMex(rawGroups[i].outputDir,
-                                                                   edOutDir,
-                                                                   sample.sample_id,
-                                                                   P);
+        P.inOut->logMain << sampleLogs[i];
+        const vector<string>& filteredBarcodes = sampleCalls[i];
         {
             ofstream filteredOutFile((edOutDir + "/filtered_barcodes.tsv").c_str());
             if (!filteredOutFile.is_open()) {

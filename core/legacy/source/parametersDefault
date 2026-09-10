@@ -2626,3 +2626,6 @@ soloClusterCBfile           -
 
 soloFlexFilteredGeneList      -
     string: optional gene-ID allowlist for per-sample filtered Flex MEX export; does not restrict calling
+
+ocmCellCallMaxMemory                  1073741824
+    int: Estimated matrix bytes admitted concurrently by OCM cell calling. An oversized sample runs alone.
