@@ -33,8 +33,8 @@ compatibility remains `2.7.1a`. Existing indexes do not need rebuilding.
   zero-truncated Poisson mean with the ordinary Poisson 0.999 cutoff.
 - Caller diagnostics expose ranks, candidates, ambient profiles, p-values,
   rescue decisions, and occupancy removals. See
-  [model and export configuration](FLEX_MODEL_FEATURES.md) and
-  [quality ranking](ORDMAG_QUALITY_RANKING.md).
+  [model and export configuration](https://github.com/morphic-bio/STAR-suite/blob/v1.9.0/docs/FLEX_MODEL_FEATURES.md) and
+  [quality ranking](https://github.com/morphic-bio/STAR-suite/blob/v1.9.0/docs/ORDMAG_QUALITY_RANKING.md).
 
 ## Cache and caller performance
 
@@ -47,7 +47,7 @@ compatibility remains `2.7.1a`. Existing indexes do not need rebuilding.
   full-probe matches; one-sided candidates pass directly to full-probe
   Hamming scoring. Packing verifies the source decision universe before
   publishing an immutable file. Unsupported cache policies retain the
-  general format. See [cache format and conversion](FLEX_KHASH_CACHE.md).
+  general format. See [cache format and conversion](https://github.com/morphic-bio/STAR-suite/blob/v1.9.0/docs/FLEX_KHASH_CACHE.md).
 - Each OrdMag bootstrap replicate sorts its array once and reuses it for all
   trial cell counts, preserving the previous estimator's arithmetic and draws.
 - Independent sample groups run concurrently. A shared `runThreadN` permit
@@ -64,7 +64,7 @@ compatibility remains `2.7.1a`. Existing indexes do not need rebuilding.
 - Sample-tag lookup uses the fixed supplied-table offset: authoritative H0
   first, followed by a separately constructed H1 table that rejects ambiguous
   ownership. Neighboring-offset search is unsupported. See
-  [sample-tag policy](FLEX_SAMPLE_TAG_POLICY.md).
+  [sample-tag policy](https://github.com/morphic-bio/STAR-suite/blob/v1.9.0/docs/FLEX_SAMPLE_TAG_POLICY.md).
 - Conservative single-N probe resolution is shared by fused input and BAM
   paths. Experimental H1X2 remains opt-in: it permits at most one mismatch per
   25-base half and supports a unique-half seed extension with at least 40 of
@@ -79,28 +79,51 @@ compatibility remains `2.7.1a`. Existing indexes do not need rebuilding.
   the full barcode and tag; comparator corrections do not imply a Flex
   barcode-merging defect.
 
-## Measured validation before release
+## Full 320K benchmark and validation
 
-The latest completed L004 optimization run processed **1,823,648,323 read
-pairs** using CBQ and 48 threads, with no alignment, reference-index loading,
-BAM, or per-read sidecar. The final optimized implementation took
-**201.901 seconds**, versus **428.954 seconds** with the prior fixed-share
-parallel caller. Caller time fell from 244 to 18 seconds. All matrices,
-249,194 called cell identities, ranks, ambient profiles, and p-values were
-identical across those optimization arms. These are single-run measurements
-of the pre-version-bump implementation, not full-set timings. See the
-[L004 report](benchmarks/FLEX_ORDMAG_SORT_PERMITS_L004_20260910.md).
+Both new benchmark arms processed all four lanes: **7,303,142,230 read pairs**,
+eight samples and sixteen probe tags, on the same 48-thread `m6id.12xlarge`
+instance. Both used the same frozen STAR 1.9.0 binary, cold OS page cache,
+100,000 simulations, and the all-feature model. There was no alignment,
+reference-index loading, BAM, or per-read decision sidecar. Input conversion
+was outside the timed process. Each number is one completed execution, not a
+repeated-trial estimate.
 
-The earlier September 9 full-set all-feature run processed **7,303,142,230
-read pairs** in **1,217.150 seconds for CBQ** and **1,452.071 seconds for
-FASTQ-BGZF**, with exact count/call parity between formats. That older build
-preceded the cache and caller performance changes in this release. Its pooled
-cell Jaccard against the saved reference results was 0.973961. See the
-[full-set caller integration report](HANDOFF_FULL320K_STAR_DEPRECATED_20260909.md).
+| Input | September 9 control | STAR 1.9.0 | Speedup | Peak RSS, control → new |
+| --- | ---: | ---: | ---: | ---: |
+| CBQ | 1,217.150 s (20m17s) | **628.033 s (10m28s)** | **1.94×** | 138.85 → 103.97 GiB |
+| FASTQ-BGZF | 1,452.071 s (24m12s) | **867.680 s (14m28s)** | **1.67×** | 139.94 → 93.79 GiB |
 
-Fresh full-set timings for the frozen 1.9.0 source will be recorded after the
-two authorized benchmark arms finish and pass count/caller validation. The
-L004 result above must not be substituted for that full-set measurement.
+For each arm, the global raw matrix and all eight filtered matrices matched
+exactly, including all **333,439 called cell identities**. All 57 caller
+diagnostic files per arm matched after excluding only the execution metadata
+field `mc_threads`; ranks, ambient profiles, p-values, rescue decisions,
+occupancy results, sample summaries, and read classifications were unchanged.
+The previously measured pooled cell Jaccard against the saved reference results
+therefore remains **0.973961**. See the
+[full 320K benchmark report](https://github.com/morphic-bio/STAR-suite/blob/v1.9.0/docs/benchmarks/FULL320K_V190_20260910.md) and the
+[September 9 caller integration report](https://github.com/morphic-bio/STAR-suite/blob/v1.9.0/docs/HANDOFF_FULL320K_STAR_DEPRECATED_20260909.md).
+
+The benchmark binary was clean-built from commit
+`a6c1c546cbb53403c542bb9819706631801c935b`, SHA-256
+`54311642da84160e2dd75321d1ea6306ef0a5724b32727b402216748a5707d67`.
+Subsequent release integration fixed the recipe wrapper and generated-default
+build rule and updated documentation. The refreshed parameter header is
+byte-identical to the header generated by the benchmark's clean build; no
+counting or caller implementation changed after that benchmark source freeze.
+The final tag preserves this commit in its ancestry. Packaged platform builds
+have their own binary checksums and embed the exact final tagged source commit.
+
+## Separate L004 optimization evidence
+
+The earlier L004 optimization run processed **1,823,648,323 read pairs** with
+CBQ and 48 threads. The optimized implementation took **201.901 seconds**,
+versus **428.954 seconds** with the prior fixed-share parallel caller; caller
+time fell from 244 to 18 seconds. All matrices, 249,194 called cell identities,
+ranks, ambient profiles, and p-values matched across those optimization arms.
+These are separate single-run, pre-version-bump implementation measurements;
+they are not the full-set timings above. See the
+[L004 report](https://github.com/morphic-bio/STAR-suite/blob/v1.9.0/docs/benchmarks/FLEX_ORDMAG_SORT_PERMITS_L004_20260910.md).
 
 ## Distribution and compatibility
 
