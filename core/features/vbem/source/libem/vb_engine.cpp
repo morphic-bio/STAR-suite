@@ -6,6 +6,7 @@
 #include <omp.h>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <cstdlib>
 #include <limits>
 #include <unordered_map>
@@ -445,8 +446,7 @@ EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& para
     
     // Thread-local storage for expected_counts: flat layout [num_threads * n_transcripts] for cache friendliness
     // Each thread writes to its own buffer, then we reduce deterministically
-    std::vector<double> expected_counts_tls(
-        params.component_partition ? 0 : (size_t)num_threads * state.n, 0.0);
+
 
     // Transcripts appearing in no equivalence class receive nothing from the
     // E-step, so their expected count is identically zero every iteration.
@@ -508,6 +508,12 @@ EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& para
     }
     const bool pcc = params.per_component_convergence;
     const bool component_partition = params.component_partition && n_components > 0;
+    std::vector<double> expected_counts_tls(
+        component_partition ? 0 : (size_t)num_threads * state.n, 0.0);
+    std::cerr << "[VB] component execution=" << component_partition
+        << " components=" << n_components << " accumulator_bytes="
+        << expected_counts_tls.size() * sizeof(double) << "\n";
+
     // EC list per component, and a descending-size order so the largest
     // components start first and do not become the tail of the schedule.
     std::vector<std::vector<size_t>> comp_ec_list;

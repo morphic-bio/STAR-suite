@@ -487,6 +487,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "quantTranscriptomeSAMoutput", &quant.trSAM.output));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBgcBias", &quant.transcriptVB.gcBiasInt));
     parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "quantVBprior", &quant.transcriptVB.vbPrior));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBComponentParallel", &quant.transcriptVB.componentParallel));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBem", &quant.transcriptVB.quantVBemInt)); // If true, use EM instead of VB
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBgenes", &quant.transcriptVB.geneOutputInt));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBgenesMode", &quant.transcriptVB.genesModeStr));
@@ -776,11 +777,13 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignSearchThreads", &pfMulti.crAssignSearchThreads));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignReadBufferLines", &pfMulti.crAssignReadBufferLines));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignCbqMode", &pfMulti.crAssignCbqMode));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignBgzfMode", &pfMulti.crAssignBgzfMode));
     parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "crAssignMinPosterior", &pfMulti.crAssignMinPosterior));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignLegacyCbRescue", &pfMulti.crAssignLegacyCbRescue));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignSkipQcOutputs", &pfMulti.crAssignSkipQcOutputs));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignFilteredBarcodes", &pfMulti.crAssignFilteredBarcodes));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignAllowUnionWhitelist", &pfMulti.crAssignAllowUnionWhitelist));
+    parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "ocmCellCallMaxMemory", &pfMulti.ocmCellCallMaxMemory));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiEnable", &pfMulti.ocmMultiEnable));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiConfig", &pfMulti.ocmMultiConfig));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiBarcodeMode", &pfMulti.ocmMultiBarcodeMode));
@@ -963,6 +966,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         if (p->nameString == "crAssignReadBufferLines" && p->inputLevel < 0) {
             pfMulti.crAssignReadBufferLines = -1;
             p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignBgzfMode" && p->inputLevel < 0) {
+            pfMulti.crAssignBgzfMode = "auto";
         }
         if (p->nameString == "crAssignCbqMode" && p->inputLevel < 0) {
             pfMulti.crAssignCbqMode = "auto";
@@ -3184,6 +3190,11 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
     
+    if (quant.transcriptVB.componentParallel != 0 && quant.transcriptVB.componentParallel != 1)
+        exitWithError("quantVBComponentParallel must be 0 or 1\n", std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    if (quant.transcriptVB.componentParallel && quant.transcriptVB.quantVBemInt)
+        exitWithError("quantVBComponentParallel requires VB (--quantVBem 0)\n", std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+
     // Initialize transcriptVB defaults
     if (quant.transcriptVB.yes) {
         // Convert int flags to bool

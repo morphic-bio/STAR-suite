@@ -2875,6 +2875,10 @@ int main(int argInN, char *argIn[])
         // 4. Run VB/EM quantification
         EMParams params;
         params.use_vb = P.quant.transcriptVB.vb;
+        params.component_partition = P.quant.transcriptVB.componentParallel != 0;
+        params.per_component_convergence = false;
+        P.inOut->logMain << "TranscriptVB component execution=" << params.component_partition
+            << " global_convergence=1\n";
         params.vb_prior = P.quant.transcriptVB.vbPrior;
         // Use defaults from EMParams (max_iters=10000, min_iters=100, tolerance=0.01)
         // Do NOT override for VB - let VB use same defaults as EM for Salmon parity
@@ -3057,6 +3061,7 @@ int main(int argInN, char *argIn[])
             }
             P.inOut->logMain << "\n";
         }
+        mergedSlam.setFitWorkers(std::max(1, P.runThreadN));
         mergedSlam.write(*transcriptomeMain, P.quant.slam.outFile,
                          P.quant.slam.errorRate, P.quant.slam.convRate,
                          P.quant.slam.vbOverdisp, P.quant.slam.vbOverdispPhi,
@@ -3070,6 +3075,8 @@ int main(int argInN, char *argIn[])
                                       P.quant.slam.vbOverdisp, P.quant.slam.vbOverdispPhi,
                                       P.quant.slam.vbOverdispPriorAlpha, P.quant.slam.vbOverdispPriorBeta);
         }
+        P.inOut->logMain << "SLAM fits: workers=" << std::max(1, P.runThreadN)
+            << " passes=" << mergedSlam.fitPasses() << " result_bytes=" << mergedSlam.fitResultBytes() << "\n";
         if (P.quant.slam.cbOut != 0) {
             std::string cbOut = P.quant.slam.cbOutFile.empty()
                                 ? (P.outFileNamePrefix + "SlamQuant.cB.tsv")

@@ -1,4 +1,5 @@
 #include "SlamQuant.h"
+#include "../../core/features/libscrna/include/ParallelTasks.h"
 #include "SlamCompat.h"
 #include "SlamDump.h"
 #include "libem/slam_vb_overdisp.h"
@@ -403,6 +404,7 @@ void SlamQuant::addRead(uint32_t geneId, uint16_t nT, uint16_t tc, double weight
     if (!allowedGenes_.empty() && geneId < allowedGenes_.size() && allowedGenes_[geneId] == 0) {
         return;
     }
+    fitsValid_ = false;
     MismatchHistogramKey key = slamPackMismatchKey(nT, tc);
     SlamGeneStats& stats = geneStats_[geneId];
     stats.histogram[key] += weight;
@@ -672,6 +674,7 @@ void SlamQuant::addTransitionBase(SlamMismatchCategory category, uint32_t readPo
 }
 
 void SlamQuant::merge(const SlamQuant& other) {
+    fitsValid_ = false;
     if (other.geneStats_.size() != geneStats_.size()) {
         return;
     }
@@ -827,6 +830,17 @@ void SlamQuant::merge(const SlamQuant& other) {
     }
 }
 
+const std::vector<SlamFit>& SlamQuant::fitGenes(const SlamFitParameters& parameters) const {
+    if (fitsValid_ && fitParameters_ == parameters) return fittedGenes_;
+    std::vector<SlamFit> next(geneStats_.size());
+    scrna::parallelFor(geneStats_.size(), fitWorkers_, [&](size_t i, size_t) {
+        if (geneStats_[i].readCount > 0.0)
+            next[i] = fitSlamHistogram(geneStats_[i].histogram, parameters);
+    });
+    fittedGenes_.swap(next); fitParameters_ = parameters; fitsValid_ = true; ++fitPasses_;
+    return fittedGenes_;
+}
+
 void SlamQuant::write(const Transcriptome& tr, const std::string& outFile,
                       double errorRate, double convRate,
                       bool vbOverdisp, double vbPhi,
@@ -837,31 +851,14 @@ void SlamQuant::write(const Transcriptome& tr, const std::string& outFile,
     }
     out << "Gene\tSymbol\tReadCount\tConversions\tCoverage\tNTR\tMAP\tSigma\tLogLikelihood\n";
 
-    SlamSolver solver(errorRate, convRate);
-    SlamVbOverdispSolver vbSolver(errorRate, convRate, vbPhi, vbPriorAlpha, vbPriorBeta);
+    const auto& fits = fitGenes({errorRate, convRate, vbPhi, vbPriorAlpha, vbPriorBeta, vbOverdisp});
     for (size_t i = 0; i < geneStats_.size(); ++i) {
         const SlamGeneStats& stats = geneStats_[i];
         if (stats.readCount <= 0.0) {
             continue;
         }
-        double ntr = 0.0;
-        double map = 0.0;
-        double sigma = 0.0;
-        double ll = 0.0;
-        if (vbOverdisp) {
-            VbOverdispResult res = vbSolver.solve(stats.histogram);
-            // Use MAP for NTR to preserve parity with legacy comparisons.
-            ntr = res.ntr_map;
-            map = res.ntr_map;
-            sigma = 0.0;
-            ll = res.log_likelihood;
-        } else {
-            SlamResult res = solver.solve(stats.histogram);
-            ntr = res.ntr;
-            map = res.ntr;
-            sigma = res.sigma;
-            ll = res.log_likelihood;
-        }
+        const auto& fit = fits[i];
+        const double ntr = fit.map, map = fit.map, sigma = fit.sigma, ll = fit.likelihood;
         const std::string& geneId = tr.geID[i];
         const std::string& geneName = tr.geName[i].empty() ? tr.geID[i] : tr.geName[i];
         out << geneId << "\t"
@@ -982,24 +979,13 @@ void SlamQuant::writeGrandSlam(const Transcriptome& tr, const std::string& outFi
         << prefix << " min2\t"
         << "Length\n";
 
-    SlamSolver solver(errorRate, convRate);
-    SlamVbOverdispSolver vbSolver(errorRate, convRate, vbPhi, vbPriorAlpha, vbPriorBeta);
+    const auto& fits = fitGenes({errorRate, convRate, vbPhi, vbPriorAlpha, vbPriorBeta, vbOverdisp});
     for (size_t i = 0; i < geneStats_.size(); ++i) {
         const SlamGeneStats& stats = geneStats_[i];
         if (stats.readCount <= 0.0) {
             continue;
         }
-        double ntr_mean = 0.0;
-        double ntr_map = 0.0;
-        if (vbOverdisp) {
-            VbOverdispResult res = vbSolver.solve(stats.histogram);
-            ntr_mean = res.ntr_mean;
-            ntr_map = res.ntr_map;
-        } else {
-            SlamResult res = solver.solve(stats.histogram);
-            ntr_mean = res.ntr;
-            ntr_map = res.ntr;
-        }
+        const double ntr_mean = fits[i].mean, ntr_map = fits[i].map;
         const std::string& geneId = tr.geID[i];
         const std::string& geneName = tr.geName[i].empty() ? tr.geID[i] : tr.geName[i];
         // Placeholder: GEDI posterior not implemented; use NTR for MAP/mean/quantiles.

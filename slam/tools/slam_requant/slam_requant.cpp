@@ -31,6 +31,7 @@ struct Args {
     double errorRate = -1.0;
     double convRate = -1.0;
     int cbOut = 0;
+    int fitThreads = 1;
     uint32_t autoTrimMaxReads = 100000;
     uint32_t autoTrimMinReads = 1000;
     uint32_t autoTrimSmoothWindow = 5;
@@ -74,6 +75,7 @@ static bool parseArgs(int argc, char** argv, Args* args) {
         else if (a == "--slamCbOut") args->cbOut = std::stoi(next("--slamCbOut"));
         else if (a == "--slamCbOutFile") args->cbOutFile = next("--slamCbOutFile");
         else if (a == "--slamCbFormat") args->cbFormat = next("--slamCbFormat");
+        else if (a == "--threads") args->fitThreads = std::stoi(next("--threads"));
         else if (a == "--errorRate") args->errorRate = std::stod(next("--errorRate"));
         else if (a == "--convRate") args->convRate = std::stod(next("--convRate"));
         else if (a == "--autoTrimDetectionReads") args->autoTrimMaxReads = static_cast<uint32_t>(std::stoul(next("--autoTrimDetectionReads")));
@@ -94,9 +96,10 @@ static bool parseArgs(int argc, char** argv, Args* args) {
                      "[--slamWeightMode dump|alignments|uniform] [--slamWeightFile <path>] [--slamWeightMatch auto|order|key] "
                      "[--dumpOut <path>] [--dumpWeightsOut <path>] "
                      "[--slamCbOut 0|1] [--slamCbOutFile <path>] [--slamCbFormat star|ezbakr] "
-                     "[--slamMinCallableLength N]\n";
+                     "[--slamMinCallableLength N] [--threads N]\n";
         return false;
     }
+    if (args->fitThreads <= 0) { std::cerr << "--threads must be positive\n"; return false; }
     if (args->cbOut != 0 && args->cbOut != 1) {
         std::cerr << "--slamCbOut must be 0 or 1\n";
         return false;
@@ -160,22 +163,23 @@ static void writeSlamOut(const std::string& outFile,
     std::ofstream out(outFile.c_str());
     if (!out.good()) return;
     out << "Gene\tSymbol\tReadCount\tConversions\tCoverage\tNTR\tMAP\tSigma\tLogLikelihood\n";
-    SlamSolver solver(errorRate, convRate);
+    const SlamFitParameters parameters{errorRate, convRate, 50, 1, 1, false};
     const auto& genes = quant.genes();
+    const auto& fits = quant.fits(parameters);
     for (size_t i = 0; i < genes.size(); ++i) {
         const SlamGeneStats& stats = genes[i];
         if (stats.readCount <= 0.0) continue;
-        SlamResult res = solver.solve(stats.histogram);
+        const auto& res = fits[i];
         const std::string& gid = (i < geneIds.size()) ? geneIds[i] : std::string("GENE_") + std::to_string(i);
         const std::string& gname = (i < geneNames.size() && !geneNames[i].empty()) ? geneNames[i] : gid;
         out << gid << "\t" << gname << "\t"
             << stats.readCount << "\t"
             << stats.conversions << "\t"
             << stats.coverage << "\t"
-            << res.ntr << "\t"
-            << res.ntr << "\t"
+            << res.map << "\t"
+            << res.map << "\t"
             << res.sigma << "\t"
-            << res.log_likelihood << "\n";
+            << res.likelihood << "\n";
     }
 }
 
@@ -402,6 +406,7 @@ int main(int argc, char** argv) {
     };
 
     SlamQuant merged(meta.geneIds.size(), meta.allowedGenes, false);
+    merged.setFitWorkers(args.fitThreads);
     if (args.trimScope == "per-file") {
         std::unordered_map<uint32_t, std::vector<SlamBufferedRead>> byFile;
         for (const auto& r : reads) {

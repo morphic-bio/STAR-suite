@@ -2344,6 +2344,14 @@ crAssignReadBufferLines    -1
                             -1 ... use process_features default.
                             >0 ... explicit queue line count for FASTQ and CBQ record streams.
 
+crAssignBgzfMode           auto
+    string: auto|off|range for process_features FASTQ input (independent of GEX).
+            auto uses native BGZF per lane when every stream has a BGZF header.
+            range rejects unsupported lanes; off uses the existing gzip reader.
+            bgzfReaderThreads is the total PF inflater count across all lanes.
+            With dynamic permits, 0 derives that count from runThreadN;
+            without permits, 0 inflates synchronously on producer threads.
+
 crAssignCbqMode            auto
     string:                 CBQ input strategy for pf-multi feature assignment.
                             auto   ... use indexed direct range counting when supported, otherwise stream.
@@ -2618,3 +2626,9 @@ soloClusterCBfile           -
 
 soloFlexFilteredGeneList      -
     string: optional gene-ID allowlist for per-sample filtered Flex MEX export; does not restrict calling
+
+ocmCellCallMaxMemory                  1073741824
+    int: Estimated matrix bytes admitted concurrently by OCM cell calling. An oversized sample runs alone.
+
+quantVBComponentParallel              0
+    int: 0/1. Assign whole EC components to workers without thread-local transcript accumulators. Keeps global VB convergence.

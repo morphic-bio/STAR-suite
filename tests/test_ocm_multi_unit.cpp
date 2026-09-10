@@ -197,6 +197,13 @@ static int testMaterializerTiny() {
     const char* logPath = std::getenv("OCM_TEST_LOG");
     P.inOut->logMain.open(logPath != nullptr && logPath[0] != '\0' ? logPath : "/dev/null");
     P.runDirPerm = static_cast<mode_t>(0775);
+    P.runThreadN = std::getenv("OCM_TEST_THREADS") ? std::atoi(std::getenv("OCM_TEST_THREADS")) : 1;
+    P.pSolo.emptyDropsLegacyKnee = false;
+    P.pSolo.cellFilter.eDcr = {};
+    P.pSolo.flexFilterEdNiters = 1000;
+    P.pSolo.flexFilterEdFdrThreshold = 0.01;
+    if (std::getenv("OCM_TEST_MEMORY")) P.pfMulti.ocmCellCallMaxMemory = std::strtoull(std::getenv("OCM_TEST_MEMORY"), nullptr, 10);
+
     P.outFileNamePrefix = runDir + "/";
     P.pfMulti.ocmMultiEnable = "yes";
     P.pfMulti.ocmMultiConfig = materializeConfigPath(root);
@@ -318,6 +325,13 @@ static int testCrBarcodeSuffixNormalization() {
                                                      log);
     Parameters P;
     P.runDirPerm = static_cast<mode_t>(0775);
+    P.runThreadN = std::getenv("OCM_TEST_THREADS") ? std::atoi(std::getenv("OCM_TEST_THREADS")) : 1;
+    P.pSolo.emptyDropsLegacyKnee = false;
+    P.pSolo.cellFilter.eDcr = {};
+    P.pSolo.flexFilterEdNiters = 1000;
+    P.pSolo.flexFilterEdFdrThreshold = 0.01;
+    if (std::getenv("OCM_TEST_MEMORY")) P.pfMulti.ocmCellCallMaxMemory = std::strtoull(std::getenv("OCM_TEST_MEMORY"), nullptr, 10);
+
     if (PfMultiMerge::writeColumnSubsetMexGz(tmpDir,
                                              outDir,
                                              axes,
