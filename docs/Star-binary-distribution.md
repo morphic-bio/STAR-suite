@@ -197,6 +197,21 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Fix Release v1.9.2 (2026-09-11)
+
+- Release tag: `v1.9.2`; notes: `docs/RELEASE_NOTES_v1.9.2.md`.
+- Debian source version: `1.9.2-1`; Ubuntu binaries:
+  `1.9.2-1~ubuntu22.04.1` and `1.9.2-1~ubuntu24.04.1`.
+- Scope: separate OrdMag primary and EmptyDrops candidate floors for scRNA-seq
+  and OCM calling (Flex unchanged), the soloCellFiltering mitochondrial-list
+  default, and the restored Trim Galore/FastQC bulk benchmark control.
+- `STAR --version` reports `1.9.2`; upstream and genome compatibility remain
+  `2.7.11b` and `2.7.4a`. Existing indexes do not need rebuilding.
+- scRNA-seq and OCM cell calls change relative to 1.9.1; Flex outputs are
+  byte-identical. The paper refresh pins new executions to 1.9.2.
+- Hosted tarball/Debian packages retain the portable no-Chromap build; local
+  production builds retain the Chromap-enabled default.
+
 ## Performance Release v1.9.1 (2026-09-10)
 
 - Release tag: `v1.9.1`; notes: `docs/RELEASE_NOTES_v1.9.1.md`.
