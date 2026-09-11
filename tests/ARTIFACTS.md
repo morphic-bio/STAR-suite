@@ -1775,3 +1775,19 @@ has empty layers and is explicitly excluded by its `validation.json`. The valid
 controls are `velocyto_before_legacy`, `velocyto_after_legacy` and
 `velocyto_after_buckets`. See `docs/ALLOCATION_FIXES_20260911.md` and the separate
 no-BAM Velocyto handoff.
+
+### No-BAM bridge Velocyto correction (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/velocyto_readinfo_fix/` preserves clean
+builds/source patches, sanitizer fixtures, 100K A375 GEX/full-guide executions and
+strict count/layer comparisons. `build4/STAR` is the corrected frozen binary.
+`bridge_final` restores the layers without changing GEX/guide counts, and
+`exact_bridge_fixed` matches the preserved `exact_legacy` control on every matrix
+and layer. The earlier `bridge` and `exact_bridge` drafts are marked superseded
+after the exact-barcode control exposed an unintended no-feature-read admission.
+See `docs/HANDOFF_NO_BAM_VELOCYTO_READINFO_20260911.md` for commands, hashes and results.
+
+Final allocation guards: `gex_only_final` has no new per-read replay storage;
+`multi_feature_final` retains only the selected Gene source. Their comparison
+JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
+`build_patch_verification.json` complete the correction's provenance.

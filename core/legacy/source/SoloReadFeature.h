@@ -15,6 +15,7 @@
 #include "hash_shims_cpp_compat.h"
 #include "SoloBinarySpool.h"
 #include "BridgeReadCounts.h"
+#include "BridgeReadInfo.h"
 #include "FlexGdna.h"
 #include "CbBucketStore.h"
 #include <functional>
@@ -58,6 +59,8 @@ public:
     // Maps readId -> packed(cbIdx, umi24, status) for populating packedReadInfo after collapse
     // Only allocated when pSolo.trackReadIdsForTags is true
     khash_t(readid_cbumi) *readIdTracker_; // nullptr if not tracking readIds
+    bool bridgeReadInfoEnabled_ = false;
+    BridgeReadInfo bridgeReadInfo_;
     
     // Extended ambiguous entry to store gene/tag info for hash re-keying after resolution
     struct ExtendedAmbiguousEntry : public ReadAlign::AmbiguousEntry {

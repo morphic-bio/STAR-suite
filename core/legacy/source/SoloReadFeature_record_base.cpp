@@ -665,6 +665,26 @@ void record_base(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint n
         return;
     }
 
+    if (soloReadFeat->bridgeReadInfoEnabled_ && !soloBar.cbMatchInd.empty()) {
+        if (iRead >= UINT32_MAX) {
+            exitWithError("EXITING because direct bridge readInfo requires a 32-bit read index.\n",
+                          std::cerr, soloReadFeat->P.inOut->logMain,
+                          EXIT_CODE_INCONSISTENT_DATA, soloReadFeat->P);
+        }
+        const auto &genes = readAnnot.annotFeatures[soloReadFeat->featureType].fSet;
+        // CountingSink retains only assigned gene reads. In particular, a
+        // transcript overlap alone does not admit a no-feature/multi-gene read.
+        if (nTr > 0 && genes.size() == 1) {
+            BridgeReadInfo::Read r{static_cast<uint32_t>(soloBar.cbMatchInd[0]),
+                                  static_cast<uint32_t>(soloBar.umiB & 0xFFFFFFu),
+                                  *genes.begin(), static_cast<uint32_t>(iRead)};
+            if (soloBar.cbMatch > 1 || soloBar.cbMatchInd.size() > 1)
+                soloReadFeat->bridgeReadInfo_.pending.push_back({ReadAlign::hashCbSeq(soloBar.cbSeq), r});
+            else
+                soloReadFeat->bridgeReadInfo_.reads.push_back(r);
+        }
+    }
+
        
     ReadSoloFeatures reFe;
     reFe.alignOut=alignOut;

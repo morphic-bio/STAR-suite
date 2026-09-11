@@ -15,7 +15,9 @@ parser.add_argument('--binary', required=True, type=Path)
 parser.add_argument('--out', required=True, type=Path)
 parser.add_argument('--mode', choices=['stream', 'sorted', 'buckets'], default='stream')
 parser.add_argument('--gex-counting', choices=['legacy', 'bridge'], default='legacy',
-                    help='Legacy supplies Velocyto read information without requiring BAM tags')
+                    help='Select the gene counting path, keeping BAM disabled')
+parser.add_argument('--features', nargs='+', default=['GeneFull', 'Velocyto'])
+parser.add_argument('--cb-match', help='Optional barcode matching control, e.g. Exact')
 args = parser.parse_args()
 reference = json.loads((args.reference_run / 'execution.json').read_text())
 assert reference['status'] == 'passed'
@@ -31,7 +33,13 @@ command[command.index('--outFileNamePrefix') + 1] = str(out / 'out') + '/'
 config_index = command.index('--pfMultiConfig') + 1
 shutil.copy2(command[config_index], out / 'out/multi_config.csv')
 command[config_index] = str(out / 'out/multi_config.csv')
-command.insert(command.index('--soloFeatures') + 2, 'Velocyto')
+feature_begin = command.index('--soloFeatures') + 1
+feature_end = feature_begin
+while feature_end < len(command) and not command[feature_end].startswith('--'):
+    feature_end += 1
+command[feature_begin:feature_end] = args.features
+if args.cb_match:
+    command[command.index('--soloCBmatchWLtype') + 1] = args.cb_match
 command.extend(['--readMapNumber', '100000'])
 env = {k: v for k, v in os.environ.items() if not k.startswith(('STAR_', 'PF_', 'OMP_'))}
 env.update(reference['environment'])
@@ -64,14 +72,17 @@ with (out / 'stdout.log').open('w') as stdout, (out / 'stderr.log').open('w') as
 manifest.update(exit_status=result.returncode, finished_unix=time.time())
 manifest['elapsed_seconds'] = manifest['finished_unix'] - manifest['started_unix']
 manifest['status'] = 'passed' if result.returncode == 0 and (out / 'out/Log.final.out').exists() else 'failed'
-if manifest['status'] == 'passed':
+if manifest['status'] == 'passed' and 'Velocyto' in args.features:
     entries = 0
+    layer_sums = {}
     for layer in ('spliced', 'unspliced', 'ambiguous'):
         with (out / 'out/Solo.out/Velocyto/raw' / (layer + '.mtx')).open() as matrix:
             dims = next(line.split() for line in matrix if line.strip() and not line.startswith('%'))
+            layer_sums[layer] = sum(int(line.split()[2]) for line in matrix if line.strip())
         entries += int(dims[2])
-    manifest['velocyto_nonzero_entries'] = entries
-    if entries == 0:
+    manifest['velocyto_stored_entries'] = entries
+    manifest['velocyto_layer_umi_sums'] = layer_sums
+    if sum(layer_sums.values()) == 0:
         manifest['status'] = 'unusable_empty_velocyto_layers'
 status.write_text(json.dumps(manifest, indent=2) + '\n')
 print({k: manifest[k] for k in ('status', 'exit_status', 'elapsed_seconds')})

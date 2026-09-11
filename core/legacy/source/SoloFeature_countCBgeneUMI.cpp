@@ -134,8 +134,10 @@ void SoloFeature::countCBgeneUMI()
     // as a readId and create impossible readId->CB conflicts.
     bool needPackedReadInfo =
         pSolo.readIndexYes[featureType] &&
-        (pSolo.trackReadIdsForTags || (pSolo.readInfoYes[featureType] && !nonFlexBridgePath));
-    bool skipForMinimalMemory = pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode && !pSolo.trackReadIdsForTags;
+        (pSolo.trackReadIdsForTags || (pSolo.readInfoYes[featureType] && !nonFlexBridgePath)
+         || (readFeatSum && readFeatSum->bridgeReadInfoEnabled_));
+    bool skipForMinimalMemory = pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode
+        && !pSolo.trackReadIdsForTags && !nonFlexBridgePath;
     if (needPackedReadInfo && !skipForMinimalMemory) {
         resetPackedStorage(nReadsInput);
         {
@@ -176,6 +178,11 @@ void SoloFeature::countCBgeneUMI()
             pSolo.flexMode && flexSnapIn != nullptr && flexSnapIn[0] != '\0';
 
         if (bridgeSnapReplay) {
+            if (readFeatSum && readFeatSum->bridgeReadInfoEnabled_) {
+                exitWithError("EXITING because bridge hash snapshots do not contain per-read CB/UMI identities.\n"
+                              "SOLUTION: unset STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN and map reads for Velocyto/readInfo.\n",
+                              std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
             if (std::getenv("STAR_SOLO_BRIDGE_HASH_SNAPSHOT_REPLAY_SKIP_READS") == nullptr) {
                 ostringstream errOut;
                 errOut << "EXITING because of fatal PARAMETERS error: STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN is set but "

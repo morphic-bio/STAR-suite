@@ -27,17 +27,8 @@ namespace {
 
 static int velocytoReferenceFeatureIndex(const ParametersSolo &pSolo)
 {
-    const int candidates[] = {
-        SoloFeatureTypes::Gene,
-        SoloFeatureTypes::GeneFull,
-        SoloFeatureTypes::GeneFull_Ex50pAS,
-        SoloFeatureTypes::GeneFull_ExonOverIntron,
-    };
-    for (auto featureType : candidates) {
-        if (pSolo.featureInd[featureType] >= 0)
-            return pSolo.featureInd[featureType];
-    }
-    return -1;
+    const int featureType = pSolo.velocytoReadInfoFeature();
+    return featureType < 0 ? -1 : pSolo.featureInd[featureType];
 }
 
 static SoloFeature *velocytoReferenceFeature(const ParametersSolo &pSolo,
@@ -51,7 +42,12 @@ static SoloFeature *velocytoReferenceFeature(const ParametersSolo &pSolo,
                           "SOLUTION: re-run STAR adding GeneFull or another gene-like feature to --soloFeatures.\n",
                       std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
     }
-    return soloFeatAll[refIndex];
+    SoloFeature *source = soloFeatAll[refIndex];
+    if (source->nReadsInput > 1 && source->packedReadInfo.data.empty()) {
+        exitWithError("EXITING because Velocyto's gene-like source did not populate per-read CB/UMI storage.\n",
+                      std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+    }
+    return source;
 }
 
 struct VelocytoSortedRecord {
