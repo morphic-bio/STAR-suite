@@ -132,3 +132,7 @@ This file tracks active top-level work only. Completed items and stale historica
   FASTQ/CBQ packing and N handling pass preserved-implementation and sanitizer tests. No further
   teardown optimization is justified by the former 27–28 s gap; it is now almost entirely removed.
   Details: docs/benchmarks/A375_CB_CORRECTOR_FLAT_HASH_20260911.md.
+
+- After committing the MSK-LARRY search corrections, implement the simple memory fixes from
+  /mnt/pikachu/STAR-suite/docs/AUDIT_ALLOCATION_PATTERNS_20260911.md. Preserve the LARRY reference
+  binary and count ledgers; validate each allocation change separately. Full P02 remains pending.

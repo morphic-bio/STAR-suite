@@ -1011,6 +1011,7 @@ static const feature_arrays *pf_anchor_group_features = NULL;
 static pf_anchor_group_entry *pf_anchor_groups = NULL;
 static int pf_anchor_group_count = 0;
 static int pf_anchor_group_capacity = 0;
+static int pf_uniform_bootstrap_anchor = 0;
 static int *pf_feature_prefix_group_ids = NULL;
 static int *pf_feature_suffix_group_ids = NULL;
 
@@ -1027,6 +1028,7 @@ static void pf_anchor_group_cache_reset_locked(void) {
     pf_anchor_groups = NULL;
     pf_anchor_group_count = 0;
     pf_anchor_group_capacity = 0;
+    pf_uniform_bootstrap_anchor = 0;
     pf_feature_prefix_group_ids = NULL;
     pf_feature_suffix_group_ids = NULL;
     pf_anchor_group_features = NULL;
@@ -1142,6 +1144,18 @@ static int pf_ensure_anchor_group_cache(const feature_arrays *features) {
         }
     }
 
+    /* One shared anchor and barcode layout permits direct use of a resolved
+     * feature index. During learning, modes remain unset until finalize(). */
+    pf_uniform_bootstrap_anchor =
+        pf_anchor_group_count == 1 &&
+        pf_anchor_groups[0].feature_count == n_features &&
+        features->number_of_mismatched_features == 0 &&
+        features->common_length > 0 && feature_mode_offsets != NULL;
+    for (int j = 0; pf_uniform_bootstrap_anchor && j < n_features; ++j) {
+        if (features->feature_offsets[j] != features->feature_offsets[0] ||
+            feature_mode_offsets[j] >= 0)
+            pf_uniform_bootstrap_anchor = 0;
+    }
     pf_anchor_group_features = features;
     const int ok = pf_anchor_group_count > 0;
     pthread_mutex_unlock(&pf_anchor_group_cache_mutex);
@@ -2070,6 +2084,46 @@ int simple_hamming_search(feature_arrays *features, char *line, int maxHammingDi
     }
     return 0;
 }
+/* A missing entry in a complete cumulative prehash rules out a match. Use
+ * this only as a negative filter: possible hits still take the original
+ * search, preserving its frame/feature order and ambiguity decisions. */
+static int pf_broad_search_may_match(
+    const feature_arrays *features,
+    unsigned char codes[][LINE_LENGTH / 2 + 1], const int *code_lengths,
+    int max_hamming)
+{
+    const int length = features->common_length;
+    if (features->number_of_features < 150 ||
+        features->number_of_mismatched_features != 0 ||
+        length <= 0 || length > MAX_FEATURE_SEQUENCE_LENGTH || length % 4 != 0)
+        return 1;
+    const seq_hash_t *table = NULL;
+    if (max_hamming == 0) table = &features->feature_code_hash;
+    else if (max_hamming == 1 && features->feature_hamming_le1_enabled)
+        table = &features->feature_hamming_le1_hash;
+    else if (max_hamming == 2 && features->feature_hamming_le2_enabled)
+        table = &features->feature_hamming_le2_hash;
+    else return 1;
+    const seq_key_mode_t mode = features->code_hash_mode;
+    if ((mode == SEQ_KEY_64 && !table->h64) ||
+        (mode != SEQ_KEY_64 && !table->h128)) return 1;
+
+    const int bytes = length / 4;
+    char query[MAX_FEATURE_SEQUENCE_LENGTH + 1];
+    for (int frame = 0; frame < 4; ++frame) {
+        for (int offset = 0; offset + bytes <= code_lengths[frame]; ++offset) {
+            /* Decode the same packed windows as the old scan, including its
+             * zero-padded final byte. Do not silently change short-tail rules. */
+            code2string(codes[frame] + offset, query, bytes);
+            const uint32_t hit = mode == SEQ_KEY_64
+                ? seq_hash_get_64(table, seq_encode_64_fixed(query, length))
+                : seq_hash_get_128(table, seq_encode_128_fixed(query, length));
+            if (hit) return 1; // Ambiguous payloads also require the old search.
+        }
+    }
+    return 0;
+}
+
 int find_feature_match_single(feature_arrays *features, char *lineR2, int maxHammingDistance,int *bestScore, char **matching_sequence, uint16_t *match_position){
     // convert lineR2 to 4 codes
     // do a quick check to see if there is a perfect match the constant feature
@@ -2077,6 +2131,8 @@ int find_feature_match_single(feature_arrays *features, char *lineR2, int maxHam
     unsigned char codes[4][LINE_LENGTH/2+1];
     int code_lengths[4];
     string2all_codes(lineR2, codes, code_lengths);
+    if (!pf_broad_search_may_match(features, codes, code_lengths, maxHammingDistance))
+        return 0;
     int best_feature=0;
     /* Keep >max as the no-match sentinel so callers can distinguish
      * true ambiguity (<=max with feature_index=0) from no hit. */
@@ -4839,6 +4895,93 @@ void process_multiple_feature_sequences(int nsequences, char **sequences, int *o
         }
     }
 }
+static int pf_bootstrap_already_matched(const uint32_t *matched, int count, uint32_t feature) {
+    for (int i = 0; i < count; ++i)
+        if (matched[i] == feature) return 1;
+    return 0;
+}
+
+/* The general anchor loop visits every feature even after an offset lookup
+ * has identified its only possible winner. For a single uniform anchor group,
+ * skip those guaranteed mismatches. Keep the original feature/offset order:
+ * it controls adaptive Hamming ceilings, first positions and learned counts. */
+static void pf_bootstrap_uniform_anchor_search(
+    char *sequence, int read_len, feature_arrays *features,
+    int max_hamming, int max_n, statistics *stats,
+    uint32_t *cached_index, int *cached_hamming, unsigned char *cache_valid,
+    uint32_t *best_feature, int *best_hamming, uint16_t *best_position, char *ambiguous)
+{
+    const pf_anchor_group_entry *group = &pf_anchor_groups[0];
+    const int feature_len = features->common_length;
+    const int expected_offset = features->feature_offsets[0];
+    const int deltas[3] = {0, -1, 1};
+    /* Each accepted feature came from a distinct cached offset, so the number
+     * of accepted features cannot exceed the number of positions in a read. */
+    uint32_t matched[read_len > 0 ? read_len : 1];
+    int matched_count = 0;
+    int anchor_pos = pf_find_anchor_position(sequence, (size_t)read_len,
+        group->anchor, group->anchor_len, 0);
+    while (anchor_pos >= 0) {
+        const int bc_pos = pf_anchor_bc_position(group->kind, anchor_pos,
+                                               expected_offset, feature_len);
+        int j = 0;
+        while (j < features->number_of_features) {
+            if (pf_bootstrap_already_matched(matched, matched_count, (uint32_t)j + 1)) {
+                ++j;
+                continue;
+            }
+            for (int k = 0; k < 3; ++k) {
+                const int offset = bc_pos + deltas[k];
+                if (offset < 0 || offset + feature_len > read_len) continue;
+                if (!cache_valid[offset]) {
+                    const int ceiling = adaptive_query_max_hamming(
+                        features, max_hamming, *best_hamming, *best_feature);
+                    int distance = max_hamming + 1;
+                    cached_index[offset] = simpleCorrectFeature(sequence + offset,
+                        features, max_n, ceiling, &distance, stats);
+                    cached_hamming[offset] = distance;
+                    cache_valid[offset] = 1;
+                }
+                if (cached_index[offset] != (uint32_t)j + 1) continue;
+                matched[matched_count++] = cached_index[offset];
+                feature_mode_record((int)cached_index[offset], offset);
+                if (cached_hamming[offset] < *best_hamming) {
+                    *best_hamming = cached_hamming[offset];
+                    *best_feature = cached_index[offset];
+                    *best_position = (uint16_t)offset;
+                    *ambiguous = 0;
+                } else if (cached_hamming[offset] == *best_hamming &&
+                           *best_feature != cached_index[offset]) {
+                    *ambiguous = 1;
+                }
+                break;
+            }
+
+            /* After a match, later offsets may still be unqueried. Visit the
+             * next feature first, exactly as the general loop would. Once all
+             * valid offsets are cached, only their returned indices can match. */
+            int next = features->number_of_features;
+            for (int k = 0; k < 3; ++k) {
+                const int offset = bc_pos + deltas[k];
+                if (offset < 0 || offset + feature_len > read_len) continue;
+                if (!cache_valid[offset]) {
+                    next = j + 1;
+                    break;
+                }
+                const uint32_t candidate = cached_index[offset];
+                if (candidate > (uint32_t)j + 1 &&
+                    candidate <= (uint32_t)features->number_of_features &&
+                    !pf_bootstrap_already_matched(matched, matched_count, candidate) &&
+                    (int)candidate - 1 < next)
+                    next = (int)candidate - 1;
+            }
+            j = next;
+        }
+        anchor_pos = pf_find_anchor_position(sequence, (size_t)read_len,
+            group->anchor, group->anchor_len, anchor_pos + 1);
+    }
+}
+
 static void process_feature_sequence_internal(char *sequence, feature_arrays *features, int maxHammingDistance, int nThreads, int feature_constant_offset, int max_feature_n, uint32_t *feature_index, int *hamming_distance, char *matching_sequence, uint16_t *match_position, statistics *stats, seq_hash_t *hot_d0) {
     const size_t read_len = strlen(sequence);
     if (feature_mode_bootstrap_reads > 0 && features && features->feature_offsets &&
@@ -4975,13 +5118,18 @@ static void process_feature_sequence_internal(char *sequence, feature_arrays *fe
         uint16_t bestPos = 0;
         char ambiguous = 0;
 
+        const int have_anchor_groups = pf_ensure_anchor_group_cache(features);
+        if (have_anchor_groups && pf_uniform_bootstrap_anchor) {
+            pf_bootstrap_uniform_anchor_search(sequence, (int)read_len, features,
+                maxHammingDistance, max_feature_n, stats, offset_cached_idx,
+                offset_cached_hamming, offset_cache_valid,
+                &bestFeature, &bestHamming, &bestPos, &ambiguous);
+        } else {
         const int n_features = features->number_of_features;
         unsigned char mode_anchor_seen_flags[n_features > 0 ? n_features : 1];
         unsigned char fallback_done_flags[n_features > 0 ? n_features : 1];
         memset(mode_anchor_seen_flags, 0, sizeof(mode_anchor_seen_flags));
         memset(fallback_done_flags, 0, sizeof(fallback_done_flags));
-
-        const int have_anchor_groups = pf_ensure_anchor_group_cache(features);
 
         // First pass: fast mode-centered checks around learned per-feature offsets.
         for (int j = 0; j < n_features; j++) {
@@ -5174,6 +5322,8 @@ static void process_feature_sequence_internal(char *sequence, feature_arrays *fe
                 }
             }
         }
+
+        } // General anchor geometry.
 
         if (!bestFeature &&
             __atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE) == 0) {

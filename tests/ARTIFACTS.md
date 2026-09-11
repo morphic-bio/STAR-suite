@@ -1690,3 +1690,20 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   validation. `../create_larry_subset_200k.py` preserves the reproducible creation procedure.
   This is a deterministic prefix regression fixture, not random biological sampling. Baseline/current
   feature assignment has not yet been run on it.
+
+### MSK LARRY search corrections (2026-09-11)
+
+- Root: `/home/lhhung/pf_larry_regression_20260911/larry_fix/`.
+- `baseline`, `build`, `build2`: preserved pre-change libraries and two clean correction builds.
+- `parity2`, `asan2`: 27 exact assignment/learning-state comparisons, including 1,600 actual reads;
+  AddressSanitizer passes on the changed translation unit and differential driver.
+- `before_1000`, `after_1000`, `after2_1000`: completed 200,000-pair diagnostic learning controls;
+  exact sparse MEX equality, wall 28.76/26.68/16.57 seconds. Threshold 1,000 is diagnostic only.
+- `after2_100000`: completed normal-learning run, 279.12 seconds, 159,035 UMIs; no matching completed
+  normal-learning baseline. `after_100000` is an intentionally stopped stack diagnostic.
+- `../larry_comparison_200k`: clean v1.4.3/current instrumented checkpoint diagnostics; not full timings.
+- Fixture `../larry_subset_200k` is now validated against both corrections. Ordinary gzip was selected
+  automatically for all eight lanes; zero BGZF inflater workers.
+- See `docs/HANDOFF_LARRY_SEARCH_CORRECTIONS_20260911.md` for scope, identities and limitations.
+- `../hierarchy/a375_larry_fix_fixed4`: full A375 passed in 146.22 s; all six matrices and
+  three guide-call CSVs exactly match `a375_flat_hash_fixed4`. Report: `a375_comparison.json`.
