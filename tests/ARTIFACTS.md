@@ -1612,3 +1612,18 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
 - `native_accepted`, `native_default_accepted`, `existing_accepted`, and `existing_control` retain native/materialization outputs, commands, binary hashes and wall/CPU/RSS/I/O measurements. `ACCEPTED_LARGE_RESULTS.json` is the final comparison record.
 - The large input reuses real A375 counts and explicitly synthetic OCM sample suffixes from the prior cross-module fixture. The existing-call arm uses the prior caller's 1,188 global calls. See `large_inventory.json` and `existing_inventory.json`.
 - No reference index, alignment, BAM, sidecar, cloud job or new release was needed. Reuse saved controls; the regression runner accepts `--saved-native`, `--saved-existing`, and `--saved-ordered`.
+
+- A375 CbCorrector khash/flat-array follow-up (2026-09-11):
+  `/home/lhhung/pf_larry_regression_20260911/hierarchy/cbcorrector_flat_hash/` contains preserved
+  baseline sources, clean-build logs/frozen STAR, unit/ASan/UBSan tests, component probe and
+  `results.json`. The new binary SHA256 is
+  `9fcde3060a5d5102831c1450a0d0551bf504933a31d04cae14d443c0c2e156b0`.
+  Full outputs are under sibling `a375_flat_hash_fixed4/` and `a375_flat_hash_balanced4/`, with
+  completed wrapper manifests, argv/environment/input identities, GNU time and CPU traces.
+  Full wall 145.47/146.21 s versus corrected controls 192.10/190.60 s; peak RSS ~39.8 versus ~44.2 GiB;
+  exit gap ~1 s versus ~28.4 s. All six matrices, three guide CSVs and biological feature totals
+  match in both before/after comparisons and between new scheduler arms. Component construction
+  26.44 versus 43.91 s; destruction 0.163 versus 12.00 s; RSS 3.31 versus 7.61 GiB.
+  Test runner `tests/run_cb_corrector_storage_test.py` requires a preserved baseline source directory
+  and fresh external `--out`; this artifact root retains both ordinary and sanitizer runs.
+  Details: `docs/benchmarks/A375_CB_CORRECTOR_FLAT_HASH_20260911.md`. Development work, unreleased.
