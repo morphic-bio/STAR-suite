@@ -110,6 +110,11 @@ void ParametersSolo::initialize(Parameters *pPin)
     parseEmptyDropsLegacyKnee();
     parseEmptyDropsMode();
 
+    // Before the soloCellFiltering return: that mode also reaches the EmptyDrops
+    // bridge, which would otherwise read the "-" default as a gene list.
+    if (cellFilterMitochondrialGenes == "-" || cellFilterMitochondrialGenes == "None")
+        cellFilterMitochondrialGenes.clear();
+
     if (pP->runMode=="soloCellFiltering") {//only filtering happens, do not need any other parameters
         yes=true;
         umiDedup.typesIn = {"NoDedup"}; //this does not affect the results - the dedup had been done when raw matrix was generated
@@ -887,8 +892,6 @@ void ParametersSolo::initialize(Parameters *pPin)
             exitWithError("EXITING: --soloFlexCellCaller must be tag-aware or legacy\n",
                 std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
-        if (cellFilterMitochondrialGenes == "-" || cellFilterMitochondrialGenes == "None")
-            cellFilterMitochondrialGenes.clear();
         if (runFlexFilter && flexFilterCallerMode == "tag-aware" &&
             (flexFilterTotalExpected || flexFilterExpectedCellsTotal || flexFilterExpectedCellsPerTag ||
              flexFilterOrdmagNsamples || flexFilterOrdmagUmiMin || flexFilterOrdmagTargetPct ||
