@@ -78,10 +78,27 @@ Artifacts: `umi_baseline`, `umi_probe_before`, `umi_probe_after`, `umi_probe_asa
 Reproduce isolated comparisons with `tests/run_umi_storage_probe.py`, supplying
 preserved headers/libraries and `--expected-ledger`; controls need not be rerun.
 
+## Bridge storage batch (audit items 7–8)
+
+Immediate barcode read counters now use an owning khash with the existing packed
+64-bit count values. Copy, move, reserve, clear, gather and snapshot semantics are
+covered by sanitizer tests against a standard-map oracle. Final bridge rows use
+one append buffer per worker and a stored slice per barcode, then copy into the
+same final CSR order. No cell or gene ordering policy changes.
+
+Full A375 reports 350,678 integer read-counter keys and 294,633 barcode slices in
+32 worker buffers (15,134,378 output slots). All six matrices and three guide
+CSV tables exactly match the UMI-counter control. Whole wall is 140.73 s versus
+142.78 s; peak RSS is 39,941,536 KiB versus 40,010,100 KiB (67 MiB lower).
+These are single-run observations. No snapshot format changed; its integer rows
+may have a different hash iteration order, with the same key/value contents.
+
+Artifacts: `bridge_build`, `bridge_unit`, `a375_bridge`, `bridge_a375_comparison.json`.
+Frozen STAR SHA256: `9652d78f0b8a1ac88f926250fd38224c72f5ed2265437ccd4d6b2a5c3f300f44`.
+
 ## Remaining work, in order
 
-1. Items 7–8: bounded integer read counters and flat bridge output rows.
-2. Review conditional items 5–6 and 9–12 separately with their relevant fixtures;
+Review conditional items 5–6 and 9–12 separately with their relevant fixtures;
    preserve iteration-dependent outputs and do not infer Flex-scale savings from A375.
 
 This file records completed changes separately from pending audit directions.

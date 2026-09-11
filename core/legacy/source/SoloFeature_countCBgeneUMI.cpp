@@ -280,6 +280,9 @@ void SoloFeature::countCBgeneUMI()
             if (soloPhaseDebugEnabled()) {
                 P.inOut->logMain << "Solo debug: populating bridge read accounting" << endl;
             }
+            P.inOut->logMain << "NOTICE: bridge immediate read counters keys="
+                             << readFeatSum->bridgeImmediateReadCounts_.size()
+                             << " storage=khash\n";
             populateBridgeReadAccounting(*this, nReadPerCBunique1, nReadPerCBmulti1);
 
             nReadPerCBunique.resize(nCB);
