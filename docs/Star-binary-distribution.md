@@ -650,3 +650,22 @@ For technical users:
 3. Add README install section (`apt` via PPA + manual `.deb` + installer bundle).
 4. Add optional PPA upload step (guarded by release environment approval).
 5. Validate install/uninstall behavior on Ubuntu 22.04 as secondary target.
+
+## Fix Release v1.9.3 (2026-09-11)
+
+- Release tag: `v1.9.3`; notes: `docs/RELEASE_NOTES_v1.9.3.md`.
+- Debian source version: `1.9.3-1`; Ubuntu binaries:
+  `1.9.3-1~ubuntu22.04.1` and `1.9.3-1~ubuntu24.04.1`.
+- Scope: restore feature-position learning for explicit feature offsets, remove
+  repeated work in large-library learning and fallback search, replace the
+  node-based barcode/UMI/read-counter storage found by the allocation audit,
+  correct Velocyto read information in no-BAM runs, and add the opt-in
+  `--dynamicThreadBgzfHierarchy` / `--dynamicThreadBalance` scheduling modes
+  (both default off).
+- `STAR --version` reports `1.9.3`; upstream and genome compatibility remain
+  `2.7.11b` and `2.7.4a`. Existing indexes do not need rebuilding.
+- Guide and lineage libraries regain reads that explicit-offset runs had been
+  losing since 1.7; GEX counting, cell calling and Flex outputs are unchanged
+  from 1.9.2.
+- Hosted tarball/Debian packages retain the portable no-Chromap build; local
+  production builds retain the Chromap-enabled default.
