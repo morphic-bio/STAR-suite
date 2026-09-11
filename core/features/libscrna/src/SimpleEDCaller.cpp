@@ -209,6 +209,7 @@ int runSimpleEDWithAmbient(const vector<string>& barcodes,
     simple_params.maxPercentile = config->max_percentile;
     simple_params.maxMinRatio = config->max_min_ratio;
     simple_params.umiMin = config->umi_min;
+    simple_params.primaryUmiMin = config->primary_umi_min;
     simple_params.umiMinFracMedian = config->umi_min_frac_median;
     simple_params.candMaxN = config->cand_max_n;
     simple_params.indMin = config->ind_min;

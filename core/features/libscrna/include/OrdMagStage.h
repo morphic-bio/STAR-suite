@@ -36,7 +36,8 @@ struct SimpleEmptyDropsParams {
     uint32 nExpectedCells = 0;      // Expected number of cells (default: 3000)
     double maxPercentile = 0.0;      // Max percentile for robust max (default: 0.99)
     double maxMinRatio = 0.0;         // Max/min ratio (default: 10.0)
-    uint32 umiMin = 0;              // Inclusive primary floor and base candidate floor (default: 500)
+    uint32 umiMin = 0;              // Inclusive base candidate floor (default: 500)
+    uint32 primaryUmiMin = 0;       // Inclusive primary floor; 0 = use umiMin (Flex)
     double umiMinFracMedian = 0.0;   // Min UMI as fraction of median (default: 0.01)
     uint32 candMaxN = 0;            // Maximum candidates (default: 20000)
     uint32 indMin = 0;              // Min index for ambient cells (default: 45000)
@@ -63,6 +64,12 @@ struct SimpleEmptyDropsParams {
 
 // Type alias for backwards compatibility
 using OrdMagParams = SimpleEmptyDropsParams;
+
+// Inclusive floor for OrdMag primary cells. Flex leaves primaryUmiMin unset,
+// so primaries are trimmed at the candidate floor; non-Flex sets it apart.
+inline uint32 ordMagPrimaryFloor(const SimpleEmptyDropsParams& params) {
+    return params.primaryUmiMin > 0 ? params.primaryUmiMin : params.umiMin;
+}
 
 // Optional diagnostics; recording these values does not alter sampling.
 struct OrdMagBootstrapTrace {

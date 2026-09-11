@@ -837,7 +837,8 @@ static void configureOcmEmptyDrops(const Parameters& P, scrna_ed_config* config)
     config->max_min_ratio = 10.0;
     config->ind_min = 45000;
     config->ind_max = 90000;
-    config->umi_min = 100;
+    config->umi_min = 500;
+    config->primary_umi_min = 100;  // OCM keeps the v1.9.1 primary trim (owner decision)
     config->umi_min_frac_median = 0.01;
     config->cand_max_n = 20000;
     config->fdr = 0.01;
@@ -855,6 +856,7 @@ static void configureOcmEmptyDrops(const Parameters& P, scrna_ed_config* config)
 
     if (P.pSolo.cellFilter.eDcr.indMin > 0) config->ind_min = P.pSolo.cellFilter.eDcr.indMin;
     if (P.pSolo.cellFilter.eDcr.indMax > 0) config->ind_max = P.pSolo.cellFilter.eDcr.indMax;
+    if (P.pSolo.cellFilter.eDcr.umiMin > 0) config->umi_min = P.pSolo.cellFilter.eDcr.umiMin;
     if (P.pSolo.cellFilter.eDcr.umiMinFracMedian > 0.0) {
         config->umi_min_frac_median = P.pSolo.cellFilter.eDcr.umiMinFracMedian;
     }
@@ -913,6 +915,8 @@ static vector<string> runOcmEmptyDropsOnCounts(OcmSparseCounts& counts,
                      << " raw_barcodes=" << beforeCells
                      << " nnz=" << nnz
                      << " simN=" << config->sim_n
+                     << " umiMin=" << config->umi_min
+                     << " primaryUmiMin=" << config->primary_umi_min
                      << " bootstrap=" << (config->use_bootstrap ? "yes" : "no")
                      << "\n";
 
