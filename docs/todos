@@ -4,6 +4,15 @@ This file tracks active top-level work only. Completed items and stale historica
 
 ## Priority 0: Paper-Critical Validation
 
+- Fix automatic central provenance registration for all runs (owner request, 2026-09-11; follow-up after the current process_features regression).
+  - The LARRY/A375 investigation could not reliably identify the latest successful baseline because run-local records were absent from the central ledger and aggregate version labels did not match execution logs. This is exactly the failure provenance must prevent.
+  - Organize records into separate `dev/` and `production/` directories under the provenance root, with a common schema and searchable index. Record the run classification explicitly; provenance is mandatory in both directories, including exploratory development runs.
+  - Register production, benchmark, smoke, and diagnostic runs under stable run IDs, including failed and interrupted attempts. Record the actual binary SHA256, source revision and dirty patch, wrapper/API settings and environment overrides, input/reference/cache identities, reader/thread/output modes, completion status, phase timings, memory, validation results, and artifact locations.
+  - Persist a local record before execution; automatically register start and terminal status with durable retry and an explicit registration receipt. Unregistered runs must remain visibly pending, never silently appear registered.
+  - Backfill existing run records, preserve conflicting metadata through explicit corrections, and link each paper row to its exact accepted run. Keep curated public summaries distinct from the complete internal run inventory.
+  - Acceptance: retrieve the latest comparable successful run and its exact executable/settings without searching scattered directories; verify registration for success, failure, interruption, and temporary service failure using tiny fixtures. Document the central location and lookup command.
+  - Evidence: [LARRY/A375 investigation and provenance audit](HANDOFF_PF_SEARCH_REVERT_A375_VALIDATION_20260911.md). This entry queues the provenance fix; it does not authorize new biological benchmark runs.
+
 - Merge the current Velocyto/BAM `packedReadInfo` lifetime fix set to `master` before the UCSF production run.
   - This is the production-critical fix for the `v0.90.1` Velocyto + BAM regression.
   - Keep the conservative lifetime guard in place for production; defer any tighter early-free optimization until it has dedicated regression coverage.
@@ -115,3 +124,15 @@ This file tracks active top-level work only. Completed items and stale historica
 - Perturb dynamic permit scheduling is treated as complete for now. The scheduler landed, Phase 5 validation was completed, and the later PF consumer-cap removal produced the expected large throughput improvement. Keep the smoke/benchmark coverage, and only revisit if new workloads show another clear scheduling bottleneck.
 - Flex already uses `libscrna`; the older migration item is complete and removed from this list.
 - Linux compatibility tarballs and installer-bundle release validation are complete; release follow-up work belongs in the release/distribution docs, not here.
+
+- A375 CbCorrector hash storage conversion is implemented and validated in the regression worktree
+  (not released): khash exact/H1/ambiguity ranges plus one ordered candidate array. Full A375 fixed-four
+  wall 192.10 → 145.47 s, balanced 190.60 → 146.21 s; peak RSS ~44.2 → ~39.8 GiB; exit ~28.4 → ~1 s.
+  Six matrices and three guide tables match exactly in both configurations. Candidate ordering,
+  FASTQ/CBQ packing and N handling pass preserved-implementation and sanitizer tests. No further
+  teardown optimization is justified by the former 27–28 s gap; it is now almost entirely removed.
+  Details: docs/benchmarks/A375_CB_CORRECTOR_FLAT_HASH_20260911.md.
+
+- After committing the MSK-LARRY search corrections, implement the simple memory fixes from
+  /mnt/pikachu/STAR-suite/docs/AUDIT_ALLOCATION_PATTERNS_20260911.md. Preserve the LARRY reference
+  binary and count ledgers; validate each allocation change separately. Full P02 remains pending.

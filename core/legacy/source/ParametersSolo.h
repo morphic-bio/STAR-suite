@@ -144,6 +144,15 @@ public:
     int32 featureFirst; //which feature is the first on the list
     array<bool,SoloFeatureTypes::N> featureYes; //which features are requested
     array<bool,SoloFeatureTypes::N> readInfoYes;//which features will need readInfo (for now only Gene and GeneFull)
+    int velocytoReadInfoFeature() const {
+        if (!featureYes[SoloFeatureTypes::Velocyto] && !featureYes[SoloFeatureTypes::VelocytoSimple])
+            return -1;
+        const int candidates[] = {SoloFeatureTypes::Gene, SoloFeatureTypes::GeneFull,
+            SoloFeatureTypes::GeneFull_Ex50pAS, SoloFeatureTypes::GeneFull_ExonOverIntron};
+        for (int feature : candidates)
+            if (featureYes[feature]) return feature;
+        return -1;
+    }
     array<bool,SoloFeatureTypes::N> readIndexYes;//which features will need recording of readIndex (for now only Gene and GeneFull, for multimappers)
     array<bool,SoloFeatureTypes::N> readStatsYes;//which features will need output of read statistics
     array<int32,SoloFeatureTypes::N> featureInd;//index of each feature - skips unrequested features

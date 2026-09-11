@@ -79,6 +79,7 @@ void BgzfRangeReader::close_input() {
         }
     }
     workers_.clear();
+    report_state_locked(false);
     if (inputFd_ >= 0) {
         ::close(inputFd_);
         inputFd_ = -1;
@@ -92,6 +93,20 @@ void BgzfRangeReader::fail_locked(const std::string& message) {
     }
     readyCv_.notify_all();
     spaceCv_.notify_all();
+}
+
+void BgzfRangeReader::report_state_locked(bool live) {
+    if (!permitHooks_.observe) return;
+    uint64_t ready = 0;
+    // Only contiguous ordered output can feed the consumer.
+    while (ready < completed_.size()) {
+        const uint64_t sequence = nextConsumeSequence_ + ready;
+        const auto& slot = completed_[sequence % completed_.size()];
+        if (!slot.ready || slot.sequence != sequence) break;
+        ++ready;
+    }
+    permitHooks_.observe(permitHooks_.context, this, ready, outstandingWork_,
+        maxOutstandingWork_, workerCount_, consumerWaiting_ ? 1 : 0, live ? 1 : 0);
 }
 
 bool BgzfRangeReader::open(const std::string& path,
@@ -159,6 +174,7 @@ bool BgzfRangeReader::open(const std::string& path,
         std::min<uint64_t>(1024U * 1024U, planned));
     maxOutstandingWork_ = std::max<size_t>(4, static_cast<size_t>(worker_threads) * 2);
     outstandingWork_ = 0;
+    consumerWaiting_ = false;
     buffer_.reset();
     cursor_ = 0;
     completed_.assign(maxOutstandingWork_, CompletedSlot());
@@ -167,6 +183,7 @@ bool BgzfRangeReader::open(const std::string& path,
     failed_ = false;
     stopping_ = false;
     workerError_.clear();
+    report_state_locked();
 
     workers_.reserve(worker_threads);
     try {
@@ -196,6 +213,7 @@ void BgzfRangeReader::worker_loop() {
                     return;
                 }
                 ++outstandingWork_;
+                report_state_locked();
             }
 
             uint64_t sequence = 0;
@@ -275,6 +293,7 @@ void BgzfRangeReader::worker_loop() {
                 slot.sequence = sequence;
                 slot.block = std::move(result);
                 slot.ready = true;
+                report_state_locked();
             }
             readyCv_.notify_all();
         }
@@ -427,6 +446,10 @@ bool BgzfRangeReader::append_next_block(std::string* error) {
         }
     } else {
         std::unique_lock<std::mutex> lock(mutex_);
+        const auto& nextSlot = completed_[nextConsumeSequence_ % completed_.size()];
+        consumerWaiting_ = !(nextSlot.ready && nextSlot.sequence == nextConsumeSequence_) &&
+            !(claimsFinished_ && nextConsumeSequence_ == claimedWorkCount_);
+        report_state_locked();
         readyCv_.wait(lock, [&]() {
             const CompletedSlot& slot =
                 completed_[nextConsumeSequence_ % completed_.size()];
@@ -434,6 +457,8 @@ bool BgzfRangeReader::append_next_block(std::string* error) {
                    (slot.ready && slot.sequence == nextConsumeSequence_) ||
                    (claimsFinished_ && nextConsumeSequence_ == claimedWorkCount_);
         });
+        consumerWaiting_ = false;
+        report_state_locked();
         if (failed_) {
             return set_error(error, workerError_.empty()
                 ? "BGZF inflate worker failed" : workerError_);
@@ -447,6 +472,7 @@ bool BgzfRangeReader::append_next_block(std::string* error) {
         slot.ready = false;
         ++nextConsumeSequence_;
         --outstandingWork_;
+        report_state_locked();
         lock.unlock();
         spaceCv_.notify_all();
     }

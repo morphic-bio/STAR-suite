@@ -10,6 +10,8 @@ extern "C" {
 
 typedef enum { PF_BGZF_AUTO = 0, PF_BGZF_OFF = 1, PF_BGZF_RANGE = 2 } pf_bgzf_mode;
 typedef struct pf_bgzf_input pf_bgzf_input;
+typedef void (*pf_bgzf_observe_fn)(void *, const void *, uint64_t, uint64_t,
+                                 uint64_t, unsigned, int, int);
 typedef struct {
     const char *name, *sequence, *quality;
     size_t name_length, sequence_length, quality_length;
@@ -19,6 +21,7 @@ typedef struct {
     void *context;
     uint64_t (*acquire)(void *);
     void (*release)(void *, uint64_t, uint64_t, uint64_t, uint64_t);
+    pf_bgzf_observe_fn observe;
 } pf_bgzf_permits;
 
 /* Returns 1 for regular BGZF, 0 for a legacy input, -1 for an I/O error.

@@ -8,6 +8,9 @@
 #include <cstdint>
 #include <condition_variable>
 #include <list>
+#include <map>
+#include <fstream>
+#include <thread>
 #include <mutex>
 #include <vector>
 
@@ -21,11 +24,25 @@ public:
         ATAC = 2
     };
 
+    enum class PermitWork : uint8_t { PROCESS, BGZF };
+
     struct PermitHookContext {
         PermitDomain domain;
+        PermitWork work;
+        PermitHookContext(PermitDomain d, PermitWork w = PermitWork::PROCESS) : domain(d), work(w) {}
+    };
+
+    struct DecodeSnapshot {
+        int inUse = 0, waiters = 0, limit = 1;
+        uint64_t acquireCalls = 0, releaseCalls = 0, maxInUse = 0;
+        uint64_t blocks = 0, bytes = 0, workNs = 0, waitNs = 0;
+        uint64_t ready = 0, outstanding = 0, capacity = 0, workers = 0;
+        uint64_t waitingReaders = 0, inputWaitNs = 0;
     };
 
     struct PermitDomainSnapshot {
+        DecodeSnapshot decode;
+        uint64_t completedReadPairs = 0;
         bool complete;
         int floor;
         int inUse;
@@ -65,6 +82,7 @@ public:
     uint chunkInN,chunkOutN;
 
     ThreadControl();
+    ~ThreadControl();
     
     struct MapPermitSnapshot {
         bool enabled;
@@ -147,11 +165,20 @@ public:
     void mapPermitSetTargetPermits(int targetPermits);
     bool mapPermitEnabled() const;
     bool mapPermitCpuMaybeSample();
-    uint64_t mapPermitAcquireForDomain(PermitDomain domain);
+    uint64_t mapPermitAcquireForDomain(PermitDomain domain, PermitWork work = PermitWork::PROCESS);
     uint64_t mapPermitAcquire();
-    void mapPermitReleaseForDomain(PermitDomain domain, uint64_t waitNs, uint64_t workUnits, uint64_t workBytes, uint64_t workNs);
+    void mapPermitReleaseForDomain(PermitDomain domain, uint64_t waitNs, uint64_t workUnits, uint64_t workBytes, uint64_t workNs, PermitWork work = PermitWork::PROCESS);
     void mapPermitRelease(uint64_t waitNs, uint64_t workUnits, uint64_t workBytes, uint64_t workNs);
     MapPermitSnapshot mapPermitSnapshot() const;
+    // Reader callbacks contain copied state; the permit pool never locks a reader.
+    void mapPermitObserveDecode(PermitDomain domain, const void* reader,
+        uint64_t ready, uint64_t outstanding, uint64_t capacity,
+        unsigned workers, int waiting, int live);
+    void mapPermitStartHierarchy(const std::string& logPath, bool featureActive,
+        bool balance = false, uint64_t mapEstimate = 0, uint64_t featureEstimate = 0);
+    void mapPermitPublishWorkEstimates(uint64_t mapPairs, uint64_t featurePairs);
+    void mapPermitStopHierarchy();
+    bool mapPermitHierarchyEnabled() const { return mapPermitHierarchyEnabledFlag.load(); }
 
     static void* threadRAprocessChunks(void *RAchunk) {
         ( (ReadAlignChunk*) RAchunk )->processChunks();
@@ -195,6 +222,29 @@ private:
     int mapPermitDomainFloor[mapPermitDomainCount]{};
     int mapPermitDomainInUse[mapPermitDomainCount]{};
     int mapPermitDomainWaiters[mapPermitDomainCount]{};
+    DecodeSnapshot mapPermitDecode[mapPermitDomainCount];
+    uint64_t mapPermitCompletedPairs[mapPermitDomainCount]{};
+    struct DecodeQueue {
+        size_t domain = 0;
+        uint64_t ready = 0, outstanding = 0, capacity = 0, workers = 0;
+        uint64_t waitStartNs = 0;
+    };
+    std::map<const void*, DecodeQueue> mapPermitDecodeQueues;
+    std::atomic<bool> mapPermitHierarchyEnabledFlag{false};
+    std::atomic<bool> mapPermitHierarchyStop{false};
+    std::thread mapPermitHierarchyThread;
+    std::condition_variable mapPermitHierarchyWake;
+    std::ofstream mapPermitHierarchyLog;
+    std::ofstream mapPermitBalanceLog;
+    bool mapPermitHierarchyFeatureActive = false;
+    bool mapPermitBalanceEnabled = false;
+    uint64_t mapPermitReadEstimates[2]{};
+    bool mapPermitReadEstimateExplicit[2]{};
+    void mapPermitHierarchyLoop();
+    bool mapPermitChildAdmissibleLocked(size_t domain, PermitWork work) const;
+    int mapPermitDecodeReservationLocked(size_t domain) const;
+    bool mapPermitHasAdmissibleWaiterLocked(size_t domain) const;
+    int mapPermitUsableBudgetLocked(size_t domain) const;
     bool mapPermitDomainComplete[mapPermitDomainCount]{};
     std::condition_variable mapPermitDomainCv[mapPermitDomainCount];
 
@@ -208,6 +258,7 @@ private:
       std::condition_variable cv;
       bool granted = false;
       PermitDomain domain = PermitDomain::MAP;
+      PermitWork work = PermitWork::PROCESS;
     };
     std::list<PermitWaiter*> mapPermitWaitQueue;
 
@@ -216,6 +267,8 @@ private:
     // and appended to `toWake`; mapPermitAvailable is decremented per grant.
     // Caller notifies the collected waiters' CVs after releasing the mutex.
     void grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake);
+    void accountWorkReleaseLocked(size_t domain, PermitWork work, uint64_t waitNs,
+                                  uint64_t units, uint64_t bytes, uint64_t workNs);
     // Exact time integrals for pool/domain occupancy. Call immediately before
     // changing available, in-use, or waiter state while mapPermitMutex is held.
     // This is deliberately part of the existing permit critical section so

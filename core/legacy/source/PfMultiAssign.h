@@ -16,6 +16,8 @@ namespace PfMultiAssign {
 struct WhitelistNormalizationResult {
     string normalizedPath;
     bool hasTwoColumnSource = false;
+    // False only after the entire normalized input is known to have no output mapping.
+    bool normalizedHasOutputMap = true;
     string assignmentNamespace = "UNKNOWN"; // NXT | TRU | UNKNOWN
     string sourcePath;
     uint64 normalizedRowCount = 0;

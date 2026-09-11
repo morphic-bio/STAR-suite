@@ -21,16 +21,20 @@ using std::endl;
 
 namespace {
 ThreadControl::PermitHookContext kFeaturePermitHookContext{ThreadControl::PermitDomain::FEATURE};
+ThreadControl::PermitHookContext kFeatureDecodeHookContext{
+    ThreadControl::PermitDomain::FEATURE, ThreadControl::PermitWork::BGZF};
 constexpr size_t kPfLineLength = 1024;
 constexpr size_t kPfSequenceCapacity = kPfLineLength - 1;
 }
 
 extern "C" uint64_t pfStarDynamicPermitAcquire(void *hookCtx) {
+    if (!g_threadChunks.mapPermitEnabled()) return UINT64_MAX;
     const ThreadControl::PermitHookContext *permitCtx =
         static_cast<const ThreadControl::PermitHookContext *>(hookCtx);
     const ThreadControl::PermitDomain domain =
         (permitCtx == nullptr) ? ThreadControl::PermitDomain::MAP : permitCtx->domain;
-    return g_threadChunks.mapPermitAcquireForDomain(domain);
+    return g_threadChunks.mapPermitAcquireForDomain(domain,
+        permitCtx ? permitCtx->work : ThreadControl::PermitWork::PROCESS);
 }
 
 extern "C" void pfStarDynamicPermitRelease(
@@ -40,11 +44,21 @@ extern "C" void pfStarDynamicPermitRelease(
     uint64_t workBytes,
     uint64_t workNs
 ) {
+    if (waitNs == UINT64_MAX) return;
     const ThreadControl::PermitHookContext *permitCtx =
         static_cast<const ThreadControl::PermitHookContext *>(hookCtx);
     const ThreadControl::PermitDomain domain =
         (permitCtx == nullptr) ? ThreadControl::PermitDomain::MAP : permitCtx->domain;
-    g_threadChunks.mapPermitReleaseForDomain(domain, waitNs, workUnits, workBytes, workNs);
+    g_threadChunks.mapPermitReleaseForDomain(domain, waitNs, workUnits, workBytes, workNs,
+        permitCtx ? permitCtx->work : ThreadControl::PermitWork::PROCESS);
+}
+
+static void pfStarObserveDecode(void* context, const void* reader,
+        uint64_t ready, uint64_t outstanding, uint64_t capacity,
+        unsigned workers, int waiting, int live) {
+    const auto* hook = static_cast<ThreadControl::PermitHookContext*>(context);
+    g_threadChunks.mapPermitObserveDecode(hook->domain, reader,
+        ready, outstanding, capacity, workers, waiting, live);
 }
 
 namespace PfMultiAssign {
@@ -218,11 +232,12 @@ static bool isValidBarcodeSeq(const string& seq) {
     return true;
 }
 
-static uint64 countValidWhitelistRows(const string& whitelistPath) {
+static uint64 countValidWhitelistRows(const string& whitelistPath, bool& hasOutputMap) {
     std::ifstream in(whitelistPath.c_str());
     if (!in.is_open()) {
         return 0;
     }
+    hasOutputMap = false;
     string line;
     uint64 count = 0;
     while (std::getline(in, line)) {
@@ -234,6 +249,14 @@ static uint64 countValidWhitelistRows(const string& whitelistPath) {
         string token = (end == string::npos) ? line.substr(first) : line.substr(first, end - first);
         if (isValidBarcodeSeq(token)) {
             ++count;
+            size_t second = end == string::npos ? string::npos
+                : line.find_first_not_of(" \t,\r\n", end);
+            if (second != string::npos) {
+                size_t end2 = line.find_first_of(" \t,\r\n", second);
+                string mapped = line.substr(second, end2 == string::npos ? end2 : end2 - second);
+                if (mapped.size() == token.size() && isValidBarcodeSeq(mapped))
+                    hasOutputMap = true;
+            }
         }
     }
     return count;
@@ -320,7 +343,7 @@ static WhitelistNormalizationResult normalizeWhitelistInternal(const string& whi
 
     if (!looksLikeMultiColumnWhitelist(whitelistPath)) {
         result.assignmentNamespace = inferOneColumnNamespace(whitelistPath, result.namespaceConfidence);
-        result.normalizedRowCount = countValidWhitelistRows(whitelistPath);
+        result.normalizedRowCount = countValidWhitelistRows(whitelistPath, result.normalizedHasOutputMap);
         return result;
     }
 
@@ -358,6 +381,7 @@ static WhitelistNormalizationResult normalizeWhitelistInternal(const string& whi
         return result;
     }
     result.normalizedPath = normalizedPath;
+    result.normalizedHasOutputMap = false;
     result.normalizedRowCount = emitted;
     return result;
 }
@@ -450,6 +474,8 @@ static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
             pfStarDynamicPermitRelease,
             &kFeaturePermitHookContext
         );
+        pf_config_set_bgzf_permit_hooks(cfg, pfStarDynamicPermitAcquire,
+            pfStarDynamicPermitRelease, pfStarObserveDecode, &kFeatureDecodeHookContext);
     }
     if (options.allowUnionWhitelist) {
         pf_config_set_allow_union_whitelist(cfg, 1);
@@ -1050,6 +1076,22 @@ static void writeApiRunSummary(const string& assignOut,
         out << "dynamicPermitDelta.feature.workNs="
             << delta(permitAfter->featureDomain.workNsTotal, permitBefore->featureDomain.workNsTotal) << "\n";
         out << "dynamicPermitAfter.configuredPermits=" << permitAfter->configuredPermits << "\n";
+        const ThreadControl::PermitDomainSnapshot* beforeDomains[] = {
+            &permitBefore->mapDomain, &permitBefore->featureDomain};
+        const ThreadControl::PermitDomainSnapshot* afterDomains[] = {
+            &permitAfter->mapDomain, &permitAfter->featureDomain};
+        const char* names[] = {"map", "feature"};
+        for (size_t i = 0; i < 2; ++i) {
+            const auto& before = *beforeDomains[i];
+            const auto& after = *afterDomains[i];
+            const string prefix = string("dynamicPermitDelta.") + names[i];
+            out << prefix << ".completedReadPairs=" << delta(after.completedReadPairs, before.completedReadPairs) << "\n"
+                << prefix << ".decode.blocks=" << delta(after.decode.blocks, before.decode.blocks) << "\n"
+                << prefix << ".decode.bytes=" << delta(after.decode.bytes, before.decode.bytes) << "\n"
+                << prefix << ".decode.workNs=" << delta(after.decode.workNs, before.decode.workNs) << "\n"
+                << prefix << ".decode.waitNs=" << delta(after.decode.waitNs, before.decode.waitNs) << "\n"
+                << prefix << ".decode.inputWaitNs=" << delta(after.decode.inputWaitNs, before.decode.inputWaitNs) << "\n";
+        }
         out << "dynamicPermitAfter.targetPermits=" << permitAfter->targetPermits << "\n";
         out << "dynamicPermitAfter.availablePermits=" << permitAfter->availablePermits << "\n";
         out << "dynamicPermitAfter.inUsePermits=" << permitAfter->inUsePermits << "\n";
@@ -1121,6 +1163,7 @@ WhitelistNormalizationResult normalizeWhitelistToNamespace(
 
     WhitelistNormalizationResult result = base;
     result.normalizedPath = translatedPath;
+    result.normalizedHasOutputMap = false;
     result.assignmentNamespace = desiredNamespace;
     result.normalizedRowCount = emitted;
     return result;

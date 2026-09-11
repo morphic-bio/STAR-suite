@@ -10,6 +10,8 @@
 #include "Transcriptome.h"
 
 #include "SoloCommon.h"
+#include "PooledTranscriptMap.h"
+using VelocytoUmiMap = PooledTranscriptMap<trTypeStruct>;
 #include "SoloRead.h"
 #include "ReadAlignChunk.h"
 #include "SoloReadFeature.h"
@@ -117,10 +119,11 @@ public:
     void countVelocytoStreamThreads();
     void countVelocytoSortedReplay();
     void countVelocytoSortedReplayCBuckets(); // Stage 2: CB-first bucketed deterministic merge (env-gated)
-    void countVelocytoFinalizeFromCuMaps(vector<unordered_map<uintUMI, vector<trTypeStruct>>> &cuTrTypes);
+    void countVelocytoFinalizeFromCuMaps(vector<VelocytoUmiMap> &cuTrTypes);
     void countVelocytoFinalizeInit();
-    void countVelocytoFinalizeOneCb(uint32 iCB, unordered_map<uintUMI, vector<trTypeStruct>> &cuMap);
+    void countVelocytoFinalizeOneCb(uint32 iCB, VelocytoUmiMap &cuMap);
     void countVelocytoFinalizeFinish();
+    uint64_t velocytoUmiKeys_ = 0, velocytoTranscriptSlots_ = 0, velocytoLiveSlots_ = 0;
     void quantTranscript();
     void prepareReadInfoOnly(); //minimal processing to populate readInfo without counting (for skipProcessing mode)
     

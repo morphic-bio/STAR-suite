@@ -103,6 +103,10 @@ struct BgzfWorkPermitHooks {
     void* context = nullptr;
     Acquire acquire = nullptr;
     Release release = nullptr;
+    // Optional copied queue state, reported without holding a compute permit.
+    using Observe = void (*)(void*, const void*, uint64_t, uint64_t, uint64_t,
+                             unsigned, int, int);
+    Observe observe = nullptr;
 
     bool enabled() const {
         return acquire != nullptr && release != nullptr;
@@ -163,6 +167,7 @@ private:
 
     void worker_loop();
     void close_input();
+    void report_state_locked(bool live = true);
     void fail_locked(const std::string& message);
     bool claim_work(CompressedWork* work,
                     uint64_t* sequence,
@@ -207,6 +212,7 @@ private:
     uint64_t targetCompressedBytes_ = 64 * 1024;
     size_t maxOutstandingWork_ = 4;
     size_t outstandingWork_ = 0;
+    bool consumerWaiting_ = false;
     uint32_t workerCount_ = 0;
     BgzfWorkPermitHooks permitHooks_;
     BgzfInflater syncInflater_;

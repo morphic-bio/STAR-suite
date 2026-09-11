@@ -6,8 +6,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SOURCE_DIR="$REPO_ROOT/core/legacy/source"
 PF_INCLUDE="$REPO_ROOT/core/features/process_features/include"
-WORK_DIR="$(mktemp -d)"
-trap 'rm -rf "$WORK_DIR"' EXIT
+if [[ -n "${TABLE_TEST_ARTIFACT_DIR:-}" ]]; then
+    WORK_DIR="$TABLE_TEST_ARTIFACT_DIR"
+    mkdir "$WORK_DIR"  # Require a fresh directory and retain test provenance.
+else
+    WORK_DIR="$(mktemp -d)"
+    trap 'rm -rf "$WORK_DIR"' EXIT
+fi
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -113,6 +118,23 @@ int main() {
     threw = true;
   }
   if (!threw) return 8;
+
+    // Stable first-occurrence ordering after duplicate removal, including SSO
+    // keys whose characters reside inside the string object itself.
+    const std::string wlShort = work + "/wl_short.txt";
+    const std::string tableShort = work + "/short.tsv";
+    const std::string outShort = work + "/out_short";
+    system(("mkdir -p \"" + outShort + "\"").c_str());
+    writeFile(wlShort, "ac\nac\nCCCCCCCCCCCCCCCC\nG\nAC\nG\nCCCCCCCCCCCCCCCC\nN\n");
+    writeFile(tableShort, "barcode\tfeature_id\tcount\nN\tHIV_DNA\t7\nG-1\tHIV_DNA\t3\nac\tHIV_DNA\t2\nCCCCCCCCCCCCCCCC\tHIV_DNA\t5\n");
+    auto shortResult = PfMultiTableImport::runTableFeatureImport(
+        wlShort, featureRef, tableShort, outShort, opts);
+    if (shortResult.returnCode || shortResult.stats.rowsRetained != 4) return 20;
+    std::ifstream shortBarcodes((outShort + "/barcodes.tsv").c_str());
+    for (const auto& expected : {"AC", "CCCCCCCCCCCCCCCC", "G", "N"}) {
+        std::string actual;
+        if (!std::getline(shortBarcodes, actual) || actual != expected) return 21;
+    }
 
   std::cout << "OK\n";
   return 0;

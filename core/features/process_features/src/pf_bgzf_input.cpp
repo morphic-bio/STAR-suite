@@ -59,6 +59,7 @@ extern "C" pf_bgzf_input *pf_bgzf_open(const char *const *paths, int streams,
             hooks.context = permits->context;
             hooks.acquire = permits->acquire;
             hooks.release = permits->release;
+            hooks.observe = permits->observe;
         }
         for (int i = 0; i < streams; ++i) {
             std::string message;

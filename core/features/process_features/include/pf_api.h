@@ -176,6 +176,10 @@ void pf_config_set_permit_hooks(
     void *hook_ctx
 );
 void pf_config_set_debug(pf_config *config, int enable);
+/* Optional child hooks. If unset, decoding uses the existing permit hooks. */
+void pf_config_set_bgzf_permit_hooks(pf_config *config,
+    pf_permit_acquire_fn acquire_cb, pf_permit_release_fn release_cb,
+    pf_bgzf_observe_fn observe_cb, void *hook_ctx);
 void pf_config_set_reverse_complement_whitelist(pf_config *config, int enable);
 void pf_config_set_limit_search(pf_config *config, int limit);
 /* 0=in_window_full, 1=in_window_simple (limited-search branch only; search is strictly in-window) */

@@ -40,6 +40,14 @@ SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
         nonFlexHashBridge && featureType == SoloFeatureTypes::Velocyto;
     const bool useInlineHashStorage =
         pSolo.inlineHashMode && (pSolo.flexMode || nonFlexHashBridge) && !keepLegacyVelocytoStream;
+    // readInfoYes also covers the default tag-table setup, even on GEX-only
+    // no-output runs. Retain identities only for Velocyto's actual source.
+    bridgeReadInfoEnabled_ = nonFlexHashBridge && readInfoYes && readIndexYes
+        && featureType == pSolo.velocytoReadInfoFeature();
+    if (bridgeReadInfoEnabled_ && iChunk == 0) {
+        P.inOut->logMain << "Direct bridge: retaining per-read CB/UMI decisions for "
+                         << SoloFeatureTypes::Names[featureType] << endl;
+    }
 
     if (pSolo.bucketStoreEnabled && pSolo.flexMode && pSolo.inlineHashMode
         && featureType == SoloFeatureTypes::Gene) {

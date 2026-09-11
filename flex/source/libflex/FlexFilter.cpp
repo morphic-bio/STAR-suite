@@ -1427,9 +1427,11 @@ static bool loadMEXFiles(
     matrixData.nGenePerCB.resize(numCells, 0);
     matrixData.countCellGeneUMIindex.resize(numCells + 1, 0);
     
-    // Temporary storage: map cell_idx -> [(gene_idx, count)]
-    vector<vector<pair<uint32_t, uint32_t>>> cellGeneMap(numCells);
-    
+    // Count first, then replay into one exact-size CSR buffer. This preserves
+    // each cell's input entry order, including duplicates and explicit zeros.
+    const std::streampos tripletsStart = matrixFile.tellg();
+    size_t entries = 0;
+
     // Read triplets: gene_row cell_col count (1-based indices in MTX)
     uint32_t geneRow, cellCol, count;
     while (matrixFile >> geneRow >> cellCol >> count) {
@@ -1447,27 +1449,52 @@ static bool loadMEXFiles(
             return false;
         }
         
-        // Store in temporary map
-        cellGeneMap[cellIdx].push_back({geneIdx, count});
+        if (++entries > UINT32_MAX / matrixData.countMatStride) {
+            cerr << "ERROR: Matrix exceeds 32-bit sparse offset capacity" << endl;
+            return false;
+        }
+        ++matrixData.nGenePerCB[cellIdx];
         matrixData.nUMIperCB[cellIdx] += count;
     }
-    matrixFile.close();
-    
-    // Build sparse matrix in countCellGeneUMI format
     uint32_t offset = 0;
-    for (uint32_t cellIdx = 0; cellIdx < numCells; cellIdx++) {
+    for (uint32_t cellIdx = 0; cellIdx < numCells; ++cellIdx) {
         matrixData.countCellGeneUMIindex[cellIdx] = offset;
-        matrixData.nGenePerCB[cellIdx] = cellGeneMap[cellIdx].size();
-        
-        for (const auto& geneCount : cellGeneMap[cellIdx]) {
-            matrixData.countCellGeneUMI.push_back(geneCount.first);   // geneIdx
-            matrixData.countCellGeneUMI.push_back(geneCount.second);  // count
-            matrixData.countCellGeneUMI.push_back(0);                 // reserved/multi
-            offset += 3;
-        }
+        offset += matrixData.nGenePerCB[cellIdx] * matrixData.countMatStride;
     }
     matrixData.countCellGeneUMIindex[numCells] = offset;
-    
+    matrixData.countCellGeneUMI.resize(offset, 0);
+    if (entries != 0) {
+        matrixFile.clear();
+        matrixFile.seekg(tripletsStart);
+        if (!matrixFile) {
+            cerr << "ERROR: Cannot rewind matrix triplets" << endl;
+            return false;
+        }
+        vector<uint32_t> cursor(matrixData.countCellGeneUMIindex.begin(),
+                                matrixData.countCellGeneUMIindex.end() - 1);
+        size_t filled = 0;
+        while (matrixFile >> geneRow >> cellCol >> count) {
+            // Also validate the replay in case the input changed between passes.
+            if (geneRow == 0 || geneRow > numGenes || cellCol == 0 || cellCol > numCells ||
+                cursor[cellCol - 1] >= matrixData.countCellGeneUMIindex[cellCol]) {
+                cerr << "ERROR: Matrix changed between counting and filling" << endl;
+                return false;
+            }
+            uint32_t& destination = cursor[cellCol - 1];
+            matrixData.countCellGeneUMI[destination] = geneRow - 1;
+            matrixData.countCellGeneUMI[destination + 1] = count;
+            destination += matrixData.countMatStride;
+            ++filled;
+        }
+        if (filled != entries) {
+            cerr << "ERROR: Matrix entry count changed between passes" << endl;
+            return false;
+        }
+    }
+    matrixFile.close();
+    cerr << "[mex-storage] cells=" << numCells << " entries=" << entries
+         << " sparse_buffers=1" << endl;
+
     cout << "Loaded MEX files:\n";
     cout << "  Barcodes: " << barcodes.size() << "\n";
     cout << "  Features: " << features.size() << "\n";
