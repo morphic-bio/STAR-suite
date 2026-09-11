@@ -1765,3 +1765,13 @@ STAR and full A375 outputs. Six matrices and three guide tables are exact.
 `/home/lhhung/pf_larry_regression_20260911/allocation_audit/ambiguity_*` and
 `a375_ambiguity` retain the old header, evidence ledger, sanitizer logs and clean
 binary/full A375 results. The initial fixture include failure is retained separately.
+
+### Velocyto pooled-state parity (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/allocation_audit/velocyto_*` preserves the
+old merge source/header, sanitizer oracle test, clean builds, 100K-GEX A375 runs,
+full guide outputs and count/layer comparisons. `velocyto_before` exited zero but
+has empty layers and is explicitly excluded by its `validation.json`. The valid
+controls are `velocyto_before_legacy`, `velocyto_after_legacy` and
+`velocyto_after_buckets`. See `docs/ALLOCATION_FIXES_20260911.md` and the separate
+no-BAM Velocyto handoff.

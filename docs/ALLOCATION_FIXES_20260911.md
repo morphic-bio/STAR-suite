@@ -207,9 +207,65 @@ missing explicit Bayesian helper include), `ambiguity_before2`,
 `ambiguity_a375_comparison.json`. Larger candidate/UMI/evidence pooling from item 6
 is not part of this small layout correction.
 
-## Remaining work, in order
+## Velocyto transcript and gene storage (audit item 9)
 
-Review conditional items 6 and 9 separately with their relevant fixtures;
-   preserve iteration-dependent outputs and do not infer Flex-scale savings from A375.
+Each cell now uses a khash from UMI to a transcript slice and one pooled transcript
+buffer. Intersections shrink their slice in place, retaining empty intersections
+as permanently rejected UMIs. Per-cell gene counters use khash, with gene IDs
+explicitly sorted for the same final matrix row order. Initial transcript slots
+remain reserved until the cell is finalized; live/allocated-slot diagnostics make
+that tradeoff visible. The per-read replay records are unchanged.
 
-This file records completed changes separately from pending audit directions.
+The sanitizer fixture compiles the preserved former merge routine as its oracle.
+It checks all intermediate transcript IDs/type masks through 60,000 observations,
+including duplicate transcripts, empty intersections, ownership moves and clear.
+A clean build passes. The initial build missed two empty-bucket temporary types;
+that compile failure is retained in `velocyto_build`, and `velocyto_build2` is the
+successful, frozen binary (SHA256
+`3e7391b669a6042fb154eda8491a07676263637a6f426bdfbdcbb6a8e453632e`).
+
+Matched A375 validation uses 100,000 GEX reads plus the full guide library, legacy
+GEX counting, and no BAM. All six raw/filtered Velocyto layer matrices and four
+axis files are byte-identical. All eight packaged/GEX/feature MEX surfaces and
+three guide tables also match. Layer totals are 34,216 spliced, 6,813 unspliced and
+5,196 ambiguous UMIs. New stream and bucketed replay paths match on these same
+surfaces, including the bucketed empty-cell handling.
+
+The pooled path logs 7,181 cells, 48,672 UMI keys, 378,877 stored transcript slots
+and 378,739 live transcripts. Whole wall is 18.05 s before and 18.00 s after; peak
+RSS is 35,031,780 and 35,031,284 KiB. This small fixture establishes correctness,
+not a material whole-job speed or memory reduction. Full-scale Velocyto has not
+been benchmarked here.
+
+The first no-BAM **bridge** control emitted empty Velocyto layers on the preserved
+binary. It is marked unusable for allocation parity and is not a performance
+control for the legacy-counting runs. The existing read-information gap is traced
+in `HANDOFF_NO_BAM_VELOCYTO_READINFO_20260911.md`; it is a separate correctness fix.
+
+Artifacts: `velocyto_baseline`, `velocyto_unit`, `velocyto_build`, `velocyto_build2`,
+`velocyto_before` (unusable empty bridge control), `velocyto_before_legacy`,
+`velocyto_after_legacy`, `velocyto_after_buckets`, and the four
+`velocyto_*comparison.json` records. Run drivers are in `tests/run_velocyto_*probe.py`.
+
+## Completed scope and remaining directions
+
+The simple changes cover the common UMI counter case, duplicate whitelist copies
+and scans, both barcode-collision tables, bridge counters/rows, occupancy grouping,
+file-MEX storage, merge/import lookups and Velocyto state. Last full A375 validation:
+146.22 s before this audit versus 139.50 s after, and 41,816,724 versus 39,908,156 KiB
+peak RSS (1.82 GiB lower); all six matrices and three guide tables are exact.
+These are single executions, not replicated speed estimates.
+
+Broader directions remain explicit:
+
+- Item 6's shared candidate/UMI pools and compact sequence/quality storage were not
+  implemented. This pass removed the redundant 56-byte evidence payload. A larger
+  refactor must preserve variable barcode lengths, evidence APIs and ownership
+  across thread/shard merges; avoid introducing temporary strings on each read.
+- Item 1 retains general hashes for rare multi-feature UMIs. A shared rare-counter
+  arena, per-barcode counter replacement and additional pre-sizing are deferred.
+- Full MSK paper P02 and full-scale conditional-path performance runs remain pending.
+- The discovered no-BAM bridge/Velocyto read-information gap needs its own correction.
+
+All changes are committed on the development branch. No merge, push or release
+was performed for this allocation work.
