@@ -2420,85 +2420,63 @@ void update_feature_counts_from_code(unsigned char *code, char *umi, uint32_t fe
         }
     }
 }
-void update_umi_counts(unsigned char *code, char *umi,  uint32_t feature_index,data_structures *hashes, memory_pool_collection *pools){
-    unsigned char code8[8];
-    memset(code8,0,8);
-    memcpy(code8,code,barcode_code_length);
-    string2code(umi, umi_length, code8+barcode_code_length);
-
-    uint64_t key = *(uint64_t*)code8;
-    khint_t k = kh_get(u64ptr, hashes->sequence_umi_hash, key);
-    feature_umi_counts *s;
-    
-    if (k == kh_end(hashes->sequence_umi_hash)) {
-        // Logic for a NEW barcode-UMI combination
-        s = (feature_umi_counts*) allocate_memory_from_pool(pools->feature_umi_counts_pool);
-        if (s == NULL) return; // Error check
-
-        memcpy(s->sequence_umi_code, code8, 8);
-        
-        // Create the new inner hash table for this UMI's feature counts
-        s->counts = kh_init(u32u32);
-        
-        // Set initial count for this feature to 1
-        int ret;
-        khint_t kh2 = kh_put(u32u32, s->counts, feature_index, &ret);
-        kh_val(s->counts, kh2) = 1;
-        // Mark as unvisited for the connected components algorithm by setting key '0' to 0.
-        khint_t kh3 = kh_put(u32u32, s->counts, 0, &ret);
-        kh_val(s->counts, kh3) = 0;
-
-        khint_t kh = kh_put(u64ptr, hashes->sequence_umi_hash, key, &ret);
-        kh_val(hashes->sequence_umi_hash, kh) = s;
-    } else {
-        s = (feature_umi_counts*)kh_val(hashes->sequence_umi_hash, k);
-        // Logic for an EXISTING barcode-UMI combination
-        khint_t k2 = kh_get(u32u32, s->counts, feature_index);
-        uint32_t current_count = 1;
-        if (k2 != kh_end(s->counts)) {
-            current_count = kh_val(s->counts, k2) + 1;
-            kh_val(s->counts, k2) = current_count;
-        } else {
-            int ret;
-            khint_t kh2 = kh_put(u32u32, s->counts, feature_index, &ret);
-            kh_val(s->counts, kh2) = current_count;
-        }
+static void pf_umi_add_count(feature_umi_counts *entry, uint32_t feature, uint32_t count) {
+    if (!entry->counts && (entry->inline_feature == 0 || entry->inline_feature == feature)) {
+        entry->inline_feature = feature;
+        entry->inline_count += count;
+        return;
     }
+    if (!entry->counts) {
+        entry->counts = kh_init(u32u32);
+        if (!entry->counts) { perror("UMI feature counter allocation"); exit(EXIT_FAILURE); }
+        int absent;
+        khint_t k = kh_put(u32u32, entry->counts, entry->inline_feature, &absent);
+        if (absent < 0) { perror("UMI feature counter insertion"); exit(EXIT_FAILURE); }
+        kh_val(entry->counts, k) = entry->inline_count;
+    }
+    int absent;
+    khint_t k = kh_put(u32u32, entry->counts, feature, &absent);
+    if (absent < 0) { perror("UMI feature counter insertion"); exit(EXIT_FAILURE); }
+    if (absent) kh_val(entry->counts, k) = count;
+    else kh_val(entry->counts, k) += count;
 }
-char check_neighbor(uint64_t code64,uint32_t *counts, data_structures *hashes){
+
+void update_umi_counts(unsigned char *code, char *umi, uint32_t feature_index,
+                       data_structures *hashes, memory_pool_collection *pools) {
+    unsigned char code8[8] = {0};
+    memcpy(code8, code, barcode_code_length);
+    string2code(umi, umi_length, code8 + barcode_code_length);
+    uint64_t key;
+    memcpy(&key, code8, sizeof(key));
+    khint_t k = kh_get(u64ptr, hashes->sequence_umi_hash, key);
+    feature_umi_counts *entry;
+    if (k == kh_end(hashes->sequence_umi_hash)) {
+        entry = allocate_memory_from_pool(pools->feature_umi_counts_pool);
+        if (!entry) return;
+        memset(entry, 0, sizeof(*entry));
+        memcpy(entry->sequence_umi_code, code8, sizeof(code8));
+        int absent;
+        k = kh_put(u64ptr, hashes->sequence_umi_hash, key, &absent);
+        kh_val(hashes->sequence_umi_hash, k) = entry;
+    } else entry = kh_val(hashes->sequence_umi_hash, k);
+    pf_umi_add_count(entry, feature_index, 1);
+}
+
+char check_neighbor(uint64_t code64, uint32_t *counts, data_structures *hashes) {
     khint_t k = kh_get(u64ptr, hashes->sequence_umi_hash, code64);
-    feature_umi_counts *result = (k != kh_end(hashes->sequence_umi_hash)) ? kh_val(hashes->sequence_umi_hash, k) : NULL;
-
-    if (result && result->counts) {
-        // Check if this node has been visited using key '0'
-        khint_t k2 = kh_get(u32u32, result->counts, 0);
-        uint32_t visited_flag = (k2 != kh_end(result->counts)) ? kh_val(result->counts, k2) : 0;
-        
-        if (visited_flag == 0) { // If not visited
-            // --- NEW: Iterate through the hash table to sum counts ---
-            khint_t iter;
-            for (iter = kh_begin(result->counts); iter != kh_end(result->counts); ++iter) {
-                if (kh_exist(result->counts, iter)) {
-                    uint32_t feature_index = kh_key(result->counts, iter);
-                    if (feature_index > 0) { // Don't add the visited flag to the temp counts array
-                        counts[feature_index] += kh_val(result->counts, iter);
-                    }
-                }
-            }
-
-            // Mark as visited by replacing the value at key '0' with 1
-            khint_t k3 = kh_get(u32u32, result->counts, 0);
-            if (k3 != kh_end(result->counts)) {
-                kh_val(result->counts, k3) = 1;
-            } else {
-                int ret;
-                khint_t kh3 = kh_put(u32u32, result->counts, 0, &ret);
-                kh_val(result->counts, kh3) = 1;
-            }
-            return 1; // Indicate success
+    if (k == kh_end(hashes->sequence_umi_hash)) return 0;
+    feature_umi_counts *entry = kh_val(hashes->sequence_umi_hash, k);
+    if (!entry || entry->visited) return 0;
+    if (entry->counts) {
+        for (khint_t j = kh_begin(entry->counts); j != kh_end(entry->counts); ++j) {
+            if (kh_exist(entry->counts, j) && kh_key(entry->counts, j) > 0)
+                counts[kh_key(entry->counts, j)] += kh_val(entry->counts, j);
         }
+    } else if (entry->inline_feature > 0) {
+        counts[entry->inline_feature] += entry->inline_count;
     }
-    return 0; // Not found or already visited
+    entry->visited = 1;
+    return 1;
 }
 int find_neighbors(uint64_t key64, uint64_t *neighbors, uint32_t *counts, data_structures *hashes){
     int neighbor_count=0;
@@ -2521,6 +2499,7 @@ int find_neighbors(uint64_t key64, uint64_t *neighbors, uint32_t *counts, data_s
 }
 void find_deduped_counts(data_structures *hashes, khash_t(u32ptr)* barcode_to_deduped_counts, uint16_t stringency, uint16_t min_counts){
     uint32_t clique_counts[number_of_features+1];
+    uint64_t multi_feature_umis = 0;
     
     // Create tracking set for barcodes that might need cleanup (empty after deduping)
     khash_t(u32ptr) *empty_candidates = kh_init(u32ptr);
@@ -2539,9 +2518,8 @@ void find_deduped_counts(data_structures *hashes, khash_t(u32ptr)* barcode_to_de
         uint64_t lookup_key = kh_key(hashes->sequence_umi_hash, k);
         feature_umi_counts *umi_counts = (feature_umi_counts*)kh_val(hashes->sequence_umi_hash, k);
         
-        khint_t k2 = kh_get(u32u32, umi_counts->counts, 0);
-        uint32_t visited = (k2 != kh_end(umi_counts->counts)) ? kh_val(umi_counts->counts, k2) : 0;
-        if (visited) {
+        if (umi_counts->counts) ++multi_feature_umis;
+        if (umi_counts->visited) {
             continue; // Already processed if the flag is 1
         }
         memset(clique_counts, 0, sizeof(clique_counts));
@@ -2653,6 +2631,10 @@ void find_deduped_counts(data_structures *hashes, khash_t(u32ptr)* barcode_to_de
         }
     }
     kh_destroy(u32ptr, empty_candidates);
+    fprintf(stderr, "[pf-umi-storage] entries=%llu inline=%llu multi_feature=%llu\n",
+            (unsigned long long)kh_size(hashes->sequence_umi_hash),
+            (unsigned long long)(kh_size(hashes->sequence_umi_hash) - multi_feature_umis),
+            (unsigned long long)multi_feature_umis);
 }
 
 void find_connected_component(uint64_t start_key, uint32_t *counts, data_structures *hashes){
@@ -6559,48 +6541,29 @@ void merge_feature_counts(uint32_t key, void *value, void *user_data)
     }
 }
 
-void merge_feature_umi_counts(uint64_t key, void *value, void *user_data)
-{
-    merge_context *ctx = (merge_context *)user_data;
-    khash_t(u64ptr) *dst = (khash_t(u64ptr)*)ctx->dst_hash;
-    feature_umi_counts *src_ent = (feature_umi_counts *)value;
+void merge_feature_umi_counts(uint64_t key, void *value, void *user_data) {
+    merge_context *ctx = user_data;
+    khash_t(u64ptr) *dst = ctx->dst_hash;
+    const feature_umi_counts *source = value;
     khint_t k = kh_get(u64ptr, dst, key);
-    feature_umi_counts *dst_ent = (k != kh_end(dst)) ? (feature_umi_counts*)kh_val(dst, k) : NULL;
-
-    if (dst_ent) {
-        /* Same barcode-UMI already present – add the counters */
-        khint_t ksrc;
-        for (ksrc = kh_begin(src_ent->counts); ksrc != kh_end(src_ent->counts); ++ksrc) {
-            if (!kh_exist(src_ent->counts, ksrc)) continue;
-            uint32_t feat_key = kh_key(src_ent->counts, ksrc);
-            uint32_t add_val = kh_val(src_ent->counts, ksrc);
-            khint_t kdst = kh_get(u32u32, dst_ent->counts, feat_key);
-            if (kdst != kh_end(dst_ent->counts)) {
-                kh_val(dst_ent->counts, kdst) += add_val;
-            } else {
-                int ret;
-                khint_t kh = kh_put(u32u32, dst_ent->counts, feat_key, &ret);
-                kh_val(dst_ent->counts, kh) = add_val;
-            }
-        }
+    feature_umi_counts *entry;
+    if (k == kh_end(dst)) {
+        entry = allocate_memory_from_pool(ctx->dst_pool->feature_umi_counts_pool);
+        memset(entry, 0, sizeof(*entry));
+        memcpy(entry->sequence_umi_code, source->sequence_umi_code, 8);
+        int absent;
+        k = kh_put(u64ptr, dst, key, &absent);
+        kh_val(dst, k) = entry;
+    } else entry = kh_val(dst, k);
+    // Keep source ownership intact: callers can free or reuse its pool after merging.
+    if (source->counts) {
+        for (khint_t j = kh_begin(source->counts); j != kh_end(source->counts); ++j)
+            if (kh_exist(source->counts, j))
+                pf_umi_add_count(entry, kh_key(source->counts, j), kh_val(source->counts, j));
     } else {
-        /* Key not present – copy the whole struct into the dst pool and table  */
-        dst_ent = (feature_umi_counts*) allocate_memory_from_pool(ctx->dst_pool->feature_umi_counts_pool);
-        memcpy(dst_ent->sequence_umi_code, src_ent->sequence_umi_code, 8);
-        dst_ent->counts = kh_init(u32u32);
-        khint_t ksrc;
-        for (ksrc = kh_begin(src_ent->counts); ksrc != kh_end(src_ent->counts); ++ksrc) {
-            if (!kh_exist(src_ent->counts, ksrc)) continue;
-            uint32_t feat_key = kh_key(src_ent->counts, ksrc);
-            uint32_t feat_val = kh_val(src_ent->counts, ksrc);
-            int ret;
-            khint_t kh = kh_put(u32u32, dst_ent->counts, feat_key, &ret);
-            kh_val(dst_ent->counts, kh) = feat_val;
-        }
-        int ret;
-        khint_t kh = kh_put(u64ptr, dst, key, &ret);
-        kh_val(dst, kh) = dst_ent;
+        pf_umi_add_count(entry, source->inline_feature, source->inline_count);
     }
+    entry->visited += source->visited;
 }
 
 void merge_feature_sequences(const char *key, void *value, void *user_data) {
