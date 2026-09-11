@@ -1727,3 +1727,10 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   exactly match `a375_whitelist`, per `umi_a375_comparison.json`.
 - PF merge/cleanup9.717→1.775s and sample cleanup2.164→0.182s; whole-job time unchanged.
   Details: `docs/ALLOCATION_FIXES_20260911.md`.
+
+### Allocation audit: bridge counts and output buffers (2026-09-11)
+
+- `allocation_audit/bridge_build`, `bridge_unit`: clean binary and ASan/UBSan map tests.
+- `a375_bridge`: full A375140.73s, peak RSS39,941,536KiB. `bridge_a375_comparison.json`
+  verifies all six matrices and three guide tables against `a375_umi`.
+- Key counts and buffer counts are logged; details in `docs/ALLOCATION_FIXES_20260911.md`.

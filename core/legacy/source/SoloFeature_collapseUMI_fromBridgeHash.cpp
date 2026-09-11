@@ -646,6 +646,7 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     countMatMult.i.assign(nCB + 1, 0);
 
     struct ThreadScratch {
+        std::vector<uint32_t> outputRows;
         std::vector<uint32_t> umiArray;
         std::vector<MgRow> mgBuf;
         std::vector<std::pair<uint32_t, uint32_t>> aggGene;
@@ -691,7 +692,9 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     };
 
     std::vector<uint32_t> cbRowCounts(nCB, 0);
-    std::vector<std::vector<uint32_t>> cbRows(nCB);
+    // One append buffer per worker; each barcode records its stable slice.
+    std::vector<size_t> cbRowOffsets(nCB, 0);
+    std::vector<uint32_t> cbRowThreads(nCB, 0);
     std::vector<BridgeStageDigest> cbDetPreCr;
     std::vector<BridgeStageDigest> cbDetPostCr;
     std::vector<BridgeStageDigest> cbDetResolved;
@@ -720,7 +723,6 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
             nGenePerCB[iCB] = 0;
             nUMIperCB[iCB] = 0;
             cbRowCounts[iCB] = 0;
-            cbRows[iCB].clear();
             if (hdMoleculeOut) {
                 ts.hdRecords.clear();
             }
@@ -998,8 +1000,9 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                     ++cbNonzeroGenes;
 
             cbRowCounts[iCB] = static_cast<uint32_t>(cbNonzeroGenes);
-            std::vector<uint32_t> &rows = cbRows[iCB];
-            rows.reserve(cbNonzeroGenes * countMatStride);
+            std::vector<uint32_t> &rows = ts.outputRows;
+            cbRowOffsets[iCB] = rows.size();
+            cbRowThreads[iCB] = static_cast<uint32_t>(omp_get_thread_num());
             for (uint32_t ig = 0; ig < nGenes; ++ig) {
                 if (ts.geneCounts[ig] == 0)
                     continue;
@@ -1081,11 +1084,16 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     countCellGeneUMI.assign(finalMatSlots, 0);
 
     for (uint32_t iCB = 0; iCB < nCB; ++iCB) {
-        const std::vector<uint32_t> &rows = cbRows[iCB];
-        if (!rows.empty())
-            std::copy(rows.begin(), rows.end(), countCellGeneUMI.begin() + countCellGeneUMIindex[iCB]);
-        std::vector<uint32_t>().swap(cbRows[iCB]);
+        const size_t slots = static_cast<size_t>(cbRowCounts[iCB]) * countMatStride;
+        if (slots != 0) {
+            const auto& rows = scratch[cbRowThreads[iCB]].outputRows;
+            std::copy_n(rows.begin() + cbRowOffsets[iCB], slots,
+                        countCellGeneUMI.begin() + countCellGeneUMIindex[iCB]);
+        }
     }
+    P.inOut->logMain << "NOTICE: bridge output rows barcodes=" << nCB
+                     << " worker_buffers=" << scratch.size()
+                     << " output_slots=" << finalMatSlots << "\n";
 
     if (bridgeDeterminismTrace) {
         writeBridgeDeterminismDigest(bridgeDeterminismPath,

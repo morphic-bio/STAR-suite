@@ -14,6 +14,7 @@
 #include "ReadAlign.h"
 #include "hash_shims_cpp_compat.h"
 #include "SoloBinarySpool.h"
+#include "BridgeReadCounts.h"
 #include "FlexGdna.h"
 #include "CbBucketStore.h"
 #include <functional>
@@ -138,7 +139,7 @@ public:
     };
     std::unordered_map<ReadAlign::AmbigKey, BridgeAmbigReadInfoOrphanEntry> bridgeAmbigReadInfoOrphan_;
 
-    std::unordered_map<uint32_t, uint64_t> bridgeImmediateReadCounts_; // key: wlCb, value: low32=unique, high32=multi
+    BridgeReadCounts bridgeImmediateReadCounts_; // key: wlCb, value: low32=unique, high32=multi
     // Filled during resolvePendingAmbiguousToHash (aggregated ambiguous accounting)
     std::vector<uint32_t> bridgePinNreadUnique_;
     std::vector<uint32_t> bridgePinNreadMulti_;
