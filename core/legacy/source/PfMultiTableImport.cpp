@@ -1,10 +1,12 @@
 #include "PfMultiTableImport.h"
+#include "BarcodeViewIndex.h"
 #ifndef PF_TABLE_IMPORT_NO_PERMITS
 #include "PfMultiAssign.h"
 #endif
 #include "PfMultiMexStub.h"
 #include "MexWriter.h"
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <algorithm>
 #include <cctype>
@@ -160,9 +162,9 @@ static bool parseNonNegativeInt(const string& text, uint64_t& out) {
 
 static bool loadWhitelistBarcodes(const string& path,
                                   vector<string>& orderedBarcodes,
-                                  std::unordered_map<string, uint32_t>& indexByBarcode) {
-    orderedBarcodes.clear();
+                                  BarcodeViewIndex& indexByBarcode) {
     indexByBarcode.clear();
+    orderedBarcodes.clear();
     std::ifstream in(path.c_str());
     if (!in.is_open()) {
         return false;
@@ -183,12 +185,19 @@ static bool loadWhitelistBarcodes(const string& path,
         if (!isValidBarcodeSeq(token)) {
             continue;
         }
-        if (indexByBarcode.find(token) != indexByBarcode.end()) {
-            continue;
-        }
-        indexByBarcode[token] = static_cast<uint32_t>(orderedBarcodes.size());
-        orderedBarcodes.push_back(token);
+        orderedBarcodes.push_back(std::move(token));
     }
+    // Finish growing the vector before borrowing keys. Compact first occurrences
+    // into its prefix; retained elements are never moved again (including SSO).
+    indexByBarcode.reserve(orderedBarcodes.size());
+    size_t kept = 0;
+    for (size_t i = 0; i < orderedBarcodes.size(); ++i) {
+        if (indexByBarcode.find(orderedBarcodes[i])) continue;
+        if (kept != i) orderedBarcodes[kept] = std::move(orderedBarcodes[i]);
+        indexByBarcode.insert(orderedBarcodes[kept], static_cast<uint32_t>(kept));
+        ++kept;
+    }
+    orderedBarcodes.resize(kept);
     return !orderedBarcodes.empty();
 }
 
@@ -213,29 +222,29 @@ static bool loadFilteredBarcodeSet(const string& path, std::unordered_set<string
 }
 
 static int resolveBarcodeIndex(const string& rawBarcode,
-                               const std::unordered_map<string, uint32_t>& indexByBarcode,
+                               const BarcodeViewIndex& indexByBarcode,
                                bool whitelistUsesSuffix,
                                bool& suffixNormalized) {
     suffixNormalized = false;
     string bc = upperCopy(rawBarcode);
     auto it = indexByBarcode.find(bc);
-    if (it != indexByBarcode.end()) {
-        return static_cast<int>(it->second);
+    if (it) {
+        return static_cast<int>(*it);
     }
 
     if (hasDigitDashSuffix(bc)) {
         string stripped = stripGemWellSuffix(bc);
         it = indexByBarcode.find(stripped);
-        if (it != indexByBarcode.end()) {
+        if (it) {
             suffixNormalized = true;
-            return static_cast<int>(it->second);
+            return static_cast<int>(*it);
         }
     } else if (!whitelistUsesSuffix) {
         string withSuffix = bc + "-1";
         it = indexByBarcode.find(withSuffix);
-        if (it != indexByBarcode.end()) {
+        if (it) {
             suffixNormalized = true;
-            return static_cast<int>(it->second);
+            return static_cast<int>(*it);
         }
     }
     return -1;
@@ -387,10 +396,12 @@ TableImportResult runTableFeatureImport(const string& whitelistNormalizedPath,
     }
 
     vector<string> orderedBarcodes;
-    std::unordered_map<string, uint32_t> barcodeIndexBySeq;
+    BarcodeViewIndex barcodeIndexBySeq;
     if (!loadWhitelistBarcodes(whitelistNormalizedPath, orderedBarcodes, barcodeIndexBySeq)) {
         throw std::runtime_error("table import: failed to load whitelist: " + whitelistNormalizedPath);
     }
+
+    std::clog << "[table-barcode-index] keys=" << barcodeIndexBySeq.size() << " copied_keys=0\n";
 
     bool whitelistUsesSuffix = false;
     for (const auto& bc : orderedBarcodes) {

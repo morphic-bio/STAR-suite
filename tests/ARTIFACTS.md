@@ -1752,3 +1752,10 @@ See `docs/ALLOCATION_FIXES_20260911.md`.
 `/home/lhhung/pf_larry_regression_20260911/allocation_audit/mex_*` contains the
 preserved loader, generated edge fixtures, actual LARRY MEX and input hashes,
 before/after data ledgers, sanitizer logs and a clean-build STAR. See the allocation report.
+
+### Merge/import allocation parity (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/allocation_audit/` directories
+`merge_baseline`, `barcode_view_unit`, `merge_table_test`, `merge_build`, `a375_merge`
+and `merge_a375_comparison.json` retain sources, sanitizer/fixture logs, the frozen
+STAR and full A375 outputs. Six matrices and three guide tables are exact.

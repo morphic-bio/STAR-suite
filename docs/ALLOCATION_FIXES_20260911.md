@@ -160,9 +160,35 @@ Artifacts: `mex_baseline`, `mex_inputs`, `mex_before`, `mex_after`, `mex_asan`,
 `mex_real_inputs`, `mex_real_manifest.json`, `mex_real_compare`, `mex_build`.
 Reproduction: `tests/run_flex_mex_storage_probe.py` with the preserved fixtures.
 
+## Merge/import barcode indices (audit item 12)
+
+The merge and table-import indices use khash keys that borrow pointer/length
+views of existing strings. Strings stay stable for the entire lookup lifetime;
+no packed-DNA assumption excludes suffixes, N bases or other valid identifiers.
+Table import finishes vector growth, then compacts first occurrences in place
+before storing views of the retained slots. This also handles short strings whose
+characters live inside the string object. Output duplicate detection reuses the
+existing barcode sort, with deterministic diagnostic ordering.
+
+Sanitizer tests cover long/short/empty/NUL-containing keys, prefix queries,
+duplicates, compaction, clear and capacity overflow. Table-import tests pass for
+CSV/TSV, suffix normalization, rejections, duplicate pair collapse and stable
+first-occurrence order. The test harness can retain all fixtures and results.
+
+A clean build and full A375 pass. All six matrices and three guide CSVs match the
+bridge control. Whole wall: 139.75 s versus 140.73 s; RSS: 39,911,908 KiB versus
+39,941,536 KiB. These small differences are single-run observations. The merge
+logs 3,686,400 keys and zero copied strings. The intervening optional-inline,
+occupancy and file-MEX changes are also present in this binary; those conditional
+paths are not exercised by this A375 configuration.
+
+Artifacts: `merge_baseline`, `barcode_view_unit`, `merge_table_test`, `merge_build`,
+`a375_merge`, `merge_a375_comparison.json`. Frozen STAR SHA256:
+`74e4716f1dc2673ff21b59a70bcc0988d597f11503e02e2cf0a743d72fcbcab3`.
+
 ## Remaining work, in order
 
-Review conditional items 6, 9 and 12 separately with their relevant fixtures;
+Review conditional items 6 and 9 separately with their relevant fixtures;
    preserve iteration-dependent outputs and do not infer Flex-scale savings from A375.
 
 This file records completed changes separately from pending audit directions.
