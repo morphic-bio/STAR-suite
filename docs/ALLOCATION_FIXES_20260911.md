@@ -139,9 +139,30 @@ Artifacts: `occupancy_baseline`, `occupancy_before`, `occupancy_after`,
 `be1800e803de55d20448a7d827113c93991e0c71e548b95c9bb63616466ed2bb`.
 Reproduction: `tests/run_occupancy_storage_probe.py`.
 
+## File-input MEX storage (audit item 11)
+
+The file loader counts entries per cell, allocates one CSR data buffer, and
+rewinds/fills it using cell cursors. It preserves each cell's original entry order,
+duplicate coordinates, explicit zeros and existing header-count tolerance. It
+checks 32-bit sparse-offset capacity and validates bounds/counts on replay.
+The loader logs cells, actual stored entries and the single sparse buffer.
+
+Before/after and ASan/UBSan fixtures cover unsorted/duplicate entries, empty input,
+header/axis mismatches, zeros and out-of-bounds indices. The actual LARRY MEX also
+matches exactly: 35,626 columns, 105,709 entries. Its complete loaded-data ledger
+SHA256 is `ea49dc131765a5d4e8ee9a9881d4a0fb483cd21c1de3f1b003039a5c814d06b0`.
+A clean core/libflex build passes; frozen STAR SHA256:
+`8dc6529af4a64ef14430fc0d2ce5baea0aea7977e1f65fc0f4378036f232f55d`.
+This file-input path is distinct from normal in-process mapping; no whole-job
+speedup is inferred from it.
+
+Artifacts: `mex_baseline`, `mex_inputs`, `mex_before`, `mex_after`, `mex_asan`,
+`mex_real_inputs`, `mex_real_manifest.json`, `mex_real_compare`, `mex_build`.
+Reproduction: `tests/run_flex_mex_storage_probe.py` with the preserved fixtures.
+
 ## Remaining work, in order
 
-Review conditional items 6, 9, 11 and 12 separately with their relevant fixtures;
+Review conditional items 6, 9 and 12 separately with their relevant fixtures;
    preserve iteration-dependent outputs and do not infer Flex-scale savings from A375.
 
 This file records completed changes separately from pending audit directions.
