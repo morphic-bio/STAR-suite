@@ -1746,3 +1746,9 @@ Details: `docs/ALLOCATION_FIXES_20260911.md`.
 `/home/lhhung/pf_larry_regression_20260911/allocation_audit/occupancy_{baseline,before,after,asan,build}`
 contains original sources, exact ledgers, sanitizer logs and the clean-build STAR.
 See `docs/ALLOCATION_FIXES_20260911.md`.
+
+### Flex MEX allocation parity (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/allocation_audit/mex_*` contains the
+preserved loader, generated edge fixtures, actual LARRY MEX and input hashes,
+before/after data ledgers, sanitizer logs and a clean-build STAR. See the allocation report.
