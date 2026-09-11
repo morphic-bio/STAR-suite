@@ -1,3 +1,16 @@
+star-suite (1.9.2-1) unstable; urgency=medium
+
+  * Separate the OrdMag primary floor from the EmptyDrops candidate floor:
+    scRNA-seq candidates start at the declared umiMin (500) with no primary
+    trim; OCM candidates use umiMin and keep the primary trim at 100; Flex
+    calling is unchanged.
+  * Clear the default mitochondrial gene list before soloCellFiltering
+    returns, so EmptyDrops_CR filtering from a saved matrix no longer exits.
+  * Restore Trim Galore with FastQC and trim QC in the PE bulk benchmark.
+  * Report STAR Suite 1.9.2 from STAR --version; retain index compatibility.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 11 Sep 2026 09:22:14 +0000
+
 star-suite (1.9.1-1) unstable; urgency=medium
 
   * Extend native BGZF input to the established STAR parser and feature
