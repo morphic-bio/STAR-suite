@@ -96,9 +96,29 @@ may have a different hash iteration order, with the same key/value contents.
 Artifacts: `bridge_build`, `bridge_unit`, `a375_bridge`, `bridge_a375_comparison.json`.
 Frozen STAR SHA256: `9652d78f0b8a1ac88f926250fd38224c72f5ed2265437ccd4d6b2a5c3f300f44`.
 
+## Optional inline correction (audit item 5)
+
+InlineCBCorrection reuses its exact khash for N-path membership and stores
+ambiguous variant ranges in khash with one shared parent-index array. A counting
+pass and replay preserve the old per-variant candidate order, including duplicate
+whitelist handling. The public ambiguity/evidence payloads are unchanged.
+
+Before/after and ASan+UBSan ledgers match byte for byte across exact, H1, N,
+ambiguous and random queries, a 48-parent collision, quality-based resolution and
+shard merge. Ledger SHA256:
+`4ef1b8e64659637fb4f22d1e752eef2679973aa290a952dde0fd6e05efaf5e32`.
+A clean STAR build passes (SHA256
+`64890391d9fc26841a18c7c8e16a5a2c0a79fcfce64f23fded64b38176cda834`).
+This optional path is not enabled by the A375 control; no full-dataset speed or
+memory claim is made for it. Existing collision-size/fanout diagnostics are retained.
+
+Artifacts: `inline_baseline`, `inline_probe_before`, `inline_probe_after`,
+`inline_probe_asan`, `inline_build`. Reproduction driver:
+`tests/run_inline_cb_storage_probe.py` with a preserved `--expected-ledger`.
+
 ## Remaining work, in order
 
-Review conditional items 5–6 and 9–12 separately with their relevant fixtures;
+Review conditional items 6 and 9–12 separately with their relevant fixtures;
    preserve iteration-dependent outputs and do not infer Flex-scale savings from A375.
 
 This file records completed changes separately from pending audit directions.
