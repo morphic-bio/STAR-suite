@@ -1759,3 +1759,9 @@ before/after data ledgers, sanitizer logs and a clean-build STAR. See the alloca
 `merge_baseline`, `barcode_view_unit`, `merge_table_test`, `merge_build`, `a375_merge`
 and `merge_a375_comparison.json` retain sources, sanitizer/fixture logs, the frozen
 STAR and full A375 outputs. Six matrices and three guide tables are exact.
+
+### Ambiguity entry layout parity (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/allocation_audit/ambiguity_*` and
+`a375_ambiguity` retain the old header, evidence ledger, sanitizer logs and clean
+binary/full A375 results. The initial fixture include failure is retained separately.

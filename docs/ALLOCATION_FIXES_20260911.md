@@ -186,6 +186,27 @@ Artifacts: `merge_baseline`, `barcode_view_unit`, `merge_table_test`, `merge_bui
 `a375_merge`, `merge_a375_comparison.json`. Frozen STAR SHA256:
 `74e4716f1dc2673ff21b59a70bcc0988d597f11503e02e2cf0a743d72fcbcab3`.
 
+## Ambiguity record padding (audit item 6, simple part)
+
+ExtendedAmbiguousEntry redeclared the quality-evidence vectors and read counter
+already supplied by its base class. All consumers access these through the
+derived type; there are no base casts that consume the hidden copy. Removing the
+three duplicate declarations reduces each record from 424 to 368 bytes on this
+build, while retaining the inherited fields and every evidence operation.
+
+The old/new evidence ledger matches through accumulation, quality padding, copy,
+move and merge; ASan/UBSan pass. Full A375 retains all six matrices and three guide
+tables. Whole wall is 139.50 s versus 139.75 s; RSS is 39,908,156 KiB versus
+39,911,908 KiB. No material A375 runtime improvement is established by this change.
+Clean-build STAR SHA256:
+`4d78a256899e8f6bbf933e203f4bb828370fb1ec0a94ff8fdda30f97d9207f6a`.
+
+Artifacts: `ambiguity_baseline`, `ambiguity_before` (initial fixture compile error:
+missing explicit Bayesian helper include), `ambiguity_before2`,
+`ambiguity_after_asan`, `ambiguity_build`, `a375_ambiguity`,
+`ambiguity_a375_comparison.json`. Larger candidate/UMI/evidence pooling from item 6
+is not part of this small layout correction.
+
 ## Remaining work, in order
 
 Review conditional items 6 and 9 separately with their relevant fixtures;
