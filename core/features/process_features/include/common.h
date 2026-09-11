@@ -158,7 +158,12 @@ typedef struct feature_sequences {
 
 typedef struct feature_umi_counts {
     unsigned char sequence_umi_code[8];
+    // The common single-feature case lives entirely in the pooled record.
+    // counts is allocated only when another feature is observed for this UMI.
     khash_t(u32u32) *counts;
+    uint32_t inline_feature;
+    uint32_t inline_count;
+    uint32_t visited;
 } feature_umi_counts;
 
 typedef struct unmatched_barcodes_features_block {

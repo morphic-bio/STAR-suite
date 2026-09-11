@@ -41,13 +41,47 @@ Artifacts: `/home/lhhung/pf_larry_regression_20260911/allocation_audit/`:
 `whitelist_comparison.json`. Earlier failed build/test harness attempts are separately
 marked and never used as timing controls.
 
+## UMI counter batch (audit item 1)
+
+Single-feature barcode–UMI counters now occupy the pooled record, with a separate
+visited flag. A general hash is allocated only upon observing a second feature.
+Gather copies values into destination-owned storage, so source pools can be freed
+independently. This removes the common per-UMI table while retaining the existing
+hash representation for rare multi-feature cases; a shared rare-counter arena is
+not implemented.
+
+The differential fixture exercises cross-thread duplicates, UMI-neighbor connected
+components, 64-way competing features, ties and count/stringency thresholds. Old
+and new ledgers match exactly; AddressSanitizer also passes. The actual 200,000-pair
+LARRY diagnostic retains every matrix entry (159,027 UMIs), with auto gzip detection.
+Runtime is 15.97 s versus 16.57 s; 159,058 of 159,704 counter records use inline storage.
+
+Full A375 preserves all six matrices and three guide tables:
+
+| Metric | Whitelist control | UMI counter change |
+|---|---:|---:|
+| Whole wall | 142.72 s | 142.78 s |
+| Peak RSS (KiB) | 41,559,480 | 40,010,100 |
+| PF read/assign/join | 13.124 s | 9.984 s |
+| PF thread hash merge/cleanup | 9.717 s | 1.775 s |
+| PF sample cleanup | 2.164 s | 0.182 s |
+
+Of 3,333,784 gathered barcode–UMIs, 3,332,717 are inline and only 1,067 need the
+general table (99.968% inline). Peak RSS falls 1.48 GiB. The shortened feature work
+overlaps GEX, so this run demonstrates no whole-job speedup. Do not add overlapping
+phase savings to predict total runtime.
+
+Artifacts: `umi_baseline`, `umi_probe_before`, `umi_probe_after`, `umi_probe_asan`,
+`umi_build`, `umi_asan_build`, `umi_1000`, `umi_larry_comparison.json`, `a375_umi`,
+`umi_a375_comparison.json`. Frozen STAR SHA256:
+`75baa872a4b4f67d6b933ccc62195c5c4f5d72b32e06e47bb5605299bad21167`.
+Reproduce isolated comparisons with `tests/run_umi_storage_probe.py`, supplying
+preserved headers/libraries and `--expected-ledger`; controls need not be rerun.
+
 ## Remaining work, in order
 
-1. Audit item 1: remove the per-UMI table from the single-feature case; retain general
-   counters for actual multi-feature UMIs. Validate gather, connected components,
-   ties and source cleanup against the preserved library before benchmarking.
-2. Items 7–8: bounded integer read counters and flat bridge output rows.
-3. Review conditional items 5–6 and 9–12 separately with their relevant fixtures;
+1. Items 7–8: bounded integer read counters and flat bridge output rows.
+2. Review conditional items 5–6 and 9–12 separately with their relevant fixtures;
    preserve iteration-dependent outputs and do not infer Flex-scale savings from A375.
 
 This file records completed changes separately from pending audit directions.

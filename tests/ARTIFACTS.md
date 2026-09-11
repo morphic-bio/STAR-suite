@@ -1716,3 +1716,14 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   peak RSS 41,559,480 KiB. Control `../hierarchy/a375_larry_fix_fixed4` is 146.22 s,
   41,816,724 KiB. `whitelist_comparison.json`: all six matrices and three guide tables exact.
 - Details and pending audit targets: `docs/ALLOCATION_FIXES_20260911.md`.
+
+### Allocation audit: inline UMI counters (2026-09-11)
+
+- Same `allocation_audit` artifact root: `umi_baseline`, `umi_build`, `umi_asan_build`,
+  `umi_probe_{before,after,asan}` preserve build identities and exact count/gather/dedup ledgers.
+- `umi_1000`: actual LARRY 200k diagnostic, 15.97 s, exact MEX versus preserved 16.57 s control.
+  `umi_larry_comparison.json` records barcode reordering and zero differing entries.
+- `a375_umi`: full A375142.78 s, peak RSS40,010,100KiB; six matrices and three guide CSVs
+  exactly match `a375_whitelist`, per `umi_a375_comparison.json`.
+- PF merge/cleanup9.717→1.775s and sample cleanup2.164→0.182s; whole-job time unchanged.
+  Details: `docs/ALLOCATION_FIXES_20260911.md`.
