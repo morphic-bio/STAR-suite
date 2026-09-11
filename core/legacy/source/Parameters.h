@@ -95,6 +95,8 @@ class Parameters {
         // waiter on an under-floor domain bypass an at-floor head.
         // 0 disables (default; legacy path).
         int dynamicThreadFifoWaiters = 0;
+        int dynamicThreadBgzfHierarchy = 0;
+        int dynamicThreadBalance = 0;
         int variableThreads = 0; // 0: fixed map permits, 1: allow runtime map permit retuning
         int variableThreadsRetuneEveryAcquires = 0; // <=0 disables auto-retune sequence
         vector<int> variableThreadsPermitSequence; // sequence of permit targets applied at retune cadence

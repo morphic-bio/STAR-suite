@@ -2426,8 +2426,7 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         assignOpts.allowUnionWhitelist = (P.pfMulti.crAssignAllowUnionWhitelist != 0);
         assignOpts.useFeatureAnchorSearch = true;
         assignOpts.requireFeatureAnchorMatch = true;
-        assignOpts.featureModeBootstrapReads =
-            (assignOpts.featureConstantOffset >= 0) ? 0 : 100000;
+        assignOpts.featureModeBootstrapReads = 100000;
         assignOpts.skipHeatmaps = true;
         if (const char* env = std::getenv("STAR_PF_USE_FEATURE_ANCHOR_SEARCH")) {
             assignOpts.useFeatureAnchorSearch = (std::atoi(env) != 0);
@@ -2496,9 +2495,11 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         };
         vector<LibrarySchedule> librarySchedules(numFeatureLibs);
         uint64_t totalEstimatedWork = 0;
+        bool featureEstimatesValid = numFeatureLibs > 0;
         int totalFileCount = 0;
         for (size_t li = 0; li < numFeatureLibs; ++li) {
             const auto& est = prepared.featureLibraries[li].featureEstimate;
+            featureEstimatesValid = featureEstimatesValid && est.valid;
             uint64_t work = est.valid ? est.estimatedReads : 0;
             if (work == 0) work = 1;
             librarySchedules[li].estimatedWork = work;
@@ -2506,6 +2507,9 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             totalEstimatedWork += work;
             totalFileCount += librarySchedules[li].fileCount;
         }
+        g_threadChunks.mapPermitPublishWorkEstimates(
+            mapEstimate.valid ? mapEstimate.estimatedReads : 0,
+            featureEstimatesValid ? totalEstimatedWork : 0);
 
         // Libraries run sequentially (pf_api holds a mutex), so each gets
         // the full thread budget.  The permit controller manages contention

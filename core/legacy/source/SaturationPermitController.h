@@ -59,6 +59,12 @@ class SaturationPermitController {
     int probeWindows = 2;
     int completionWindows = 2;
     bool featureActive = false;
+    // Zero preserves legacy MAP/ATAC (+ optional FEATURE) behavior.
+    unsigned activeMask = 0;
+    // GEX/FEATURE can seed an already controlled allocation instead of
+    // spending a short workload's lifetime on exclusive saturation probes.
+    bool startFromFloors = false;
+    std::array<int, 3> initialFloors{{0, 0, 0}};
     WorkEstimates workEstimates;
   };
 
@@ -109,10 +115,10 @@ class SaturationPermitController {
             configuredPermits, fixedFeatureFloor, probeWindows)) {}
 
   explicit SaturationPermitController(const Config &config)
-      : configuredPermits_(std::max(config.featureActive ? 3 : 2,
+      : configuredPermits_(std::max(minimumBudget(config),
                                     config.configuredPermits)),
-        featureActive_(config.featureActive),
-        fixedFeatureFloor_(config.featureActive
+        featureActive_(config.activeMask ? (config.activeMask & 2) != 0 : config.featureActive),
+        fixedFeatureFloor_(config.featureActive || config.activeMask
                                ? 0
                                : std::max(0, std::min(
                                      config.fixedFeatureFloor,
@@ -120,7 +126,9 @@ class SaturationPermitController {
         budget_(configuredPermits_ - fixedFeatureFloor_),
         probeWindows_(std::max(1, config.probeWindows)),
         completionWindows_(std::max(1, config.completionWindows)),
-        estimates_(config.workEstimates) {
+        estimates_(config.workEstimates),
+        activeMask_(config.activeMask ? config.activeMask & 7U : (config.featureActive ? 7U : 5U)) {
+    if (activeMask_ == 0) activeMask_ = 1;
     floors_.fill(0);
     saturation_.fill(0);
     saturationKnown_.fill(false);
@@ -128,7 +136,18 @@ class SaturationPermitController {
     completionStreak_.fill(0);
     floors_[domainIndex(Domain::FEATURE)] = fixedFeatureFloor_;
     buildProbeOrder();
-    beginProbe(0);
+    if (config.startFromFloors) {
+      int remaining = budget_;
+      for (size_t i = 0; i < kDomainCount; ++i) {
+        if (!(activeMask_ & (1U << i))) continue;
+        floors_[i] = std::max(0, std::min(config.initialFloors[i], remaining));
+        remaining -= floors_[i];
+      }
+      phase_ = Phase::STEADY;
+      recomputeCapacityLimited(); // no saturation claim from an unmeasured seed
+    } else {
+      beginProbe(0);
+    }
   }
 
   Decision initialDecision() const { return makeDecision(Reason::NONE, false); }
@@ -287,6 +306,13 @@ class SaturationPermitController {
  private:
   static constexpr size_t kDomainCount = 3;
 
+  static int minimumBudget(const Config& config) {
+    if (config.startFromFloors) return 1;
+    if (!config.activeMask) return config.featureActive ? 3 : 2;
+    unsigned mask = config.activeMask & 7U;
+    return std::max(1, int((mask & 1U) + ((mask >> 1) & 1U) + ((mask >> 2) & 1U)));
+  }
+
   static Config makeLegacyConfig(int configuredPermits,
                                  int fixedFeatureFloor,
                                  int probeWindows) {
@@ -374,9 +400,9 @@ class SaturationPermitController {
   }
 
   void buildProbeOrder() {
-    probeOrder_.push_back(Domain::ATAC);
-    probeOrder_.push_back(Domain::MAP);
-    if (featureActive_) {
+    if (activeMask_ & 4U) probeOrder_.push_back(Domain::ATAC);
+    if (activeMask_ & 1U) probeOrder_.push_back(Domain::MAP);
+    if (activeMask_ & 2U) {
       probeOrder_.push_back(Domain::FEATURE);
     }
     bool anyEstimate = false;
@@ -532,6 +558,7 @@ class SaturationPermitController {
   int probeWindows_;
   int completionWindows_;
   WorkEstimates estimates_;
+  unsigned activeMask_;
   std::array<int, kDomainCount> floors_{};
   std::array<int, kDomainCount> saturation_{};
   std::array<bool, kDomainCount> saturationKnown_{};

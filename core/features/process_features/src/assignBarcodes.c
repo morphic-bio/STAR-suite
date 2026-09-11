@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <time.h>
 #include "pf_bgzf_input.h"
 #include "../include/common.h"
 #include "../include/barcode_match.h"
@@ -22,6 +23,31 @@
 #ifndef PF_FASTQ_GZBUFFER_SIZE
 #define PF_FASTQ_GZBUFFER_SIZE (1U << 20)
 #endif
+
+typedef struct {
+    double wall;
+    double coordinator_cpu;
+} pf_phase_clock;
+
+static pf_phase_clock pf_phase_now(void) {
+    struct timespec wall, cpu;
+    clock_gettime(CLOCK_MONOTONIC, &wall);
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu);
+    pf_phase_clock value = {wall.tv_sec + wall.tv_nsec * 1e-9,
+                           cpu.tv_sec + cpu.tv_nsec * 1e-9};
+    return value;
+}
+
+static pf_phase_clock pf_phase_report(const char *phase, const char *directory,
+                                       pf_phase_clock start) {
+    const pf_phase_clock end = pf_phase_now();
+    // Coordinator CPU excludes MAP and worker threads, even inside STAR.
+    // It is useful for serial merge/finalization; it is NOT read-worker CPU.
+    fprintf(stderr, "[pf-phase] phase=%s wall_seconds=%.6f coordinator_cpu_seconds=%.6f monotonic_end=%.6f directory=%s\n",
+            phase, end.wall - start.wall, end.coordinator_cpu - start.coordinator_cpu,
+            end.wall, directory ? directory : "-");
+    return end;
+}
 
 static gzFile open_fastq_gz_reader(const char *path, const char *role) {
     gzFile file = gzopen(path, "rb");
@@ -1763,12 +1789,12 @@ static int find_matches_at_code_offset(unsigned char *sequence_code,
 
 int checkSequenceAndCorrectForN(char *line, char *corrected_lines[], char *buffer,int sequence_length, int maxN){
     int nCount=0;
-    int indices[maxN];
+    int indices[maxN > 0 ? maxN : 1];
     corrected_lines[0]=line;
     for (int i=0; i<sequence_length; i++){
         if (line[i] == 'N'){
+            if (nCount >= maxN) return 0;
             indices[nCount++]=i;
-            if (nCount > maxN) return 0;
             
         }
         else if (line[i] != 'A' && line[i] != 'C' && line[i] != 'G' && line[i] != 'T'){
@@ -1872,8 +1898,10 @@ static int exactCorrectFeature(char *line, feature_arrays *features, int maxN){
     }
 
     const size_t length=strlen(line)-1;
-    char buffer[(length+1) * (4 << ((maxN-1)*2))];
-    char *corrected_seqs[ 4 << ((maxN-1)*2)];
+    // Even with N expansion disabled, the original sequence needs one slot.
+    const int max_alts = maxN > 0 ? (4 << ((maxN-1)*2)) : 1;
+    char buffer[(length+1) * max_alts];
+    char *corrected_seqs[max_alts];
     int nAlts=checkSequenceAndCorrectForN(line, corrected_seqs, buffer, length, maxN);
     if (nAlts <= 0){
         return 0;
@@ -3748,8 +3776,9 @@ int simpleCorrectFeature(char *line, feature_arrays *features, int maxN, int max
     }
 
     const size_t length = strlen(line) - 1;
-    char buffer[(length + 1) * (4 << ((maxN - 1) * 2))];
-    char *corrected_seqs[4 << ((maxN - 1) * 2)];
+    const int max_alts = maxN > 0 ? (4 << ((maxN - 1) * 2)) : 1;
+    char buffer[(length + 1) * max_alts];
+    char *corrected_seqs[max_alts];
     int nAlts = checkSequenceAndCorrectForN(line, corrected_seqs, buffer, length, maxN);
     const int multi_alt = (nAlts > 1);
     if (nAlts <= 0) {
@@ -3792,8 +3821,9 @@ int simpleCorrectFeature(char *line, feature_arrays *features, int maxN, int max
 }
 int checkAndCorrectFeature(char *line, feature_arrays *features,int maxHammingDistance, int nThreads, int *hamming_distance, char *matching_sequence, int maxN,char *ambiguous, uint16_t *match_position, statistics *stats){
     const size_t length=strlen(line)-1;
-    char buffer[(length+1) * (4 << ((maxN-1)*2))];
-    char *corrected_seqs[ 4 << ((maxN-1)*2)];
+    const int max_alts = maxN > 0 ? (4 << ((maxN-1)*2)) : 1;
+    char buffer[(length+1) * max_alts];
+    char *corrected_seqs[max_alts];
 
     if (ambiguous) {
         *ambiguous = 0;
@@ -4111,10 +4141,11 @@ int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint1
         return 0;
     }
     //The return code should indicate whether we should calculate the barcode or not
-    char buffer[(barcode_length + 1) * (4 << ((max_barcode_n-1)*2))];
-    char *corrected_seqs[ 4 << ((max_barcode_n-1)*2)];
+    const int max_alts = maxN > 0 ? (4 << ((maxN-1)*2)) : 1;
+    char buffer[(barcode_length + 1) * max_alts];
+    char *corrected_seqs[max_alts];
     char *candidateBarcode = sequence;
-    memset (buffer, 0, (barcode_length + 1) * (4 << ((max_barcode_n-1)*2)));
+    memset (buffer, 0, sizeof(buffer));
 
     pf_trace_namespace_init_once();
     char raw_barcode[barcode_length + 1];
@@ -4282,7 +4313,9 @@ int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint1
 
 
 void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, int legacy_cb_rescue, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int emptydrops_use_fdr, int skip_qc_outputs, int *error_out, sample_args *sample){
+    pf_phase_clock phase_clock = pf_phase_now();
     process_pending_barcodes(hashes, pools, stats, min_posterior, legacy_cb_rescue);
+    phase_clock = pf_phase_report("pending_barcode_rescue", directory, phase_clock);
     double elapsed_time = get_time_in_seconds() - stats->start_time;
     fprintf(stderr, "Finished processing %ld reads in %.2f seconds (%.1f thousand reads/second)\n", stats->number_of_reads, elapsed_time, stats->number_of_reads / (double)elapsed_time / 1000.0);
 
@@ -4292,6 +4325,7 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
     // Create and populate the deduped counts using modular pf_counts API.
     // pf_build_deduped_counts() internally calls find_deduped_counts().
     pf_counts_result *counts_result = pf_build_deduped_counts(hashes, features->number_of_features, stringency, min_counts);
+    phase_clock = pf_phase_report("umi_dedup", directory, phase_clock);
     if (!counts_result) {
         fprintf(stderr, "Error: failed to build deduped counts\n");
         return;
@@ -4323,6 +4357,7 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
         filtered_barcodes_hash,  // May be NULL
         &active_filter
     );
+    phase_clock = pf_phase_report("barcode_filter", directory, phase_clock);
     
     // Handle filter status
     if (filter_status == PF_FILTER_FAILED) {
@@ -4461,7 +4496,9 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
     }
     
     // Clean up the counts result (frees all nested hash tables and arrays)
+    phase_clock = pf_phase_report("mex_and_qc_output", directory, phase_clock);
     pf_counts_result_free(counts_result);
+    pf_phase_report("counts_cleanup", directory, phase_clock);
 }
 
 void open_fastq_files(const char *barcode_fastq, const char *forward_fastq, const char *reverse_fastq, gzFile *barcode_fastqgz, gzFile *forward_fastqgz, gzFile *reverse_fastqgz) {
@@ -4539,7 +4576,13 @@ static void *read_bgzf_by_set(fastq_reader_set *set) {
     const size_t lines = 2 * n;
     sample_args *args = set->input_args;
     pf_bgzf_permits permits = {args->permit_hook_ctx,
-                               args->permit_acquire_hook, args->permit_release_hook};
+                               args->permit_acquire_hook, args->permit_release_hook, NULL};
+    if (args->bgzf_permit_acquire_hook && args->bgzf_permit_release_hook) {
+        permits.context = args->bgzf_permit_hook_ctx;
+        permits.acquire = args->bgzf_permit_acquire_hook;
+        permits.release = args->bgzf_permit_release_hook;
+        permits.observe = args->bgzf_observe_hook;
+    }
     char error[1024] = "";
     pf_bgzf_input *input = NULL;
     long long count = 0;
@@ -5822,14 +5865,14 @@ void *consume_reads(void *arg) {
     const int nThreads = sample_args->nThreads;
     int nreaders=(reader_sets[0]->forward_reader && reader_sets[0]->reverse_reader)?3:2;
     const int lines_per_block=2*nreaders;           /* NEW – 4 or 6 lines */
-    const int bootstrap_serial_waiter =
-        (thread_id != 0 &&
-         feature_mode_bootstrap_reads > 0 &&
+    const int bootstrap_ordered_mode =
+        (feature_mode_bootstrap_reads > 0 &&
          features &&
          features->feature_offsets &&
          feature_mode_hist &&
          feature_mode_offsets &&
          pf_has_anchor_arrays(features));
+    const int bootstrap_serial_waiter = thread_id != 0 && bootstrap_ordered_mode;
     pf_trace_reads_init_once();
     pf_trace_anchor_init_once();
     seq_hash_t thread_hot_d0;
@@ -5897,9 +5940,15 @@ void *consume_reads(void *arg) {
             usleep(100 * (empty_sweeps > 8 ? 8 : empty_sweeps));
 
         int data_available = 0;
-        for (int sweep = 0; sweep < nsets; sweep++) {
+        // During learning, wait for the next lane in round-robin order. Taking
+        // whichever lane is ready changes the training population and which
+        // reads receive the broader bootstrap search when decoder scheduling changes.
+        const int ordered_bootstrap = bootstrap_ordered_mode &&
+            __atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE) != 1;
+        for (int sweep = 0; sweep < (ordered_bootstrap ? 1 : nsets); sweep++) {
             int i = (rr_start + sweep) % nsets;
             if (done_flags[i]){
+                if (ordered_bootstrap) rr_start = (i + 1) % nsets;
                 continue;
             }
             fastq_reader_set *set = reader_sets[i];
@@ -5915,6 +5964,7 @@ void *consume_reads(void *arg) {
             if (set->filled < lines_per_block) {
                 if (set->done && set->filled == 0) {
                     done_flags[i] = 1;
+                    if (ordered_bootstrap) rr_start = (i + 1) % nsets;
                 }
                 pthread_mutex_unlock(&set->mutex);
                 continue;
@@ -6515,6 +6565,7 @@ static int pf_bgzf_assign_batch(void *opaque, unsigned worker,
 }
 
 void process_files_in_sample(sample_args *args) {
+    pf_phase_clock phase_clock = pf_phase_now();
     //allocate buffers here
     //number of lines to read into the buffer
     double  min_posterior=args->min_posterior;
@@ -6638,6 +6689,7 @@ void process_files_in_sample(sample_args *args) {
     }
 
     int input_error = 0;
+    phase_clock = pf_phase_report("reader_setup", args->directory, phase_clock);
     const int direct = native_count == sample_size && fastq_files->forward_fastq &&
         !fastq_files->reverse_fastq && !args->legacy_cb_rescue &&
         feature_mode_bootstrap_reads == 0 && !args->chem_detect && !args->probe_only;
@@ -6654,7 +6706,13 @@ void process_files_in_sample(sample_args *args) {
                 paths[2*i] = fastq_files->barcode_fastq[sample_offset+i];
                 paths[2*i+1] = fastq_files->forward_fastq[sample_offset+i];
             }
-            pf_bgzf_permits permits = {args->permit_hook_ctx, args->permit_acquire_hook, args->permit_release_hook};
+            pf_bgzf_permits permits = {args->permit_hook_ctx, args->permit_acquire_hook, args->permit_release_hook, NULL};
+            if (args->bgzf_permit_acquire_hook && args->bgzf_permit_release_hook) {
+                permits.context = args->bgzf_permit_hook_ctx;
+                permits.acquire = args->bgzf_permit_acquire_hook;
+                permits.release = args->bgzf_permit_release_hook;
+                permits.observe = args->bgzf_observe_hook;
+            }
             char error[1024] = "";
             input_error = !pf_bgzf_process_batches(paths, sample_size, 2, nconsumers,
                 args->bgzf_threads, args->bgzf_crc_check, max_reads > 0 ? max_reads : 0,
@@ -6694,6 +6752,7 @@ void process_files_in_sample(sample_args *args) {
     for (int i = 0; i < sample_size; ++i) input_error |= reader_sets[i]->input_error;
     }
     if (input_error && args->error_out) *args->error_out = 1;
+    phase_clock = pf_phase_report("read_assign_and_join", args->directory, phase_clock);
     // Merge data from all threads into the first thread's data structures
     for (int i = 1; i < nconsumers; i++) {
         merge_stats(&args->stats[0], &args->stats[i]);
@@ -6729,11 +6788,13 @@ void process_files_in_sample(sample_args *args) {
         free_memory_pool_collection(args->pools[i]);
         //[i] = NULL; // Avoid double-free in later cleanup
     }
+    phase_clock = pf_phase_report("thread_hash_merge_and_cleanup", args->directory, phase_clock);
     if (!args->probe_only && !input_error) {
         // Since merging is not required, finalize using the first thread's data.
         finalize_processing(args->features, &args->hashes[0], args->directory, args->pools[0], &args->stats[0], args->stringency, args->min_counts, min_posterior, args->legacy_cb_rescue, args->filtered_barcodes_hash, args->skip_emptydrops, args->emptydrops_failure_fatal, args->expected_cells, args->emptydrops_use_fdr, args->skip_qc_outputs, args->error_out, args);
     }
    
+    phase_clock = pf_phase_now();
     // Free the reader sets
     for (int i = 0; i < sample_size; ++i)
         free_fastq_reader_set(reader_sets[i]);
@@ -6753,6 +6814,7 @@ void process_files_in_sample(sample_args *args) {
     args->stats = NULL;
     args->hashes = NULL;
     args->pools = NULL;
+    pf_phase_report("sample_cleanup", args->directory, phase_clock);
 }
 
 void initialize_data_structures(data_structures *hashes){

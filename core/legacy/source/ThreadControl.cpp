@@ -1,4 +1,8 @@
 #include "ThreadControl.h"
+#include "BgzfRateController.h"
+#include "SaturationPermitController.h"
+#include "WorkloadDrainEstimate.h"
+#include <stdexcept>
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -112,6 +116,7 @@ void ThreadControl::mapPermitConfigure(
     mapPermitFloorsActive = false;
     mapPermitFifoEnabled = false;
     mapPermitWaitQueue.clear();
+    mapPermitDecodeQueues.clear();
 
     if (!mapPermitEnabledFlag) {
         mapPermitConfigured = mapPermitTotalThreads;
@@ -147,6 +152,8 @@ void ThreadControl::mapPermitConfigure(
     mapPermitNoAdmissibleGrantEvents = 0;
     mapPermitFloorChangeCalls = 0;
     for (size_t domain = 0; domain < mapPermitDomainCount; ++domain) {
+        mapPermitDecode[domain] = DecodeSnapshot{};
+        mapPermitCompletedPairs[domain] = 0;
         mapPermitDomainFloor[domain] = 0;
         mapPermitDomainInUse[domain] = 0;
         mapPermitDomainWaiters[domain] = 0;
@@ -313,6 +320,223 @@ void ThreadControl::mapPermitConfigureRetunePlan(const std::vector<int> &permitS
     mapPermitRetuneStep.store(0, std::memory_order_relaxed);
 }
 
+ThreadControl::~ThreadControl() { mapPermitStopHierarchy(); }
+
+bool ThreadControl::mapPermitChildAdmissibleLocked(size_t domain, PermitWork work) const {
+    if (!mapPermitHierarchyEnabledFlag.load()) return true;
+    if (work == PermitWork::BGZF)
+        return mapPermitDecode[domain].inUse < mapPermitDecode[domain].limit;
+    const int reserve = mapPermitDecodeReservationLocked(domain);
+    return reserve == 0 || mapPermitDomainInUse[domain] - mapPermitDecode[domain].inUse <
+        mapPermitUsableBudgetLocked(domain) - reserve;
+}
+
+int ThreadControl::mapPermitDecodeReservationLocked(size_t domain) const {
+    // The decoder split is borrowable. Only protect it from new processing
+    // leases when there is pending decoding and an underfilled ordered input.
+    // Otherwise processing may use the whole parent budget. Existing work is
+    // never preempted, and a one-permit parent must let both stages progress.
+    const auto& decode = mapPermitDecode[domain];
+    if (!mapPermitHierarchyEnabledFlag.load() || decode.waiters == 0) return 0;
+    bool inputLow = false;
+    for (const auto& entry : mapPermitDecodeQueues) {
+        const auto& queue = entry.second;
+        if (queue.domain == domain && queue.capacity > 0 &&
+            queue.ready <= queue.capacity / 4 && queue.outstanding > queue.ready) {
+            inputLow = true;
+            break;
+        }
+    }
+    return inputLow ? std::min(decode.limit,
+        std::max(0, mapPermitUsableBudgetLocked(domain) - 1)) : 0;
+}
+
+bool ThreadControl::mapPermitHasAdmissibleWaiterLocked(size_t domain) const {
+    if (!mapPermitHierarchyEnabledFlag.load()) return mapPermitDomainWaiters[domain] > 0;
+    for (const auto* waiter : mapPermitWaitQueue) {
+        if (permitDomainIndex(waiter->domain) == domain &&
+            mapPermitChildAdmissibleLocked(domain, waiter->work)) return true;
+    }
+    return false;
+}
+
+int ThreadControl::mapPermitUsableBudgetLocked(size_t domain) const {
+    int others = 0;
+    for (size_t i = 0; i < mapPermitDomainCount; ++i) {
+        if (i == domain) continue;
+        // Budget epochs follow parent demand, not every individual grant.
+        // Outstanding loans are reclaimed by floor admission on release.
+        const bool active = !mapPermitDomainComplete[i] &&
+            (mapPermitDomainWaiters[i] > 0 || mapPermitDomainInUse[i] > 0);
+        others += active ? mapPermitDomainFloor[i] : 0;
+    }
+    return std::max(1, mapPermitConfigured - others);
+}
+
+void ThreadControl::mapPermitStartHierarchy(const std::string& logPath, bool featureActive,
+        bool balance, uint64_t mapEstimate, uint64_t featureEstimate) {
+    if (mapPermitHierarchyEnabledFlag.load()) return;
+    mapPermitHierarchyLog.open(logPath.c_str());
+    if (!mapPermitHierarchyLog) throw std::runtime_error("Cannot write permit hierarchy log: " + logPath);
+    mapPermitHierarchyFeatureActive = featureActive;
+    mapPermitBalanceEnabled = balance;
+    if (balance) {
+        mapPermitBalanceLog.open((logPath + ".outer.tsv").c_str());
+        if (!mapPermitBalanceLog) throw std::runtime_error("Cannot write outer permit log: " + logPath);
+    }
+    {
+        std::lock_guard<std::mutex> lock(mapPermitMutex);
+        mapPermitFifoEnabled = true;
+        mapPermitReadEstimates[0] = mapEstimate;
+        mapPermitReadEstimates[1] = featureEstimate;
+        mapPermitReadEstimateExplicit[0] = mapEstimate != 0;
+        mapPermitReadEstimateExplicit[1] = featureEstimate != 0;
+        // Preserve explicit parent floors. Fill an unspecified MAP floor with
+        // the remaining budget; child limits confer no independent root floor.
+        if (featureActive && mapPermitDomainFloor[1] == 0)
+            mapPermitDomainFloor[1] = std::max(1, mapPermitConfigured / 2);
+        if (mapPermitDomainFloor[0] == 0)
+            mapPermitDomainFloor[0] = std::max(0, mapPermitConfigured - mapPermitDomainFloor[1]);
+        mapPermitFloorsActive = true;
+        for (size_t i = 0; i < 2; ++i)
+            mapPermitDecode[i].limit = std::max(1, mapPermitDomainFloor[i] / 4);
+        mapPermitHierarchyEnabledFlag.store(true);
+    }
+    mapPermitHierarchyStop.store(false);
+    mapPermitHierarchyThread = std::thread(&ThreadControl::mapPermitHierarchyLoop, this);
+}
+
+void ThreadControl::mapPermitPublishWorkEstimates(uint64_t mapPairs, uint64_t featurePairs) {
+    std::lock_guard<std::mutex> lock(mapPermitMutex);
+    if (!mapPermitHierarchyEnabledFlag.load()) return;
+    if (!mapPermitReadEstimateExplicit[0]) mapPermitReadEstimates[0] = mapPairs;
+    if (!mapPermitReadEstimateExplicit[1]) mapPermitReadEstimates[1] = featurePairs;
+}
+
+void ThreadControl::mapPermitStopHierarchy() {
+    mapPermitHierarchyStop.store(true);
+    mapPermitHierarchyWake.notify_all();
+    if (mapPermitHierarchyThread.joinable()) mapPermitHierarchyThread.join();
+    if (mapPermitHierarchyLog.is_open()) mapPermitHierarchyLog.close();
+    if (mapPermitBalanceLog.is_open()) mapPermitBalanceLog.close();
+}
+
+void ThreadControl::mapPermitHierarchyLoop() {
+    BgzfRateController controllers[2];
+    auto previousTime = std::chrono::steady_clock::now();
+    const auto start = previousTime;
+    auto outerTime = start;
+    WorkloadDrainEstimate estimators[2];
+    using Outer = star::multiome::SaturationPermitController;
+    Outer::Config config;
+    const auto initial = mapPermitSnapshot();
+    config.configuredPermits = initial.configuredPermits;
+    config.activeMask = mapPermitHierarchyFeatureActive ? 3U : 1U;
+    config.startFromFloors = true;
+    config.completionWindows = 1;
+    config.initialFloors = {{initial.mapDomain.floor, initial.featureDomain.floor, 0}};
+    Outer outer(config);
+    if (mapPermitBalanceEnabled)
+        mapPermitBalanceLog << "seconds\tmapFloor\tfeatureFloor\tmapCompletedPairs\tfeatureCompletedPairs\tmapEstimate\tfeatureEstimate\tmapRate\tfeatureRate\tmapEtaSec\tfeatureEtaSec\tmapComplete\tfeatureComplete\tinnerSettled\treason\n";
+    mapPermitHierarchyLog << "seconds\tdomain\tparentBudget\tfloor\tinUse\tloans\tdecodeLimit\tdecodeInUse\tdecodeWaiters\tprocessingWaiters\tcompletedPairs\trate\tdecodeBlocks\tdecodeBytes\tdecodeWorkNs\tdecodeWaitNs\tready\tcapacity\tworkers\tinputWaitNs\tdecodeReservation\treason\n";
+    while (!mapPermitHierarchyStop.load()) {
+        {
+            std::unique_lock<std::mutex> lock(mapPermitMutex);
+            mapPermitHierarchyWake.wait_for(lock, std::chrono::milliseconds(250),
+                [this] { return mapPermitHierarchyStop.load(); });
+        }
+        if (mapPermitHierarchyStop.load()) break;
+        const auto now = std::chrono::steady_clock::now();
+        const double dt = std::chrono::duration<double>(now - previousTime).count();
+        previousTime = now;
+        const auto snap = mapPermitSnapshot();
+        const PermitDomainSnapshot* domains[] = {&snap.mapDomain, &snap.featureDomain};
+        const bool outerDue = mapPermitBalanceEnabled &&
+            std::chrono::duration<double>(now - outerTime).count() >= 2.0;
+        bool innerSettled = true;
+        for (size_t i = 0; i < (mapPermitHierarchyFeatureActive ? 2U : 1U); ++i) {
+            const auto& domain = *domains[i];
+            int budget, reservation;
+            {
+                std::lock_guard<std::mutex> lock(mapPermitMutex);
+                budget = mapPermitUsableBudgetLocked(i);
+                reservation = mapPermitDecodeReservationLocked(i);
+            }
+            BgzfRateController::Observation observation;
+            observation.budget = budget;
+            observation.workers = static_cast<unsigned>(domain.decode.workers);
+            observation.completedPairs = domain.completedReadPairs;
+            observation.inputWaitNs = domain.decode.inputWaitNs;
+            observation.ready = domain.decode.ready;
+            observation.capacity = domain.decode.capacity;
+            observation.seconds = dt;
+            observation.decodePending = domain.decode.waiters > 0 || domain.decode.inUse > 0;
+            observation.processorReady = domain.currentWaiters > domain.decode.waiters ||
+                domain.inUse > domain.decode.inUse;
+            observation.allowNewTrial = !outerDue;
+            const auto decision = controllers[i].observe(observation);
+            if (!domain.complete && domain.decode.workers > 0)
+                innerSettled = innerSettled && controllers[i].settled();
+            std::vector<PermitWaiter*> wake;
+            {
+                std::lock_guard<std::mutex> lock(mapPermitMutex);
+                mapPermitAccountStateLocked(steadyNowNs());
+                mapPermitDecode[i].limit = decision.limit;
+                grantFifoWaitersLocked(wake);
+                for (auto* waiter : wake) waiter->cv.notify_one();
+            }
+            mapPermitHierarchyLog << std::chrono::duration<double>(now - start).count() << '\t'
+                << (i == 0 ? "map" : "feature") << '\t' << budget << '\t' << domain.floor << '\t'
+                << domain.inUse << '\t' << std::max(0, domain.inUse - domain.floor) << '\t'
+                << decision.limit << '\t' << domain.decode.inUse << '\t' << domain.decode.waiters << '\t'
+                << domain.currentWaiters - domain.decode.waiters << '\t' << domain.completedReadPairs << '\t'
+                << decision.rate << '\t' << domain.decode.blocks << '\t' << domain.decode.bytes << '\t'
+                << domain.decode.workNs << '\t' << domain.decode.waitNs << '\t' << domain.decode.ready << '\t'
+                << domain.decode.capacity << '\t' << domain.decode.workers << '\t' << domain.decode.inputWaitNs
+                << '\t' << reservation << '\t' << (domain.complete ? "complete" : decision.reason) << '\n';
+        }
+        mapPermitHierarchyLog.flush();
+        if (outerDue && innerSettled) {
+            uint64_t supplied[2];
+            {
+                std::lock_guard<std::mutex> lock(mapPermitMutex);
+                supplied[0] = mapPermitReadEstimates[0];
+                supplied[1] = mapPermitReadEstimates[1];
+            }
+            const double seconds = std::chrono::duration<double>(now - outerTime).count();
+            outerTime = now;
+            const auto m = estimators[0].observe(snap.mapDomain.completedReadPairs,
+                supplied[0], seconds, snap.mapDomain.complete);
+            const auto f = estimators[1].observe(snap.featureDomain.completedReadPairs,
+                supplied[1], seconds, snap.featureDomain.complete);
+            Outer::Observation o;
+            o.mapUnitsDelta = snap.mapDomain.complete ? 0 : m.delta;
+            o.featureUnitsDelta = snap.featureDomain.complete ? 0 : f.delta;
+            o.mapInUse = snap.mapDomain.inUse;
+            o.featureInUse = snap.featureDomain.inUse;
+            o.mapWaiters = snap.mapDomain.currentWaiters;
+            o.featureWaiters = snap.featureDomain.currentWaiters;
+            o.mapEtaSec = m.eta;
+            o.featureEtaSec = f.eta;
+            o.mapEstimateComplete = snap.mapDomain.complete;
+            o.featureEstimateComplete = snap.featureDomain.complete;
+            const auto d = outer.observe(o);
+            if (d.floorsChanged) {
+                mapPermitConfigureDomainFloors({d.mapFloor, d.featureFloor, 0});
+                estimators[0].allocationChanged();
+                estimators[1].allocationChanged();
+            }
+            mapPermitBalanceLog << std::chrono::duration<double>(now - start).count() << '\t'
+                << d.mapFloor << '\t' << d.featureFloor << '\t'
+                << snap.mapDomain.completedReadPairs << '\t' << snap.featureDomain.completedReadPairs << '\t'
+                << m.estimate << '\t' << f.estimate << '\t' << m.rate << '\t' << f.rate << '\t'
+                << m.eta << '\t' << f.eta << '\t' << snap.mapDomain.complete << '\t'
+                << snap.featureDomain.complete << '\t' << innerSettled << '\t' << Outer::reasonName(d.reason) << '\n';
+            mapPermitBalanceLog.flush();
+        }
+    }
+}
+
 void ThreadControl::mapPermitConfigureDomainFloors(const std::vector<int> &floorsByDomainIndex) {
     std::vector<PermitWaiter*> toWake;
     {
@@ -418,19 +642,20 @@ void ThreadControl::grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake) {
     // below-floor domain bypass a head waiter that's already at-floor.
     while (mapPermitAvailable > 0 && !mapPermitWaitQueue.empty()) {
         auto pickIt = mapPermitWaitQueue.end();
-        if (!mapPermitFloorsActive) {
+        if (!mapPermitFloorsActive && !mapPermitHierarchyEnabledFlag.load()) {
             pickIt = mapPermitWaitQueue.begin();
         } else {
             for (auto it = mapPermitWaitQueue.begin();
                  it != mapPermitWaitQueue.end(); ++it) {
                 const size_t di = permitDomainIndex((*it)->domain);
+                if (!mapPermitChildAdmissibleLocked(di, (*it)->work)) continue;
                 if (mapPermitDomainInUse[di] < mapPermitDomainFloor[di]) {
                     pickIt = it; break;
                 }
                 bool blockedByFloor = false;
                 for (size_t j = 0; j < mapPermitDomainCount; ++j) {
                     if (j == di) continue;
-                    if (mapPermitDomainWaiters[j] > 0
+                    if (mapPermitHasAdmissibleWaiterLocked(j)
                             && mapPermitDomainInUse[j]
                                     < mapPermitDomainFloor[j]) {
                         blockedByFloor = true; break;
@@ -455,6 +680,12 @@ void ThreadControl::grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake) {
         mapPermitWaitQueue.erase(pickIt);
         --mapPermitDomainWaiters[di];
         ++mapPermitDomainInUse[di];
+        if (waiter->work == PermitWork::BGZF) {
+            --mapPermitDecode[di].waiters;
+            ++mapPermitDecode[di].inUse;
+            mapPermitDecode[di].maxInUse = std::max<uint64_t>(
+                mapPermitDecode[di].maxInUse, mapPermitDecode[di].inUse);
+        }
         if (mapPermitTelemetryEnabledFlag) {
             ++mapPermitDomainQueuedGrantCalls[di];
             mapPermitDomainMaxInUse[di] = std::max<uint64_t>(
@@ -462,7 +693,13 @@ void ThreadControl::grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake) {
         }
         waiter->granted = true;
         --mapPermitAvailable;
-        toWake.push_back(waiter);
+        if (mapPermitHierarchyEnabledFlag.load()) {
+            // Waiters live on acquiring threads' stacks. Keep the lock until
+            // notification so a timeout/spurious wake cannot destroy one first.
+            waiter->cv.notify_one();
+        } else {
+            toWake.push_back(waiter);
+        }
     }
 }
 
@@ -531,7 +768,7 @@ uint64_t ThreadControl::mapPermitAcquire() {
     return mapPermitAcquireForDomain(PermitDomain::MAP);
 }
 
-uint64_t ThreadControl::mapPermitAcquireForDomain(PermitDomain domain) {
+uint64_t ThreadControl::mapPermitAcquireForDomain(PermitDomain domain, PermitWork work) {
     if (!mapPermitEnabledFlag) {
         return 0;
     }
@@ -558,11 +795,13 @@ uint64_t ThreadControl::mapPermitAcquireForDomain(PermitDomain domain) {
     // notify_one() bypass race.
     if (mapPermitFifoEnabled) {
         std::unique_lock<std::mutex> lock(mapPermitMutex);
+        if (work == PermitWork::BGZF) ++mapPermitDecode[domainIndex].acquireCalls;
         // Domain-aware fast path: only take a free permit if the queue is
         // empty AND admitting this domain wouldn't violate another domain's
         // floor. When floors are inactive this collapses to the simple check.
         auto canAdmitFifo = [&]() -> bool {
             if (mapPermitAvailable <= 0) return false;
+            if (!mapPermitChildAdmissibleLocked(domainIndex, work)) return false;
             if (!mapPermitFloorsActive) return true;
             if (mapPermitDomainInUse[domainIndex]
                     < mapPermitDomainFloor[domainIndex]) {
@@ -570,7 +809,7 @@ uint64_t ThreadControl::mapPermitAcquireForDomain(PermitDomain domain) {
             }
             for (size_t i = 0; i < mapPermitDomainCount; ++i) {
                 if (i == domainIndex) continue;
-                if (mapPermitDomainWaiters[i] > 0
+                if (mapPermitHasAdmissibleWaiterLocked(i)
                         && mapPermitDomainInUse[i]
                                 < mapPermitDomainFloor[i]) {
                     return false;
@@ -582,6 +821,11 @@ uint64_t ThreadControl::mapPermitAcquireForDomain(PermitDomain domain) {
             mapPermitAccountStateLocked(steadyNowNs());
             --mapPermitAvailable;
             ++mapPermitDomainInUse[domainIndex];
+            if (work == PermitWork::BGZF) {
+                ++mapPermitDecode[domainIndex].inUse;
+                mapPermitDecode[domainIndex].maxInUse = std::max<uint64_t>(
+                    mapPermitDecode[domainIndex].maxInUse, mapPermitDecode[domainIndex].inUse);
+            }
             if (mapPermitTelemetryEnabledFlag) {
                 ++mapPermitDomainFastAcquireCalls[domainIndex];
                 mapPermitDomainMaxInUse[domainIndex] = std::max<uint64_t>(
@@ -591,10 +835,12 @@ uint64_t ThreadControl::mapPermitAcquireForDomain(PermitDomain domain) {
         } else {
             PermitWaiter waiter;
             waiter.domain = domain;
+            waiter.work = work;
             mapPermitAccountStateLocked(steadyNowNs());
             mapPermitWaitQueue.push_back(&waiter);
             mapPermitBlockedAcquireCalls.fetch_add(1, std::memory_order_relaxed);
             ++mapPermitDomainWaiters[domainIndex];
+            if (work == PermitWork::BGZF) ++mapPermitDecode[domainIndex].waiters;
             if (mapPermitTelemetryEnabledFlag) {
                 ++mapPermitDomainBlockedAcquireCalls[domainIndex];
                 mapPermitDomainMaxWaiters[domainIndex] = std::max<uint64_t>(
@@ -604,6 +850,11 @@ uint64_t ThreadControl::mapPermitAcquireForDomain(PermitDomain domain) {
             const uint64_t waiters =
                 mapPermitCurrentWaiters.fetch_add(1, std::memory_order_relaxed) + 1;
             atomicStoreMax(mapPermitMaxWaiters, waiters);
+            if (mapPermitHierarchyEnabledFlag.load()) {
+                std::vector<PermitWaiter*> wake;
+                grantFifoWaitersLocked(wake);
+                for (auto* queued : wake) queued->cv.notify_one();
+            }
             while (!waiter.granted) {
                 if (waiter.cv.wait_for(
                         lock, std::chrono::nanoseconds(kPermitWaitPollNs)) ==
@@ -699,6 +950,7 @@ uint64_t ThreadControl::mapPermitAcquireForDomain(PermitDomain domain) {
                 const uint64_t waiters = mapPermitCurrentWaiters.fetch_add(1, std::memory_order_relaxed) + 1;
                 atomicStoreMax(mapPermitMaxWaiters, waiters);
                 ++mapPermitDomainWaiters[domainIndex];
+                if (work == PermitWork::BGZF) ++mapPermitDecode[domainIndex].waiters;
                 if (mapPermitTelemetryEnabledFlag) {
                     ++mapPermitDomainBlockedAcquireCalls[domainIndex];
                     mapPermitDomainMaxWaiters[domainIndex] = std::max<uint64_t>(
@@ -753,6 +1005,7 @@ uint64_t ThreadControl::mapPermitAcquireForDomain(PermitDomain domain) {
         if (blocked) {
             mapPermitCurrentWaiters.fetch_sub(1, std::memory_order_relaxed);
             --mapPermitDomainWaiters[domainIndex];
+            if (work == PermitWork::BGZF) --mapPermitDecode[domainIndex].waiters;
             if (mapPermitTelemetryEnabledFlag) {
                 ++mapPermitDomainQueuedGrantCalls[domainIndex];
             }
@@ -761,6 +1014,12 @@ uint64_t ThreadControl::mapPermitAcquireForDomain(PermitDomain domain) {
         }
         --mapPermitAvailable;
         ++mapPermitDomainInUse[domainIndex];
+        if (work == PermitWork::BGZF) {
+            ++mapPermitDecode[domainIndex].acquireCalls;
+            ++mapPermitDecode[domainIndex].inUse;
+            mapPermitDecode[domainIndex].maxInUse = std::max<uint64_t>(
+                mapPermitDecode[domainIndex].maxInUse, mapPermitDecode[domainIndex].inUse);
+        }
         if (mapPermitTelemetryEnabledFlag) {
             mapPermitDomainMaxInUse[domainIndex] = std::max<uint64_t>(
                 mapPermitDomainMaxInUse[domainIndex],
@@ -788,7 +1047,8 @@ void ThreadControl::mapPermitReleaseForDomain(
     uint64_t waitNs,
     uint64_t workUnits,
     uint64_t workBytes,
-    uint64_t workNs
+    uint64_t workNs,
+    PermitWork work
 ) {
     if (!mapPermitEnabledFlag) {
         return;
@@ -806,6 +1066,7 @@ void ThreadControl::mapPermitReleaseForDomain(
                 mapPermitAvailable = mapPermitConfigured;
             }
             const size_t releasingIdx = permitDomainIndex(domain);
+            accountWorkReleaseLocked(releasingIdx, work, waitNs, workUnits, workBytes, workNs);
             if (mapPermitDomainInUse[releasingIdx] > 0) {
                 --mapPermitDomainInUse[releasingIdx];
             }
@@ -846,6 +1107,7 @@ void ThreadControl::mapPermitReleaseForDomain(
             mapPermitAvailable = mapPermitConfigured;
         }
         const size_t releasingIdx = permitDomainIndex(domain);
+        accountWorkReleaseLocked(releasingIdx, work, waitNs, workUnits, workBytes, workNs);
         if (mapPermitDomainInUse[releasingIdx] > 0) {
             --mapPermitDomainInUse[releasingIdx];
         }
@@ -897,6 +1159,47 @@ void ThreadControl::mapPermitReleaseForDomain(
     }
 }
 
+void ThreadControl::accountWorkReleaseLocked(size_t domain, PermitWork work,
+        uint64_t waitNs, uint64_t units, uint64_t bytes, uint64_t workNs) {
+    if (work == PermitWork::BGZF) {
+        auto& decode = mapPermitDecode[domain];
+        --decode.inUse;
+        ++decode.releaseCalls;
+        decode.blocks += units;
+        decode.bytes += bytes;
+        decode.workNs += workNs;
+        decode.waitNs += waitNs;
+    } else {
+        mapPermitCompletedPairs[domain] += units;
+    }
+}
+
+void ThreadControl::mapPermitObserveDecode(PermitDomain domain, const void* reader,
+        uint64_t ready, uint64_t outstanding, uint64_t capacity,
+        unsigned workers, int waiting, int live) {
+    std::lock_guard<std::mutex> lock(mapPermitMutex);
+    const auto now = steadyNowNs();
+    auto found = mapPermitDecodeQueues.find(reader);
+    if (found != mapPermitDecodeQueues.end() && found->second.waitStartNs) {
+        mapPermitDecode[found->second.domain].inputWaitNs += now - found->second.waitStartNs;
+    }
+    if (!live) {
+        mapPermitDecodeQueues.erase(reader);
+    } else {
+        auto& queue = mapPermitDecodeQueues[reader];
+        queue.domain = permitDomainIndex(domain);
+        queue.ready = ready;
+        queue.outstanding = outstanding;
+        queue.capacity = capacity;
+        queue.workers = workers;
+        queue.waitStartNs = waiting ? now : 0;
+    }
+    if (mapPermitHierarchyEnabledFlag.load() && mapPermitAvailable > 0 && !mapPermitWaitQueue.empty()) {
+        std::vector<PermitWaiter*> wake;
+        grantFifoWaitersLocked(wake);
+    }
+}
+
 ThreadControl::MapPermitSnapshot ThreadControl::mapPermitSnapshot() const {
     MapPermitSnapshot snapshot{};
     snapshot.enabled = mapPermitEnabledFlag;
@@ -937,6 +1240,8 @@ ThreadControl::MapPermitSnapshot ThreadControl::mapPermitSnapshot() const {
         PermitDomainSnapshot *domainSnapshots[mapPermitDomainCount] = {
             &snapshot.mapDomain, &snapshot.featureDomain, &snapshot.atacDomain};
         for (size_t domain = 0; domain < mapPermitDomainCount; ++domain) {
+            domainSnapshots[domain]->decode = mapPermitDecode[domain];
+            domainSnapshots[domain]->completedReadPairs = mapPermitCompletedPairs[domain];
             domainSnapshots[domain]->complete = mapPermitDomainComplete[domain];
             domainSnapshots[domain]->floor = mapPermitDomainFloor[domain];
             domainSnapshots[domain]->inUse = mapPermitDomainInUse[domain];
@@ -958,6 +1263,18 @@ ThreadControl::MapPermitSnapshot ThreadControl::mapPermitSnapshot() const {
                 mapPermitDomainInUsePermitNs[domain];
             domainSnapshots[domain]->waiterNs =
                 mapPermitDomainWaiterNs[domain];
+        }
+        for (const auto& item : mapPermitDecodeQueues) {
+            const auto& queue = item.second;
+            auto& decode = domainSnapshots[queue.domain]->decode;
+            decode.ready += queue.ready;
+            decode.outstanding += queue.outstanding;
+            decode.capacity += queue.capacity;
+            decode.workers += queue.workers;
+            if (queue.waitStartNs) {
+                ++decode.waitingReaders;
+                decode.inputWaitNs += snapshotNowNs - queue.waitStartNs;
+            }
         }
     }
 

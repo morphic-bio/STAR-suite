@@ -929,6 +929,10 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     const int configuredPermits = (P.dynamicThreadConstMapPermits > 0)
         ? P.dynamicThreadConstMapPermits
         : permitTotalThreads;
+    int configuredMapFloor = std::max(0, P.dynamicThreadMapFloor);
+    int configuredFeatureFloor = std::max(0, P.dynamicThreadFeatureFloor);
+    int configuredAtacFloor = std::max(0, P.dynamicThreadAtacFloor);
+    if (!g_threadChunks.mapPermitHierarchyEnabled()) {
     g_threadChunks.mapPermitConfigure(interfaceEnabled, permitTotalThreads, configuredPermits, telemetryEnabled, variableThreadsEnabled);
     g_threadChunks.mapPermitConfigureCpuAware(
         interfaceEnabled && P.dynamicThreadPfControllerCpuAware == 1,
@@ -939,9 +943,6 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
 
     // Per-domain borrowable floors (Step 5a). Index order must match
     // ThreadControl::permitDomainIndex(): MAP=0, FEATURE=1, ATAC=2.
-    int configuredMapFloor = std::max(0, P.dynamicThreadMapFloor);
-    int configuredFeatureFloor = std::max(0, P.dynamicThreadFeatureFloor);
-    int configuredAtacFloor = std::max(0, P.dynamicThreadAtacFloor);
     if (interfaceEnabled && P.chromapAtac.enabled == 1 &&
         P.dynamicThreadAtacController == 2) {
         const bool featureActive = P.dynamicThreadFeatureWorkEstimate > 0;
@@ -976,6 +977,12 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     // queued waiters in strict arrival order; new arrivals cannot
     // fast-path past existing waiters.
     g_threadChunks.mapPermitConfigureFifoWaiters(P.dynamicThreadFifoWaiters == 1);
+    } else {
+        const auto initial = g_threadChunks.mapPermitSnapshot();
+        configuredMapFloor = initial.mapDomain.floor;
+        configuredFeatureFloor = initial.featureDomain.floor;
+        configuredAtacFloor = initial.atacDomain.floor;
+    }
 
     if (interfaceEnabled) {
         pthread_mutex_lock(&g_threadChunks.mutexLogMain);

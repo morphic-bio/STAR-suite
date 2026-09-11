@@ -10,6 +10,33 @@
 #include <vector>
 
 int main() {
+    // Native decoding and processing consume the same parent permits, but
+    // only completed read pairs advance the parent's biological workload.
+    for (bool fifo : {false, true}) {
+        ThreadControl pool;
+        pool.mapPermitConfigure(true, 2, 2, true, false);
+        pool.mapPermitConfigureFifoWaiters(fifo);
+        using D = ThreadControl::PermitDomain;
+        using W = ThreadControl::PermitWork;
+        auto decodeWait = pool.mapPermitAcquireForDomain(D::FEATURE, W::BGZF);
+        auto processWait = pool.mapPermitAcquireForDomain(D::FEATURE);
+        auto snap = pool.mapPermitSnapshot();
+        assert(snap.inUsePermits == 2 && snap.featureDomain.decode.inUse == 1);
+        pool.mapPermitReleaseForDomain(D::FEATURE, decodeWait, 7, 4096, 100, W::BGZF);
+        pool.mapPermitReleaseForDomain(D::FEATURE, processWait, 101, 8192, 200);
+        snap = pool.mapPermitSnapshot();
+        assert(snap.availablePermits == 2 && snap.featureDomain.decode.inUse == 0);
+        assert(snap.featureDomain.completedReadPairs == 101);
+        assert(snap.featureDomain.decode.blocks == 7);
+        assert(snap.featureDomain.workUnitsTotal == 108); // retained legacy aggregate
+        assert(snap.featureDomain.decode.acquireCalls == snap.featureDomain.decode.releaseCalls);
+        int reader;
+        pool.mapPermitObserveDecode(D::FEATURE, &reader, 2, 3, 4, 8, 0, 1);
+        snap = pool.mapPermitSnapshot();
+        assert(snap.featureDomain.decode.ready == 2 && snap.featureDomain.decode.workers == 8);
+        pool.mapPermitObserveDecode(D::FEATURE, &reader, 0, 0, 0, 0, 0, 0);
+        assert(pool.mapPermitSnapshot().featureDomain.decode.workers == 0);
+    }
     // Durable completion is explicit permit state, not a guess based on a
     // zero-work window. It releases the completed domain's floor immediately
     // and prevents a later controller update from reinstalling that floor.

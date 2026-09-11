@@ -34,6 +34,7 @@ update this file with its output location.
 
 ## Known untracked artifacts (current)
 
+- `/home/lhhung/pf_larry_regression_20260911/` (feature-search policy regression diagnostics, clean build logs, full A375 revert validation in `a375_revert_star/`, semantic feature-MEX and bytewise GEX comparisons; see `docs/HANDOFF_PF_SEARCH_REVERT_A375_VALIDATION_20260911.md`)
 - `.codespaces-demo/` (Codespaces demo cache, downloaded public fixtures, tiny indices, and walkthrough runs)
 - `plans/artifacts/parms_tests_YYYYMMDD/` (logs + report)
 - `tests/*_output*/` (smoke/regression outputs)
@@ -1612,6 +1613,59 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
 - `native_accepted`, `native_default_accepted`, `existing_accepted`, and `existing_control` retain native/materialization outputs, commands, binary hashes and wall/CPU/RSS/I/O measurements. `ACCEPTED_LARGE_RESULTS.json` is the final comparison record.
 - The large input reuses real A375 counts and explicitly synthetic OCM sample suffixes from the prior cross-module fixture. The existing-call arm uses the prior caller's 1,188 global calls. See `large_inventory.json` and `existing_inventory.json`.
 - No reference index, alignment, BAM, sidecar, cloud job or new release was needed. Reuse saved controls; the regression runner accepts `--saved-native`, `--saved-existing`, and `--saved-ordered`.
+# A375 hierarchical permit validation (2026-09-11, development)
+
+- Runbook: `docs/RUNBOOK_ADAPTIVE_PERMIT_BALANCING_A375_20260911.md`.
+- Historical command/log manifest: `docs/ADAPTIVE_PERMIT_A375_REFERENCE_RUNS_20260911.json`.
+- Artifact root: `/home/lhhung/pf_larry_regression_20260911/hierarchy/`.
+- `step1/`: clean accounting build and permit tests; `step2/`: initial hierarchy build,
+  controller/input tests and pre-worker parameter-conflict rejection.
+- `a375_inner_off/`, `a375_inner_on/`: completed full A375 same-binary comparison,
+  191.9031/189.6228 s wrapper wall and 25.451/26.2649 s feature API. Each retains
+  `execution.json`, exact argv/environment, binary/source hashes and patch, GNU time,
+  stdout/stderr, process-tree CPU samples and biological outputs. On arm has
+  `out/PermitHierarchy.tsv` at 250 ms resolution.
+- `a375_inner_comparison.json`: strict parity failed for one raw feature UMI at
+  `IL1B_sg2_HEK / GGGTCAGCACCTCACT`; GEX, filtered matrices and guide calls match.
+  This entry was also the residual in the pre-hierarchy March comparison. The later
+  zero-N and learning-order diagnostics below identify defects before merge/gather.
+- `a375_inner_tail_diagnosis.json`: MAP takes all 32 permits as soon as feature-read
+  processing ends; approximately 31 active permits in the subsequent GEX tail. Most
+  observed input waiting occurs during read overlap (4.13 s versus 0.032 s later).
+- `step2_demand/`: separate clean build and passed unit/input tests for a borrowable
+  decoder reservation only under low ordered input with pending decode work. Binary
+  SHA256 `adca5d77abab460e9a389c6691d8a5c09cd0047a0fc9e1469bd0a410c7b47d98`.
+  Full `a375_demand_off/` and `a375_demand_on/` completed in 191.88/190.40 s;
+  `a375_fixed4/` completed in 189.36 s. Six matrices and three guide tables agree exactly.
+- `step4/`: clean inner/outer build and passed legacy/new controller, input and CLI tests.
+  `a375_outer_{fixed4,inner4,balanced4}/`: same-binary 189.36/191.59/190.86 s full runs.
+  GEX, filtered feature matrices and guide tables match; raw feature singletons differ.
+  `a375_step4_summary.json` and strict comparisons retain the failed raw parity gate.
+- `umi_trace/`, `umi_trace_modes/`: target read ledgers, before/after merge snapshots,
+  source-order controls and the negative-shift UBSan failure. Same relevant producer and
+  consumer pairs; singleton differences exist before merge and are not deduplication ties.
+- `zero_n_fix/`: actual-read regression, clean fixed build, ASan/UBSan and anchor tests.
+  One expansion slot for zero-N prevents input corruption and invalid shift arithmetic.
+- `learning_order_fix/`: same 200,000 source pairs in two lanes, opposite producer delays.
+  Prior zero-N-only implementation differs in 215 raw entries; deterministic round-robin
+  learning has identical histograms and 147,638 UMIs under both delays. Exact input and
+  source identities, build commands and matrix comparisons retained.
+- `a375_corrected_{fixed4,inner4,balanced4}/`: full A375 correctness build
+  `ce9d8142f6e8f0f52d4755b669265166f4a08e673c65650be362e8ffe2577a3c`,
+  192.10/190.62/190.60 s total wall; all six matrices, three guide-call CSVs and feature
+  totals agree exactly. `a375_corrected_summary.json` records phase/CPU/RSS results;
+  `a375_correctness_cross_build_impact.json` records the separate effect of the fixes
+  versus the older build. See `docs/HANDOFF_A375_HIERARCHY_CORRECTNESS_20260911.md`.
+- These are unreleased development runs. Correctness precedes end-to-end wall time,
+  full-workload tail (including gathers), then average CPU. March's feature duration is
+  a historical diagnostic reference, not an independent performance target.
+
+- A375 exit-table probes: `/home/lhhung/pf_larry_regression_20260911/hierarchy/exit_cleanup_probe/`.
+  Same clean CbCorrector object and real 3,686,400-barcode whitelist; 88,270,080 H1 entries,
+  42,938,880 ambiguity keys. Construction ~44 s; isolated destruction 11.43 s with no
+  threads, 12.00 s after a joined thread. Full STAR's 27–28 s exit remains only partly
+  explained; these are component experiments, not new full-set timings. Source, objects,
+  binary hashes, manifests and timing files retained. No production change.
 
 - A375 CbCorrector khash/flat-array follow-up (2026-09-11):
   `/home/lhhung/pf_larry_regression_20260911/hierarchy/cbcorrector_flat_hash/` contains preserved
@@ -1627,3 +1681,12 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   Test runner `tests/run_cb_corrector_storage_test.py` requires a preserved baseline source directory
   and fresh external `--out`; this artifact root retains both ordinary and sanitizer runs.
   Details: `docs/benchmarks/A375_CB_CORRECTOR_FLAT_HASH_20260911.md`. Development work, unreleased.
+
+- MSK ES LARRY quick comparison input (2026-09-11):
+  `/home/lhhung/pf_larry_regression_20260911/larry_subset_200k/` contains 200,000 read pairs,
+  first 25,000 from each of eight lanes, in 16 ordinary-gzip FASTQs (11,357,278 compressed bytes).
+  Full 245,979-feature reference and TRU whitelist are copied unchanged. `manifest.json` retains
+  source identities, prefix/output/reference hashes, exact counts and successful paired FASTQ/CRC
+  validation. `../create_larry_subset_200k.py` preserves the reproducible creation procedure.
+  This is a deterministic prefix regression fixture, not random biological sampling. Baseline/current
+  feature assignment has not yet been run on it.

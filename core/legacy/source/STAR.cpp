@@ -3575,6 +3575,7 @@ int main(int argInN, char *argIn[])
     // assignment, and concurrent ATAC have all joined.  Earlier summaries are
     // useful interval diagnostics but cannot establish the permit exit
     // invariant for a multi-arm worker.
+    g_threadChunks.mapPermitStopHierarchy();
     if (P.dynamicThreadInterface == 1) {
         const ThreadControl::MapPermitSnapshot permitFinal =
             g_threadChunks.mapPermitSnapshot();
