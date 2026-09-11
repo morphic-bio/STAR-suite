@@ -1,3 +1,20 @@
+star-suite (1.9.3-1) unstable; urgency=medium
+
+  * Restore feature-position learning when a feature offset is given explicitly,
+    so guide and lineage libraries regain the reads lost since 1.7: A375 assigns
+    9,274,336 feature reads again instead of 9,063,551.
+  * Remove repeated work in LARRY learning and in the broad fallback search, and
+    fix expansion-buffer bounds when no Ns are permitted.
+  * Replace node-based barcode, UMI and read-counter storage found by the
+    allocation audit, which also removes the long single-threaded cleanup at exit.
+  * Give Velocyto corrected read identities from the direct hash bridge, so
+    --outSAMtype None runs no longer produce empty Velocyto layers.
+  * Add the opt-in --dynamicThreadBgzfHierarchy and --dynamicThreadBalance
+    scheduling modes; both default to off.
+  * Report STAR Suite 1.9.3 from STAR --version; retain index compatibility.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 11 Sep 2026 22:02:07 +0000
+
 star-suite (1.9.2-1) unstable; urgency=medium
 
   * Separate the OrdMag primary floor from the EmptyDrops candidate floor:
