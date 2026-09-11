@@ -225,32 +225,37 @@ vector<uint32_t> OccupancyGuard::filterHighOccupancy(
             cb16Length = barcodes[0].size() - tagLength;
         }
         
-        // Group cells by GEM (CB16) - track unique tags AND cell indices per GEM
-        unordered_map<string, unordered_set<string>> gemToUniqueTags;  // CB16 -> unique TAG8s
-        unordered_map<string, vector<uint32_t>> gemToCellIndices;      // CB16 -> cell indices
-        
-        for (size_t i = 0; i < barcodes.size(); i++) {
-            if (barcodes[i].size() < cb16Length + tagLength) {
-                continue;  // Skip malformed barcodes
-            }
-            string gem = barcodes[i].substr(0, cb16Length);  // CB16
-            string tag = barcodes[i].substr(barcodes[i].size() - tagLength);  // TAG8
-            gemToUniqueTags[gem].insert(tag);
-            gemToCellIndices[gem].push_back(static_cast<uint32_t>(i));
+        // Sort indices into the existing barcode strings. Adjacent GEM/tag runs
+        // replace the two nested maps without copying any barcode or tag strings.
+        vector<uint32_t> order;
+        order.reserve(barcodes.size());
+        for (size_t i = 0; i < barcodes.size(); ++i) {
+            if (barcodes[i].size() >= cb16Length + tagLength)
+                order.push_back(static_cast<uint32_t>(i));
         }
-        
-        // Find GEMs where UNIQUE TAG COUNT exceeds threshold (matches MC simulation)
-        for (const auto& gemEntry : gemToUniqueTags) {
-            const string& gem = gemEntry.first;
-            const unordered_set<string>& uniqueTags = gemEntry.second;
-            if (uniqueTags.size() > occupancyThreshold) {
-                // Remove ALL cells in this high-occupancy GEM
-                const vector<uint32_t>& cellIndices = gemToCellIndices[gem];
-                for (uint32_t idx : cellIndices) {
-                    toRemove.push_back(idx);
-                }
+        auto gemCompare = [&](uint32_t a, uint32_t b) {
+            return barcodes[a].compare(0, cb16Length, barcodes[b], 0, cb16Length);
+        };
+        auto tagCompare = [&](uint32_t a, uint32_t b) {
+            return barcodes[a].compare(barcodes[a].size() - tagLength, tagLength,
+                barcodes[b], barcodes[b].size() - tagLength, tagLength);
+        };
+        sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
+            const int gem = gemCompare(a, b);
+            return gem ? gem < 0 : tagCompare(a, b) < 0;
+        });
+        for (size_t first = 0; first < order.size();) {
+            size_t end = first + 1, tags = 1;
+            while (end < order.size() && gemCompare(order[first], order[end]) == 0) {
+                if (tagCompare(order[end - 1], order[end]) != 0) ++tags;
+                ++end;
             }
+            if (tags > occupancyThreshold)
+                toRemove.insert(toRemove.end(), order.begin() + first, order.begin() + end);
+            first = end;
         }
+        // Consumers treat removals as a set; expose deterministic input-index order.
+        sort(toRemove.begin(), toRemove.end());
     } else {
         // Hash-based mode: Compute occupancy directly (existing logic)
         vector<double> occupancies;
