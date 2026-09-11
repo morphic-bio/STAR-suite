@@ -17,7 +17,11 @@ PREFETCH_BIN="${PREFETCH_BIN:-}"
 PIGZ_BIN="${PIGZ_BIN:-}"
 SEQTK_BIN="${SEQTK_BIN:-}"
 SAMTOOLS_BIN="${SAMTOOLS_BIN:-}"
+AWK_BIN="${AWK_BIN:-}"
+TRIM_GALORE_BIN="${TRIM_GALORE_BIN:-}"
+FASTQC_BIN="${FASTQC_BIN:-}"
 TRIMVALIDATE_BIN="${REPO_ROOT}/core/features/vbem/tools/trimvalidate/trimvalidate"
+TRIM_QC_FASTQ_BIN="${REPO_ROOT}/core/legacy/source/trim_qc_fastq"
 REMOVE_Y_READS_BIN="${REPO_ROOT}/core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads"
 TXIMPORT_BIN="${REPO_ROOT}/core/features/vbem/tools/tximport_compat/tximport_compat"
 SAMPLE_FLD_BIN="${REPO_ROOT}/core/features/vbem/tools/sample_fld/sample_fld"
@@ -43,7 +47,11 @@ Optional:
   --pigz-bin PATH              pigz binary (fallback PATH).
   --seqtk-bin PATH             seqtk binary (fallback PATH).
   --samtools-bin PATH          samtools binary (fallback PATH).
+  --awk-bin PATH               awk binary (fallback PATH).
+  --trim-galore-bin PATH       Trim Galore binary (fallback PATH).
+  --fastqc-bin PATH            FastQC binary (fallback PATH).
   --trimvalidate-bin PATH      trimvalidate binary (default: repo path).
+  --trim-qc-fastq-bin PATH     trim_qc_fastq binary (default: repo path).
   --remove-y-reads-bin PATH    remove_y_reads binary (default: repo path).
   --tximport-bin PATH          tximport_compat binary (default: repo path).
   --sample-fld-bin PATH        sample_fld binary (default: repo path).
@@ -179,7 +187,11 @@ while [[ $# -gt 0 ]]; do
         --pigz-bin) PIGZ_BIN="$2"; shift 2 ;;
         --seqtk-bin) SEQTK_BIN="$2"; shift 2 ;;
         --samtools-bin) SAMTOOLS_BIN="$2"; shift 2 ;;
+        --awk-bin) AWK_BIN="$2"; shift 2 ;;
+        --trim-galore-bin) TRIM_GALORE_BIN="$2"; shift 2 ;;
+        --fastqc-bin) FASTQC_BIN="$2"; shift 2 ;;
         --trimvalidate-bin) TRIMVALIDATE_BIN="$2"; shift 2 ;;
+        --trim-qc-fastq-bin) TRIM_QC_FASTQ_BIN="$2"; shift 2 ;;
         --remove-y-reads-bin) REMOVE_Y_READS_BIN="$2"; shift 2 ;;
         --tximport-bin) TXIMPORT_BIN="$2"; shift 2 ;;
         --sample-fld-bin) SAMPLE_FLD_BIN="$2"; shift 2 ;;
@@ -202,6 +214,7 @@ ENV_FILE="${OUTDIR}/tool_env.sh"
 SUMMARY="${OUTDIR}/SUMMARY.txt"
 
 build_if_missing "${STAR_BIN}" make -C "${REPO_ROOT}/core/legacy/source" -j8 STAR
+build_if_missing "${TRIM_QC_FASTQ_BIN}" make -C "${REPO_ROOT}/core/legacy/source" -j8 trim_qc_fastq
 build_if_missing "${TRIMVALIDATE_BIN}" make -C "${REPO_ROOT}/core/features/vbem/tools/trimvalidate" -j8
 build_if_missing "${REMOVE_Y_READS_BIN}" make -C "${REPO_ROOT}/core/features/yremove_fastq/tools/remove_y_reads" -j8
 build_if_missing "${TXIMPORT_BIN}" make -C "${REPO_ROOT}/core/features/vbem/tools/tximport_compat" -j8
@@ -216,6 +229,9 @@ resolve_from_path PREFETCH_BIN "${PREFETCH_BIN}" prefetch
 resolve_from_path PIGZ_BIN "${PIGZ_BIN}" pigz
 resolve_from_path SEQTK_BIN "${SEQTK_BIN}" seqtk
 resolve_from_path SAMTOOLS_BIN "${SAMTOOLS_BIN}" samtools
+resolve_from_path AWK_BIN "${AWK_BIN}" awk
+resolve_from_path TRIM_GALORE_BIN "${TRIM_GALORE_BIN}" trim_galore
+resolve_from_path FASTQC_BIN "${FASTQC_BIN}" fastqc
 
 require_file "${COMPARE_SCRIPT}"
 require_file "${MAKE_GENE_MAP_SCRIPT}"
@@ -227,7 +243,11 @@ require_file "${MAKE_GENE_MAP_SCRIPT}"
 [[ -x "${PIGZ_BIN}" ]] || die "pigz binary not executable: ${PIGZ_BIN}"
 [[ -x "${SEQTK_BIN}" ]] || die "seqtk binary not executable: ${SEQTK_BIN}"
 [[ -x "${SAMTOOLS_BIN}" ]] || die "samtools binary not executable: ${SAMTOOLS_BIN}"
+[[ -x "${AWK_BIN}" ]] || die "awk binary not executable: ${AWK_BIN}"
+[[ -x "${TRIM_GALORE_BIN}" ]] || die "Trim Galore binary not executable: ${TRIM_GALORE_BIN}"
+[[ -x "${FASTQC_BIN}" ]] || die "FastQC binary not executable: ${FASTQC_BIN}"
 [[ -x "${TRIMVALIDATE_BIN}" ]] || die "trimvalidate binary not executable: ${TRIMVALIDATE_BIN}"
+[[ -x "${TRIM_QC_FASTQ_BIN}" ]] || die "trim_qc_fastq binary not executable: ${TRIM_QC_FASTQ_BIN}"
 [[ -x "${REMOVE_Y_READS_BIN}" ]] || die "remove_y_reads binary not executable: ${REMOVE_Y_READS_BIN}"
 [[ -x "${TXIMPORT_BIN}" ]] || die "tximport_compat binary not executable: ${TXIMPORT_BIN}"
 [[ -x "${SAMPLE_FLD_BIN}" ]] || die "sample_fld binary not executable: ${SAMPLE_FLD_BIN}"
@@ -245,7 +265,11 @@ require_file "${MAKE_GENE_MAP_SCRIPT}"
     printf 'pigz\t%s\texternal\tbinary\t%s\n' "${PIGZ_BIN}" "$(version_or_na "${PIGZ_BIN}")"
     printf 'seqtk\t%s\texternal\tbinary\t%s\n' "${SEQTK_BIN}" "$(version_or_na "${SEQTK_BIN}")"
     printf 'samtools\t%s\texternal\tbinary\t%s\n' "${SAMTOOLS_BIN}" "$(version_or_na "${SAMTOOLS_BIN}")"
+    printf 'awk\t%s\texternal\tbinary\t%s\n' "${AWK_BIN}" "$("${AWK_BIN}" --version 2>&1 | head -n1 || echo NA)"
+    printf 'trim_galore\t%s\texternal\tbinary\t%s\n' "${TRIM_GALORE_BIN}" "$("${TRIM_GALORE_BIN}" --version 2>&1 | awk '/version/{print $NF; exit}' || echo NA)"
+    printf 'fastqc\t%s\texternal\tbinary\t%s\n' "${FASTQC_BIN}" "$("${FASTQC_BIN}" --version 2>&1 | head -n1 || echo NA)"
     printf 'trimvalidate\t%s\trepo\tbinary\t%s\n' "${TRIMVALIDATE_BIN}" "$(version_or_na "${TRIMVALIDATE_BIN}")"
+    printf 'trim_qc_fastq\t%s\trepo\tbinary\t%s\n' "${TRIM_QC_FASTQ_BIN}" "$(version_or_na "${TRIM_QC_FASTQ_BIN}")"
     printf 'remove_y_reads\t%s\trepo\tbinary\t%s\n' "${REMOVE_Y_READS_BIN}" "$(version_or_na "${REMOVE_Y_READS_BIN}")"
     printf 'tximport_compat\t%s\trepo\tbinary\t%s\n' "${TXIMPORT_BIN}" "$(version_or_na "${TXIMPORT_BIN}")"
     printf 'sample_fld\t%s\trepo\tbinary\t%s\n' "${SAMPLE_FLD_BIN}" "$(version_or_na "${SAMPLE_FLD_BIN}")"
@@ -266,7 +290,11 @@ require_file "${MAKE_GENE_MAP_SCRIPT}"
     printf 'export PIGZ_BIN=%q\n' "${PIGZ_BIN}"
     printf 'export SEQTK_BIN=%q\n' "${SEQTK_BIN}"
     printf 'export SAMTOOLS_BIN=%q\n' "${SAMTOOLS_BIN}"
+    printf 'export AWK_BIN=%q\n' "${AWK_BIN}"
+    printf 'export TRIM_GALORE_BIN=%q\n' "${TRIM_GALORE_BIN}"
+    printf 'export FASTQC_BIN=%q\n' "${FASTQC_BIN}"
     printf 'export TRIMVALIDATE_BIN=%q\n' "${TRIMVALIDATE_BIN}"
+    printf 'export TRIM_QC_FASTQ_BIN=%q\n' "${TRIM_QC_FASTQ_BIN}"
     printf 'export REMOVE_Y_READS_BIN=%q\n' "${REMOVE_Y_READS_BIN}"
     printf 'export TXIMPORT_BIN=%q\n' "${TXIMPORT_BIN}"
     printf 'export SAMPLE_FLD_BIN=%q\n' "${SAMPLE_FLD_BIN}"

@@ -31,6 +31,12 @@ SKIP_INTEGRATED=0
 SKIP_EXTERNAL=0
 SKIP_COMPARE=0
 PARITY_QC=0
+TRIM_QC=1
+TRIM_QC_BASENAME="${TRIM_QC_BASENAME:-read_qc}"
+TRIM_QC_MAX_READS="${TRIM_QC_MAX_READS:-250000}"
+EXTERNAL_TRIMMER="${EXTERNAL_TRIMMER:-trim_galore}"
+TRIMGALORE_CORES="${TRIMGALORE_CORES:-}"
+EXTERNAL_YREMOVE="${EXTERNAL_YREMOVE:-awk}"
 
 usage() {
     cat <<'EOF'
@@ -55,6 +61,12 @@ Optional:
   --min-length N                 Adapter trim minimum length for trimvalidate (default: 20).
   --adapter-r1 SEQ               R1 adapter for trimvalidate.
   --adapter-r2 SEQ               R2 adapter for trimvalidate.
+  --external-trimmer MODE        External trimming arm: trim_galore or trimvalidate
+                                  (default: trim_galore).
+  --trimgalore-cores N           Cores passed to Trim Galore --cores
+                                  (default: --threads value).
+  --external-yremove MODE        External Y-removal arm: awk or remove_y_reads
+                                  (default: awk).
   --yremove                      Enable Y-chromosome removal (default).
   --no-yremove                   Disable Y-chromosome removal on both arms.
   --skip-copy                    Do not copy /storage PE inputs into --pikachu-fastq-dir.
@@ -67,25 +79,32 @@ Optional:
   --parity-qc                    Also emit integrated TranscriptomeSAM and run
                                   Salmon QC/comparison. Excluded from the
                                   production benchmark by default.
+  --trim-qc                      Emit FastQC-like trim-QC reports on both arms
+                                  and include external trim-QC timing (default).
+  --no-trim-qc                   Disable FastQC-like trim-QC reports on both arms.
+  --trim-qc-max-reads N          Limit reads sampled by trim-QC reporting
+                                  (default: 250000; 0 = no limit).
   --dry-run                      Print resolved commands only.
   -h, --help                     Show this help.
 
 Modes:
   --yremove (default):
     Integrated arm:
-      raw FASTQ -> STAR (trimCutadapt + emitNoYBAM + emitYNoYFastq + TranscriptVB)
+      raw FASTQ -> STAR (trimCutadapt + trim-QC + emitNoYBAM
+                + emitYNoYFastq + TranscriptVB)
 
     External arm:
-      raw FASTQ -> trimvalidate -> STAR (TranscriptomeSAM + emitNoYBAM)
-                -> remove_y_reads on trimmed FASTQs
-                -> Salmon alignment-mode QC on transcriptome BAM
+      raw FASTQ -> Trim Galore + FastQC -> STAR (full BAM + TranscriptomeSAM)
+                -> awk/samtools Y-removal from BAM-derived ynames
+                -> gzip-compressed Y/no-Y FASTQs
+                -> Salmon alignment-mode QC on no-Y transcriptome BAM
 
   --no-yremove:
     Integrated arm:
-      raw FASTQ -> STAR (trimCutadapt + TranscriptVB)
+      raw FASTQ -> STAR (trimCutadapt + trim-QC + TranscriptVB)
 
     External arm:
-      raw FASTQ -> trimvalidate -> STAR (TranscriptomeSAM)
+      raw FASTQ -> Trim Galore + FastQC -> STAR (TranscriptomeSAM)
                 -> Salmon alignment-mode QC on transcriptome BAM
 
 Note:
@@ -199,6 +218,120 @@ count_fastq_reads() {
     else
         awk 'END {print NR/4}' "${fastq}"
     fi
+}
+
+write_awk_y_remove_script() {
+    local script_path="$1"
+    cat > "${script_path}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ne 9 ]]; then
+    echo "Usage: $0 SAMTOOLS AWK GENOME_BAM TRANSCRIPTOME_BAM R1_FASTQ R2_FASTQ BAM_OUT_DIR FASTQ_OUT_DIR SAMPLE_PREFIX" >&2
+    exit 2
+fi
+
+SAMTOOLS_BIN="$1"
+AWK_BIN="$2"
+GENOME_BAM="$3"
+TRANSCRIPTOME_BAM="$4"
+R1_FASTQ="$5"
+R2_FASTQ="$6"
+BAM_OUT_DIR="$7"
+FASTQ_OUT_DIR="$8"
+SAMPLE_PREFIX="$9"
+
+[[ -x "${SAMTOOLS_BIN}" ]] || { echo "samtools not executable: ${SAMTOOLS_BIN}" >&2; exit 2; }
+[[ -x "${AWK_BIN}" ]] || { echo "awk not executable: ${AWK_BIN}" >&2; exit 2; }
+[[ -f "${GENOME_BAM}" ]] || { echo "genome BAM not found: ${GENOME_BAM}" >&2; exit 2; }
+[[ -f "${TRANSCRIPTOME_BAM}" ]] || { echo "transcriptome BAM not found: ${TRANSCRIPTOME_BAM}" >&2; exit 2; }
+[[ -f "${R1_FASTQ}" ]] || { echo "R1 FASTQ not found: ${R1_FASTQ}" >&2; exit 2; }
+[[ -f "${R2_FASTQ}" ]] || { echo "R2 FASTQ not found: ${R2_FASTQ}" >&2; exit 2; }
+mkdir -p "${BAM_OUT_DIR}" "${FASTQ_OUT_DIR}"
+
+Y_NAMES="${BAM_OUT_DIR}/ynames.txt"
+GENOME_Y_BAM="${BAM_OUT_DIR}/Aligned.sortedByCoord.out_Y.bam"
+GENOME_NOY_BAM="${BAM_OUT_DIR}/Aligned.sortedByCoord.out_noY.bam"
+TX_Y_BAM="${BAM_OUT_DIR}/Aligned.toTranscriptome.out_Y.bam"
+TX_NOY_BAM="${BAM_OUT_DIR}/Aligned.toTranscriptome.out_noY.bam"
+Y_R1="${FASTQ_OUT_DIR}/${SAMPLE_PREFIX}_R1_Y.fastq.gz"
+Y_R2="${FASTQ_OUT_DIR}/${SAMPLE_PREFIX}_R2_Y.fastq.gz"
+NOY_R1="${FASTQ_OUT_DIR}/${SAMPLE_PREFIX}_R1_noY.fastq.gz"
+NOY_R2="${FASTQ_OUT_DIR}/${SAMPLE_PREFIX}_R2_noY.fastq.gz"
+
+"${SAMTOOLS_BIN}" view "${GENOME_BAM}" \
+  | "${AWK_BIN}" '$3 == "chrY" {
+        name=$1
+        sub(/\/[12]$/, "", name)
+        unique[name]=1
+    }
+    END {
+        for (name in unique) print name
+    }' > "${Y_NAMES}"
+
+"${SAMTOOLS_BIN}" view -h -b -N "${Y_NAMES}" \
+    -o "${GENOME_Y_BAM}" \
+    -U "${GENOME_NOY_BAM}" \
+    "${GENOME_BAM}"
+
+"${SAMTOOLS_BIN}" view -h -b -N "${Y_NAMES}" \
+    -o "${TX_Y_BAM}" \
+    -U "${TX_NOY_BAM}" \
+    "${TRANSCRIPTOME_BAM}"
+
+split_one_fastq() {
+    local in_fastq="$1"
+    local y_out="$2"
+    local noy_out="$3"
+    local tmp_dir="${FASTQ_OUT_DIR}/.awk_filter.$(basename "${in_fastq}").$$"
+    local y_fifo="${tmp_dir}/y.fifo"
+    local noy_fifo="${tmp_dir}/noy.fifo"
+    mkdir -p "${tmp_dir}"
+    mkfifo "${y_fifo}" "${noy_fifo}"
+
+    gzip -c < "${y_fifo}" > "${y_out}" &
+    local y_pid=$!
+    gzip -c < "${noy_fifo}" > "${noy_out}" &
+    local noy_pid=$!
+
+    if [[ "${in_fastq}" == *.gz ]]; then
+        gzip -dc -- "${in_fastq}"
+    else
+        cat -- "${in_fastq}"
+    fi | "${AWK_BIN}" -v y_names="${Y_NAMES}" -v y_out="${y_fifo}" -v noy_out="${noy_fifo}" '
+        BEGIN {
+            while ((getline line < y_names) > 0) {
+                if (line != "") y[line]=1
+            }
+            close(y_names)
+        }
+        NR % 4 == 1 {
+            read=$0
+            sub(/^@/, "", read)
+            sub(/[[:space:]].*/, "", read)
+            sub(/\/[12]$/, "", read)
+            dest = (read in y) ? y_out : noy_out
+        }
+        { print >> dest }
+        END {
+            close(y_out)
+            close(noy_out)
+        }'
+
+    wait "${y_pid}"
+    wait "${noy_pid}"
+    rm -rf "${tmp_dir}"
+}
+
+split_one_fastq "${R1_FASTQ}" "${Y_R1}" "${NOY_R1}"
+split_one_fastq "${R2_FASTQ}" "${Y_R2}" "${NOY_R2}"
+
+for fastq in "${Y_R1}" "${Y_R2}" "${NOY_R1}" "${NOY_R2}"; do
+    reads="$(gzip -dc -- "${fastq}" | "${AWK_BIN}" 'END {print NR/4}')"
+    printf '%s: reads=%s\n' "${fastq}" "${reads}"
+done
+EOF
+    chmod +x "${script_path}"
 }
 
 append_quant_compare_row() {
@@ -323,6 +456,9 @@ while [[ $# -gt 0 ]]; do
         --min-length) MIN_LENGTH="$2"; shift 2 ;;
         --adapter-r1) ADAPTER_R1="$2"; shift 2 ;;
         --adapter-r2) ADAPTER_R2="$2"; shift 2 ;;
+        --external-trimmer) EXTERNAL_TRIMMER="$2"; shift 2 ;;
+        --trimgalore-cores) TRIMGALORE_CORES="$2"; shift 2 ;;
+        --external-yremove) EXTERNAL_YREMOVE="$2"; shift 2 ;;
         --yremove) YREMOVE=1; shift ;;
         --no-yremove) YREMOVE=0; shift ;;
         --skip-copy) SKIP_COPY=1; shift ;;
@@ -332,6 +468,9 @@ while [[ $# -gt 0 ]]; do
         --integrated-only) SKIP_EXTERNAL=1; SKIP_COMPARE=1; shift ;;
         --skip-compare) SKIP_COMPARE=1; shift ;;
         --parity-qc) PARITY_QC=1; shift ;;
+        --trim-qc) TRIM_QC=1; shift ;;
+        --no-trim-qc) TRIM_QC=0; shift ;;
+        --trim-qc-max-reads) TRIM_QC_MAX_READS="$2"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown argument: $1" ;;
@@ -344,6 +483,20 @@ done
 [[ -n "${SALMON_LIBTYPE}" ]] || die "--salmon-libtype must be non-empty"
 [[ "${QUALITY_CUTOFF}" =~ ^[0-9]+$ ]] || die "--quality must be an integer"
 [[ "${MIN_LENGTH}" =~ ^[0-9]+$ ]] || die "--min-length must be an integer"
+[[ "${TRIM_QC_MAX_READS}" =~ ^[0-9]+$ ]] || die "--trim-qc-max-reads must be an integer"
+case "${EXTERNAL_TRIMMER}" in
+    trim_galore|trimvalidate) ;;
+    *) die "--external-trimmer must be trim_galore or trimvalidate" ;;
+esac
+case "${EXTERNAL_YREMOVE}" in
+    awk|remove_y_reads) ;;
+    *) die "--external-yremove must be awk or remove_y_reads" ;;
+esac
+if [[ -z "${TRIMGALORE_CORES}" ]]; then
+    TRIMGALORE_CORES="${THREADS}"
+fi
+[[ "${TRIMGALORE_CORES}" =~ ^[0-9]+$ ]] || die "--trimgalore-cores must be an integer"
+[[ "${TRIMGALORE_CORES}" -gt 0 ]] || die "--trimgalore-cores must be > 0"
 
 if [[ -z "${TRANSCRIPTOME}" ]]; then
     TRANSCRIPTOME="${STAR_INDEX}/transcriptome.fa"
@@ -359,6 +512,7 @@ require_file "${GATHER_SCRIPT}"
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 command -v gzip >/dev/null 2>&1 || die "gzip is required"
 command -v samtools >/dev/null 2>&1 || die "samtools is required"
+command -v awk >/dev/null 2>&1 || die "awk is required"
 require_file /usr/bin/time
 
 OUT_ROOT="$(mkdir -p "${OUT_ROOT}" && cd "${OUT_ROOT}" && pwd)"
@@ -381,6 +535,17 @@ source "${TOOL_ENV}"
 [[ -x "${STAR_BIN}" ]] || die "Resolved STAR_BIN not executable: ${STAR_BIN}"
 [[ -x "${SALMON_BIN}" ]] || die "Resolved SALMON_BIN not executable: ${SALMON_BIN}"
 [[ -x "${TRIMVALIDATE_BIN}" ]] || die "Resolved TRIMVALIDATE_BIN not executable: ${TRIMVALIDATE_BIN}"
+if [[ "${EXTERNAL_TRIMMER}" == "trim_galore" ]]; then
+    [[ -x "${TRIM_GALORE_BIN:-}" ]] || die "Resolved TRIM_GALORE_BIN not executable: ${TRIM_GALORE_BIN:-unset}"
+    [[ -x "${FASTQC_BIN:-}" ]] || die "Resolved FASTQC_BIN not executable: ${FASTQC_BIN:-unset}"
+fi
+if [[ "${EXTERNAL_YREMOVE}" == "awk" ]]; then
+    AWK_BIN="${AWK_BIN:-$(command -v awk)}"
+    [[ -x "${AWK_BIN}" ]] || die "Resolved AWK_BIN not executable: ${AWK_BIN}"
+fi
+if [[ "${TRIM_QC}" -eq 1 ]]; then
+    [[ -x "${TRIM_QC_FASTQ_BIN:-}" ]] || die "Resolved TRIM_QC_FASTQ_BIN not executable: ${TRIM_QC_FASTQ_BIN:-unset}"
+fi
 [[ -x "${REMOVE_Y_READS_BIN}" ]] || die "Resolved REMOVE_Y_READS_BIN not executable: ${REMOVE_Y_READS_BIN}"
 [[ -x "${MAKE_GENE_MAP_SCRIPT}" ]] || die "Resolved MAKE_GENE_MAP_SCRIPT not executable: ${MAKE_GENE_MAP_SCRIPT}"
 require_file "${COMPARE_SALMON_STAR_SCRIPT}"
@@ -408,6 +573,12 @@ RUN_MANIFEST="${OUT_ROOT}/RUN_MANIFEST.txt"
     echo "skip_external=${SKIP_EXTERNAL}"
     echo "skip_compare=${SKIP_COMPARE}"
     echo "parity_qc=${PARITY_QC}"
+    echo "trim_qc=${TRIM_QC}"
+    echo "trim_qc_basename=${TRIM_QC_BASENAME}"
+    echo "trim_qc_max_reads=${TRIM_QC_MAX_READS}"
+    echo "external_trimmer=${EXTERNAL_TRIMMER}"
+    echo "trimgalore_cores=${TRIMGALORE_CORES}"
+    echo "external_yremove=${EXTERNAL_YREMOVE}"
 } > "${RUN_MANIFEST}"
 
 run_stage() {
@@ -489,13 +660,26 @@ run_stage() {
     local integrated_gene_quant="${integrated_dir}/quant.genes.sf"
     local integrated_transcriptome_bam="${integrated_dir}/Aligned.toTranscriptome.out.bam"
     local integrated_salmon_dir="${integrated_dir}/salmon_qc"
+    local integrated_trim_qc_prefix="${integrated_dir}/${TRIM_QC_BASENAME}"
+    local external_trim_qc_prefix="${external_dir}/${TRIM_QC_BASENAME}"
+    local external_trim_qc_r1_prefix="${external_trim_qc_prefix}_R1"
+    local external_trim_qc_r2_prefix="${external_trim_qc_prefix}_R2"
 
     local external_raw_r1="${external_dir}/${sample_name}.raw_R1.fastq"
     local external_raw_r2="${external_dir}/${sample_name}.raw_R2.fastq"
     local external_trim_r1="${external_dir}/${sample_name}.trimmed_R1.fastq"
     local external_trim_r2="${external_dir}/${sample_name}.trimmed_R2.fastq"
+    if [[ "${EXTERNAL_TRIMMER}" == "trim_galore" ]]; then
+        external_trim_r1="${external_dir}/${sample_name}.trimmed_val_1.fq.gz"
+        external_trim_r2="${external_dir}/${sample_name}.trimmed_val_2.fq.gz"
+    fi
+    local external_genome_bam="${external_dir}/Aligned.sortedByCoord.out.bam"
     local external_transcriptome_bam="${external_dir}/Aligned.toTranscriptome.out.bam"
     local external_y_bam="${external_dir}/Aligned.sortedByCoord.out_Y.bam"
+    local external_noy_bam="${external_dir}/Aligned.sortedByCoord.out_noY.bam"
+    local external_y_transcriptome_bam="${external_dir}/Aligned.toTranscriptome.out_Y.bam"
+    local external_noy_transcriptome_bam="${external_dir}/Aligned.toTranscriptome.out_noY.bam"
+    local external_salmon_bam="${external_transcriptome_bam}"
     local external_salmon_dir="${external_dir}/salmon_qc"
 
     if [[ "${SKIP_INTEGRATED}" -eq 0 ]]; then
@@ -529,6 +713,12 @@ run_stage() {
                 --emitYNoYFastqCompression gz
             )
         fi
+        if [[ "${TRIM_QC}" -eq 1 ]]; then
+            integrated_cmd+=(
+                --trimQcReport "${integrated_trim_qc_prefix}"
+                --trimQcMaxReads "${TRIM_QC_MAX_READS}"
+            )
+        fi
         write_cmd_script "${integrated_dir}/run_integrated_star.sh" "${integrated_cmd[@]}"
         log "Stage ${stage_name}: integrated STAR-suite arm (yremove=${YREMOVE})"
         run_timed_cmd "${integrated_dir}/star.time_v.log" "${integrated_dir}/star.log" "${integrated_cmd[@]}"
@@ -539,6 +729,10 @@ run_stage() {
             fi
             if [[ "${YREMOVE}" -eq 1 ]]; then
                 require_file "${integrated_dir}/Aligned.sortedByCoord.out_Y.bam"
+            fi
+            if [[ "${TRIM_QC}" -eq 1 ]]; then
+                require_file "${integrated_trim_qc_prefix}.trim_qc.json"
+                require_file "${integrated_trim_qc_prefix}.trim_qc.html"
             fi
         fi
 
@@ -567,35 +761,78 @@ run_stage() {
     fi
 
     if [[ "${SKIP_EXTERNAL}" -eq 0 ]]; then
-        local external_decompress_cmd=(
-            bash -lc
-            "gzip -dc $(printf '%q' "${raw_r1}") > $(printf '%q' "${external_raw_r1}") && gzip -dc $(printf '%q' "${raw_r2}") > $(printf '%q' "${external_raw_r2}")"
-        )
-        write_cmd_script "${external_dir}/run_decompress_raw_fastq.sh" "${external_decompress_cmd[@]}"
-        log "Stage ${stage_name}: external FASTQ decompression for trimvalidate"
-        run_timed_cmd "${external_dir}/decompress.time_v.log" "${external_dir}/decompress.log" "${external_decompress_cmd[@]}"
-        if [[ "${DRY_RUN}" -eq 0 ]]; then
-            require_file "${external_raw_r1}"
-            require_file "${external_raw_r2}"
-        fi
+        if [[ "${EXTERNAL_TRIMMER}" == "trim_galore" ]]; then
+            local trim_cmd=(
+                "${TRIM_GALORE_BIN}"
+                --paired
+                --quality "${QUALITY_CUTOFF}"
+                --length "${MIN_LENGTH}"
+                --adapter "${ADAPTER_R1}"
+                --adapter2 "${ADAPTER_R2}"
+                --cores "${TRIMGALORE_CORES}"
+                --basename "${sample_name}.trimmed"
+                --output_dir "${external_dir}"
+            )
+            if [[ "${TRIM_QC}" -eq 1 ]]; then
+                trim_cmd+=(--fastqc --fastqc_args "--threads ${THREADS}")
+            fi
+            trim_cmd+=("${raw_r1}" "${raw_r2}")
+            write_cmd_script "${external_dir}/run_trimgalore.sh" "${trim_cmd[@]}"
+            log "Stage ${stage_name}: external Trim Galore adapter-removal arm (cores=${TRIMGALORE_CORES}, fastqc=${TRIM_QC})"
+            run_timed_cmd "${external_dir}/trimgalore.time_v.log" "${external_dir}/trimgalore.log" "${trim_cmd[@]}"
+            if [[ "${DRY_RUN}" -eq 0 ]]; then
+                require_file "${external_trim_r1}"
+                require_file "${external_trim_r2}"
+            fi
+        else
+            local external_decompress_cmd=(
+                bash -lc
+                "gzip -dc $(printf '%q' "${raw_r1}") > $(printf '%q' "${external_raw_r1}") && gzip -dc $(printf '%q' "${raw_r2}") > $(printf '%q' "${external_raw_r2}")"
+            )
+            write_cmd_script "${external_dir}/run_decompress_raw_fastq.sh" "${external_decompress_cmd[@]}"
+            log "Stage ${stage_name}: external FASTQ decompression for trimvalidate"
+            run_timed_cmd "${external_dir}/decompress.time_v.log" "${external_dir}/decompress.log" "${external_decompress_cmd[@]}"
+            if [[ "${DRY_RUN}" -eq 0 ]]; then
+                require_file "${external_raw_r1}"
+                require_file "${external_raw_r2}"
+            fi
 
-        local trim_cmd=(
-            "${TRIMVALIDATE_BIN}"
-            -1 "${external_raw_r1}"
-            -2 "${external_raw_r2}"
-            -o1 "${external_trim_r1}"
-            -o2 "${external_trim_r2}"
-            --quality "${QUALITY_CUTOFF}"
-            --length "${MIN_LENGTH}"
-            --adapter-r1 "${ADAPTER_R1}"
-            --adapter-r2 "${ADAPTER_R2}"
-        )
-        write_cmd_script "${external_dir}/run_trimvalidate.sh" "${trim_cmd[@]}"
-        log "Stage ${stage_name}: external trimvalidate adapter-removal arm"
-        run_timed_cmd "${external_dir}/trimvalidate.time_v.log" "${external_dir}/trimvalidate.log" "${trim_cmd[@]}"
-        if [[ "${DRY_RUN}" -eq 0 ]]; then
-            require_file "${external_trim_r1}"
-            require_file "${external_trim_r2}"
+            if [[ "${TRIM_QC}" -eq 1 ]]; then
+                local external_trim_qc_cmd=(
+                    bash -lc
+                    "$(printf '%q' "${TRIM_QC_FASTQ_BIN}") --input $(printf '%q' "${external_raw_r1}") --report $(printf '%q' "${external_trim_qc_r1_prefix}") --stage external_fastq_r1 --mate-count 2 --mate-index 1 --max-reads $(printf '%q' "${TRIM_QC_MAX_READS}") && $(printf '%q' "${TRIM_QC_FASTQ_BIN}") --input $(printf '%q' "${external_raw_r2}") --report $(printf '%q' "${external_trim_qc_r2_prefix}") --stage external_fastq_r2 --mate-count 2 --mate-index 2 --max-reads $(printf '%q' "${TRIM_QC_MAX_READS}")"
+                )
+                write_cmd_script "${external_dir}/run_external_trim_qc.sh" "${external_trim_qc_cmd[@]}"
+                log "Stage ${stage_name}: external FastQC-like trim-QC reports"
+                run_timed_cmd "${external_dir}/trim_qc.time_v.log" "${external_dir}/trim_qc.log" "${external_trim_qc_cmd[@]}"
+                if [[ "${DRY_RUN}" -eq 0 ]]; then
+                    require_file "${external_trim_qc_r1_prefix}.trim_qc.json"
+                    require_file "${external_trim_qc_r1_prefix}.trim_qc.html"
+                    require_file "${external_trim_qc_r2_prefix}.trim_qc.json"
+                    require_file "${external_trim_qc_r2_prefix}.trim_qc.html"
+                fi
+            else
+                log "Stage ${stage_name}: skipping external trim-QC reports"
+            fi
+
+            local trim_cmd=(
+                "${TRIMVALIDATE_BIN}"
+                -1 "${external_raw_r1}"
+                -2 "${external_raw_r2}"
+                -o1 "${external_trim_r1}"
+                -o2 "${external_trim_r2}"
+                --quality "${QUALITY_CUTOFF}"
+                --length "${MIN_LENGTH}"
+                --adapter-r1 "${ADAPTER_R1}"
+                --adapter-r2 "${ADAPTER_R2}"
+            )
+            write_cmd_script "${external_dir}/run_trimvalidate.sh" "${trim_cmd[@]}"
+            log "Stage ${stage_name}: external trimvalidate adapter-removal arm"
+            run_timed_cmd "${external_dir}/trimvalidate.time_v.log" "${external_dir}/trimvalidate.log" "${trim_cmd[@]}"
+            if [[ "${DRY_RUN}" -eq 0 ]]; then
+                require_file "${external_trim_r1}"
+                require_file "${external_trim_r2}"
+            fi
         fi
 
         local external_star_cmd=(
@@ -610,7 +847,10 @@ run_stage() {
             --quantMode TranscriptomeSAM
             --outFileNamePrefix "${external_dir}/"
         )
-        if [[ "${YREMOVE}" -eq 1 ]]; then
+        if [[ "${external_trim_r1}" == *.gz ]]; then
+            external_star_cmd+=(--readFilesCommand zcat)
+        fi
+        if [[ "${YREMOVE}" -eq 1 && "${EXTERNAL_YREMOVE}" != "awk" ]]; then
             external_star_cmd+=(--emitNoYBAM yes)
         fi
         write_cmd_script "${external_dir}/run_external_star.sh" "${external_star_cmd[@]}"
@@ -619,32 +859,64 @@ run_stage() {
         if [[ "${DRY_RUN}" -eq 0 ]]; then
             require_file "${external_transcriptome_bam}"
             if [[ "${YREMOVE}" -eq 1 ]]; then
-                require_file "${external_y_bam}"
+                require_file "${external_genome_bam}"
+                if [[ "${EXTERNAL_YREMOVE}" != "awk" ]]; then
+                    require_file "${external_y_bam}"
+                fi
             fi
         fi
 
         if [[ "${YREMOVE}" -eq 1 ]]; then
             mkdir -p "${external_dir}/y_fastq_split"
-            local remove_y_cmd=(
-                "${REMOVE_Y_READS_BIN}"
-                -y "${external_y_bam}"
-                --threads "${THREADS}"
-                -o "${external_dir}/y_fastq_split"
-                "${external_trim_r1}"
-                "${external_trim_r2}"
-            )
-            write_cmd_script "${external_dir}/run_remove_y_reads.sh" "${remove_y_cmd[@]}"
-            log "Stage ${stage_name}: external remove_y_reads FASTQ split"
-            run_timed_cmd "${external_dir}/remove_y_reads.time_v.log" "${external_dir}/remove_y_reads.log" "${remove_y_cmd[@]}"
+            if [[ "${EXTERNAL_YREMOVE}" == "awk" ]]; then
+                local awk_y_split_script="${external_dir}/awk_y_remove.sh"
+                local awk_y_prefix="${sample_name}.trimmed"
+                write_awk_y_remove_script "${awk_y_split_script}"
+                local awk_y_cmd=(
+                    "${awk_y_split_script}"
+                    "${SAMTOOLS_BIN:-$(command -v samtools)}"
+                    "${AWK_BIN:-$(command -v awk)}"
+                    "${external_genome_bam}"
+                    "${external_transcriptome_bam}"
+                    "${external_trim_r1}"
+                    "${external_trim_r2}"
+                    "${external_dir}"
+                    "${external_dir}/y_fastq_split"
+                    "${awk_y_prefix}"
+                )
+                write_cmd_script "${external_dir}/run_awk_y_remove.sh" "${awk_y_cmd[@]}"
+                log "Stage ${stage_name}: external awk/samtools Y-removal for BAM and FASTQ artifacts"
+                run_timed_cmd "${external_dir}/awk_y_split.time_v.log" "${external_dir}/awk_y_split.log" "${awk_y_cmd[@]}"
+                external_salmon_bam="${external_noy_transcriptome_bam}"
+                if [[ "${DRY_RUN}" -eq 0 ]]; then
+                    require_file "${external_y_bam}"
+                    require_file "${external_noy_bam}"
+                    require_file "${external_y_transcriptome_bam}"
+                    require_file "${external_noy_transcriptome_bam}"
+                    require_file "${external_salmon_bam}"
+                fi
+            else
+                local remove_y_cmd=(
+                    "${REMOVE_Y_READS_BIN}"
+                    -y "${external_y_bam}"
+                    --threads "${THREADS}"
+                    -o "${external_dir}/y_fastq_split"
+                    "${external_trim_r1}"
+                    "${external_trim_r2}"
+                )
+                write_cmd_script "${external_dir}/run_remove_y_reads.sh" "${remove_y_cmd[@]}"
+                log "Stage ${stage_name}: external remove_y_reads FASTQ split"
+                run_timed_cmd "${external_dir}/remove_y_reads.time_v.log" "${external_dir}/remove_y_reads.log" "${remove_y_cmd[@]}"
+            fi
         else
-            log "Stage ${stage_name}: skipping external remove_y_reads (yremove disabled)"
+            log "Stage ${stage_name}: skipping external Y/no-Y FASTQ split (yremove disabled)"
         fi
 
         local external_salmon_cmd=(
             "${SALMON_BIN}" quant
             -t "${TRANSCRIPTOME}"
             -l "${SALMON_LIBTYPE}"
-            -a "${external_transcriptome_bam}"
+            -a "${external_salmon_bam}"
             -g "${TX2GENE}"
             --gcBias
             -p "${THREADS}"
@@ -708,6 +980,7 @@ run_stage() {
     local integrated_star_wall="NA"
     local integrated_salmon_wall="NA"
     local external_decompress_wall="NA"
+    local external_trim_qc_wall="NA"
     local external_trim_wall="NA"
     local external_star_wall="NA"
     local external_ysplit_wall="NA"
@@ -719,11 +992,26 @@ run_stage() {
     else
         integrated_salmon_wall="(disabled)"
     fi
-    external_decompress_wall="$(extract_time_metric "${external_dir}/decompress.time_v.log" "Elapsed (wall clock) time")"
-    external_trim_wall="$(extract_time_metric "${external_dir}/trimvalidate.time_v.log" "Elapsed (wall clock) time")"
+    if [[ "${EXTERNAL_TRIMMER}" == "trim_galore" ]]; then
+        external_decompress_wall="(folded into Trim Galore)"
+        external_trim_qc_wall="(FastQC folded into Trim Galore)"
+        external_trim_wall="$(extract_time_metric "${external_dir}/trimgalore.time_v.log" "Elapsed (wall clock) time")"
+    else
+        external_decompress_wall="$(extract_time_metric "${external_dir}/decompress.time_v.log" "Elapsed (wall clock) time")"
+        if [[ "${TRIM_QC}" -eq 1 ]]; then
+        external_trim_qc_wall="$(extract_time_metric "${external_dir}/trim_qc.time_v.log" "Elapsed (wall clock) time")"
+        else
+        external_trim_qc_wall="(disabled)"
+        fi
+        external_trim_wall="$(extract_time_metric "${external_dir}/trimvalidate.time_v.log" "Elapsed (wall clock) time")"
+    fi
     external_star_wall="$(extract_time_metric "${external_dir}/star.time_v.log" "Elapsed (wall clock) time")"
     if [[ "${YREMOVE}" -eq 1 ]]; then
-        external_ysplit_wall="$(extract_time_metric "${external_dir}/remove_y_reads.time_v.log" "Elapsed (wall clock) time")"
+        if [[ "${EXTERNAL_YREMOVE}" == "awk" ]]; then
+            external_ysplit_wall="$(extract_time_metric "${external_dir}/awk_y_split.time_v.log" "Elapsed (wall clock) time")"
+        else
+            external_ysplit_wall="$(extract_time_metric "${external_dir}/remove_y_reads.time_v.log" "Elapsed (wall clock) time")"
+        fi
     else
         external_ysplit_wall="(skipped)"
     fi
@@ -736,6 +1024,11 @@ run_stage() {
         echo "Stage:                  ${stage_name}"
         echo "Y-removal:              ${YREMOVE}"
         echo "Parity QC:              ${PARITY_QC}"
+        echo "Trim QC:                ${TRIM_QC}"
+        echo "Trim QC max reads:      ${TRIM_QC_MAX_READS}"
+        echo "External trimmer:       ${EXTERNAL_TRIMMER}"
+        echo "Trim Galore cores:      ${TRIMGALORE_CORES}"
+        echo "External Y-removal:     ${EXTERNAL_YREMOVE}"
         echo "Sample:                 ${sample_name}"
         echo "FASTQ dir:              ${stage_fastq_dir}"
         echo "STAR index:             ${STAR_INDEX}"
@@ -749,7 +1042,8 @@ run_stage() {
         echo "  Integrated STAR:      ${integrated_star_wall} (production total)"
         echo "  Integrated Salmon QC: ${integrated_salmon_wall}"
         echo "  External decompress:  ${external_decompress_wall}"
-        echo "  External trimvalidate:${external_trim_wall}"
+        echo "  External trim QC:     ${external_trim_qc_wall}"
+        echo "  External trimmer:     ${external_trim_wall}"
         echo "  External STAR:        ${external_star_wall}"
         echo "  External remove_y:    ${external_ysplit_wall}"
         echo "  External Salmon:      ${external_salmon_wall}"
@@ -768,21 +1062,49 @@ run_stage() {
         echo "  Integrated Y R2:      ${integrated_y_r2:-NA}"
         echo "  Integrated noY R1:    ${integrated_noy_r1:-NA}"
         echo "  Integrated noY R2:    ${integrated_noy_r2:-NA}"
+        if [[ "${TRIM_QC}" -eq 1 ]]; then
+            echo "  Trim QC JSON:         ${integrated_trim_qc_prefix}.trim_qc.json"
+            echo "  Trim QC HTML:         ${integrated_trim_qc_prefix}.trim_qc.html"
+        else
+            echo "  Trim QC JSON:         NA (disabled)"
+            echo "  Trim QC HTML:         NA (disabled)"
+        fi
         echo
         echo "External outputs:"
         if [[ "${SKIP_EXTERNAL}" -eq 1 ]]; then
             echo "  NA (skipped)"
         else
-            echo "  raw R1 (plain):       ${external_raw_r1}"
-            echo "  raw R2 (plain):       ${external_raw_r2}"
+            if [[ "${EXTERNAL_TRIMMER}" == "trimvalidate" ]]; then
+                echo "  raw R1 (plain):       ${external_raw_r1}"
+                echo "  raw R2 (plain):       ${external_raw_r2}"
+            else
+                echo "  raw R1 source:        ${raw_r1}"
+                echo "  raw R2 source:        ${raw_r2}"
+            fi
             echo "  trimmed R1:           ${external_trim_r1}"
             echo "  trimmed R2:           ${external_trim_r2}"
+            echo "  genome BAM:           ${external_genome_bam}"
             echo "  transcriptome BAM:    ${external_transcriptome_bam}"
+            if [[ "${YREMOVE}" -eq 1 ]]; then
+                echo "  noY genome BAM:       ${external_noy_bam}"
+                echo "  noY transcriptome BAM:${external_noy_transcriptome_bam}"
+                echo "  Salmon input BAM:     ${external_salmon_bam}"
+            fi
             echo "  Salmon QC dir:        ${external_salmon_dir}"
             echo "  External Y R1:        ${external_y_r1:-NA}"
             echo "  External Y R2:        ${external_y_r2:-NA}"
             echo "  External noY R1:      ${external_noy_r1:-NA}"
             echo "  External noY R2:      ${external_noy_r2:-NA}"
+            if [[ "${EXTERNAL_TRIMMER}" == "trim_galore" && "${TRIM_QC}" -eq 1 ]]; then
+                echo "  FastQC outputs:       ${external_dir}/*fastqc.{html,zip}"
+            elif [[ "${TRIM_QC}" -eq 1 ]]; then
+                echo "  Trim QC R1 JSON:      ${external_trim_qc_r1_prefix}.trim_qc.json"
+                echo "  Trim QC R1 HTML:      ${external_trim_qc_r1_prefix}.trim_qc.html"
+                echo "  Trim QC R2 JSON:      ${external_trim_qc_r2_prefix}.trim_qc.json"
+                echo "  Trim QC R2 HTML:      ${external_trim_qc_r2_prefix}.trim_qc.html"
+            else
+                echo "  Trim QC reports:      NA (disabled)"
+            fi
         fi
         echo
         if [[ "${DRY_RUN}" -eq 0 && "${YREMOVE}" -eq 1 ]]; then
