@@ -55,10 +55,7 @@ public:
                           uint8_t &hammingDist) const;
     
     // Get whitelist size
-    size_t whitelistSize() const { return whitelist_.size(); }
-    
-    // Get whitelist sequences (for Bayesian resolver)
-    const std::vector<std::string>& whitelist() const { return whitelist_; }
+    size_t whitelistSize() const { return whitelistSize_; }
     
     // Read-only view into the single candidate array; indices remain 0-based
     // and in whitelist encounter order. Valid for this corrector's lifetime.
@@ -86,8 +83,8 @@ public:
     std::string decodePackedKey(uint32_t packedKey, size_t cbLength) const;
     
 private:
-    // Whitelist storage (canonical CB strings)
-    std::vector<std::string> whitelist_;
+    // Lookup tables own packed keys. Canonical strings remain in ParametersSolo.
+    size_t whitelistSize_;
     
     struct LookupDeleter {
         void operator()(khash_t(cbCorrectorLookup)* h) const { kh_destroy(cbCorrectorLookup, h); }
@@ -113,10 +110,10 @@ private:
         return CandidateView{candidateIndices_.data() + range.offset, range.count};
     }
 
-    template<class Visitor> void forEachVariant(Visitor visit) const {
-        for (size_t i = 0; i < whitelist_.size(); ++i) {
+    template<class Visitor> void forEachVariant(const std::vector<std::string>& whitelist, Visitor visit) const {
+        for (size_t i = 0; i < whitelist.size(); ++i) {
             PackedCB packed;
-            if (!encodeCB(whitelist_[i], packed)) continue;
+            if (!encodeCB(whitelist[i], packed)) continue;
             for (size_t pos = 0; pos < cbLength_; ++pos) {
                 const uint32_t shift = packedShift(pos, cbLength_);
                 const uint32_t current = (packed.key >> shift) & 3u;

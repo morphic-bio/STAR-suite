@@ -51,6 +51,13 @@ static void run(const std::vector<std::string>& whitelist,const std::vector<std:
     }
 }
 int main() {
+    {
+        std::vector<std::string> input{"ACGTACGTACGTACGT"};
+        CbCorrector owned(input);
+        input.clear(); input.shrink_to_fit();
+        assert(owned.whitelistSize() == 1);
+        assert(owned.correct("ACGTACGTACGTACGT").whitelistIdx == 1);
+    }
     std::vector<std::string> exhaustive;
     for(unsigned bits=0;bits<15625;++bits) {unsigned n=bits;std::string s(6,'A');for(auto& c:s){c="ACGTN"[n%5];n/=5;}exhaustive.push_back(s);}
     std::mt19937 rng(1943);

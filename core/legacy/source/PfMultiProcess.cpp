@@ -1247,13 +1247,33 @@ static bool loadBarcodeListFromFile(const string& path,
     return !out.empty();
 }
 
+// Membership borrows Solo's immutable packed table; no second whitelist copy.
+static bool whitelistContains(const ParametersSolo& solo, const string& barcode) {
+    if (barcode.size() != solo.cbL || barcode.size() > 16) return false;
+    uint32_t packed = 0;
+    for (char base : barcode) {
+        const size_t code = string("ACGT").find(base);
+        if (code == string::npos) return false;
+        packed = (packed << 2) | static_cast<uint32_t>(code);
+    }
+    const khint_t k = kh_get(cbH0, solo.cbWLhash, packed);
+    if (k == kh_end(solo.cbWLhash)) return false;
+    const uint32_t index = kh_val(solo.cbWLhash, k);
+    return index < solo.cbWLstr.size() && solo.cbWLstr[index] == barcode;
+}
+
+static bool whitelistContains(const std::unordered_set<string>& whitelist, const string& barcode) {
+    return whitelist.find(barcode) != whitelist.end();
+}
+
 // Normalize filtered barcodes into the whitelist (assignment) namespace.
 //
 // sourceNamespace and whitelistNamespace must both be resolved ("NXT" or
 // "TRU").  Uses deterministic mapping only.
+template<class Whitelist>
 static vector<string> normalizeFilteredBarcodesForAssignNamespace(
     const vector<string>& inputBarcodes,
-    const std::unordered_set<string>& whitelistSet,
+    const Whitelist& whitelistSet,
     FilteredBarcodeNormalizationStats& stats,
     const string& sourceNamespace = "",
     const string& whitelistNamespace = "") {
@@ -1277,7 +1297,7 @@ static vector<string> normalizeFilteredBarcodesForAssignNamespace(
         string candidate = needsTranslation ? translateNxtMiddleTwoBases(bc) : bc;
         string selected;
 
-        if (whitelistSet.find(candidate) != whitelistSet.end()) {
+        if (whitelistContains(whitelistSet, candidate)) {
             selected = candidate;
             if (needsTranslation) {
                 stats.translatedToSet++;
@@ -3368,7 +3388,8 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                     + ", assign_out=" + run.assignOut);
             }
             const string whitelistPath = run.barcodeOutputMapPath.empty()
-                ? run.whitelistPath : run.barcodeOutputMapPath;
+                ? (run.whitelistNormalization.normalizedHasOutputMap ? run.whitelistPath : "")
+                : run.barcodeOutputMapPath;
             for (const auto& source : mexSources) {
                 const bool splitSource = (source.mexDir != run.assignOut);
                 const string featureRefPath = resolveAssignStubFeatureRef(
@@ -3662,8 +3683,14 @@ int finalizePfMultiConfig(Parameters& P,
         std::unordered_set<string> gexWhitelistSet;
         uint64_t gexWhitelistRows = 0;
         uint64_t gexWhitelistInvalidRows = 0;
-        const bool haveGexWhitelistSet =
+        const bool useSoloWhitelist = P.pSolo.cbWLhash && P.pSolo.cbL <= 16
+            && P.pSolo.soloCBwhitelist.size() == 1 && P.pSolo.soloCBwhitelist[0] == soloWhitelist;
+        const bool haveGexWhitelistSet = useSoloWhitelist ||
             loadWhitelistBarcodeSet(soloWhitelist, gexWhitelistSet, gexWhitelistRows, gexWhitelistInvalidRows);
+        if (useSoloWhitelist) {
+            P.inOut->logMain << "NOTICE: GEX normalization reuses Solo packed whitelist (keys="
+                             << kh_size(P.pSolo.cbWLhash) << ", copied_keys=0)\n";
+        }
         if (!haveGexWhitelistSet) {
             P.inOut->logMain << "WARNING: failed to load whitelist set for GEX barcode normalization: "
                              << soloWhitelist << "\n";
@@ -3671,8 +3698,11 @@ int finalizePfMultiConfig(Parameters& P,
         if (solo && getFilteredBarcodesFromSolo(solo, P, filteredGexBarcodes, true)) {
             if (haveGexWhitelistSet && isKnownNamespace(gexWhitelistNamespace)) {
                 FilteredBarcodeNormalizationStats gexNormStats;
-                filteredGexBarcodes =
-                    normalizeFilteredBarcodesForAssignNamespace(
+                filteredGexBarcodes = useSoloWhitelist
+                    ? normalizeFilteredBarcodesForAssignNamespace(
+                        filteredGexBarcodes, P.pSolo, gexNormStats,
+                        gexNormalizationChem, gexWhitelistNamespace)
+                    : normalizeFilteredBarcodesForAssignNamespace(
                         filteredGexBarcodes, gexWhitelistSet, gexNormStats,
                         gexNormalizationChem, gexWhitelistNamespace);
                 P.inOut->logMain
@@ -3827,7 +3857,9 @@ int finalizePfMultiConfig(Parameters& P,
             for (const auto& run : featureRuns) {
                 writeDeferredFilteredAssignOutput(
                     run.assignOut, filteredGexBarcodes, run.featureMexOutputNamespace,
-                    run.barcodeOutputMapPath.empty() ? run.whitelistPath : run.barcodeOutputMapPath,
+                    run.barcodeOutputMapPath.empty()
+                        ? (run.whitelistNormalization.normalizedHasOutputMap ? run.whitelistPath : "")
+                        : run.barcodeOutputMapPath,
                     P.inOut->logMain);
             }
         }

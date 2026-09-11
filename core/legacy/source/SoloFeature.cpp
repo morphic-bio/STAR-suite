@@ -383,7 +383,7 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
     };
 
     khash_t(cg_agg) *hash = readFeatSum->inlineHash_;
-    const std::vector<std::string> &whitelistSeqs = pSolo.cbCorrector->whitelist();
+    const std::vector<std::string> &whitelistSeqs = pSolo.cbWLstr;
     CbBayesianResolver resolver(whitelistSeqs.size(), &whitelistSeqs);
     static const std::unordered_map<uint32_t, uint32_t> kEmptyUmiHistogram;
 

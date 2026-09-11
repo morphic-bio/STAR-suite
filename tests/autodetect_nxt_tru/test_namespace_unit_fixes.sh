@@ -66,6 +66,7 @@ cat > "${WORK_DIR}/test_pf_multi_helpers.cpp" << 'EOF'
 #include <unordered_set>
 #include <vector>
 #include "PfMultiProcess.cpp"
+ParametersSolo::~ParametersSolo() {}
 
 static int assert_true(bool cond, const std::string& msg) {
     if (!cond) {
@@ -169,6 +170,21 @@ int main(int argc, char** argv) {
     rc |= assert_true(sameNsStats.outputCount == 2, "same-namespace outputCount should be 2");
     rc |= assert_true(sameNsOut.size() == 2, "same-namespace normalized output size should be 2");
 
+    ParametersSolo solo;
+    solo.cbL = 16;
+    solo.cbWLstr = {"AAAAAAAAAAAAAAAA", "CCCCCCCCCCCCCCCC"};
+    solo.cbWLhash = kh_init(cbH0);
+    int absent;
+    auto a = kh_put(cbH0, solo.cbWLhash, 0u, &absent); kh_val(solo.cbWLhash, a) = 0;
+    auto c = kh_put(cbH0, solo.cbWLhash, 0x55555555u, &absent); kh_val(solo.cbWLhash, c) = 1;
+    FilteredBarcodeNormalizationStats packedStats;
+    auto packedOut = normalizeFilteredBarcodesForAssignNamespace(sameNsIn, solo, packedStats, "NXT", "NXT");
+    rc |= assert_true(packedOut == sameNsOut, "borrowed packed whitelist preserves normalization");
+    rc |= assert_true(packedStats.inSet == sameNsStats.inSet && packedStats.unmatched == sameNsStats.unmatched,
+                      "packed whitelist preserves membership statistics");
+    rc |= assert_true(!whitelistContains(solo, "AAAAAAAAAAAAAAA") && !whitelistContains(solo, "NAAAAAAAAAAAAAAA"),
+                      "length and invalid-base inputs cannot collide with packed exact keys");
+    kh_destroy(cbH0, solo.cbWLhash);
     return rc;
 }
 EOF
@@ -199,7 +215,6 @@ cat > "${WORK_DIR}/test_pf_multi_assign_norm.cpp" << 'EOF'
 #include <iostream>
 #include <string>
 
-ThreadControl g_threadChunks;
 
 static int assert_true(bool cond, const std::string& msg) {
     if (!cond) {
@@ -235,12 +250,23 @@ int main(int argc, char** argv) {
                       "two-column normalization path should be whitelist.normalized.txt");
     rc |= assert_true(count_nonempty_lines(two.normalizedPath) == 2, "normalized whitelist file should have 2 lines");
 
+    rc |= assert_true(!two.normalizedHasOutputMap, "normalized two-column source emits only one column");
+
     auto one = PfMultiAssign::normalizeWhitelistForAssign(argv[2], argv[3]);
     rc |= assert_true(!one.hasTwoColumnSource, "one-column whitelist must not set hasTwoColumnSource");
     rc |= assert_true(one.assignmentNamespace == "UNKNOWN", "one-column unknown whitelist should infer UNKNOWN");
     rc |= assert_true(!one.namespaceConfidence, "one-column unknown whitelist should be non-confident");
     rc |= assert_true(one.normalizedRowCount == 2, "one-column normalizedRowCount should be 2");
     rc |= assert_true(one.normalizedPath == std::string(argv[2]), "one-column normalized path should stay source path");
+
+    rc |= assert_true(!one.normalizedHasOutputMap, "complete one-column scan rules out output mapping");
+    const std::string mixedPath = std::string(argv[3]) + "/mixed_TRU.txt";
+    {
+        std::ofstream mixed(mixedPath);
+        mixed << "AAAAAAAAAAAAAAAA\nCCCCCCCCCCCCCCCC\tCCCCCCCGGCCCCCCC\n";
+    }
+    auto mixed = PfMultiAssign::normalizeWhitelistForAssign(mixedPath, argv[3]);
+    rc |= assert_true(mixed.normalizedHasOutputMap, "later second columns must not be skipped");
 
     // Ambiguous 2-column: complement rule matches but no filename hint → UNKNOWN
     auto ambig = PfMultiAssign::normalizeWhitelistForAssign(argv[4], argv[3]);
@@ -254,12 +280,11 @@ int main(int argc, char** argv) {
 }
 EOF
 
-g++ -std=c++11 -O2 -fopenmp \
+g++ -std=c++11 -O2 -fopenmp -ffunction-sections -fdata-sections \
     ${INC_FLAGS} \
     "${WORK_DIR}/test_pf_multi_assign_norm.cpp" \
-    "${REPO_ROOT}/core/legacy/source/PfMultiAssign.o" \
-    "${REPO_ROOT}/core/legacy/source/ThreadControl.o" \
-    "${REPO_ROOT}/core/legacy/source/PfMultiConfig.o" \
+    "${REPO_ROOT}/core/legacy/source/PfMultiAssign.cpp" \
+    -Wl,--gc-sections \
     -L"${REPO_ROOT}/core/features/process_features" -lprocess_features \
     -L"${REPO_ROOT}/core/features/libscrna" -lscrna \
     -lpthread -lz -lstdc++ -lhts -lglib-2.0 \

@@ -1707,3 +1707,12 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
 - See `docs/HANDOFF_LARRY_SEARCH_CORRECTIONS_20260911.md` for scope, identities and limitations.
 - `../hierarchy/a375_larry_fix_fixed4`: full A375 passed in 146.22 s; all six matrices and
   three guide-call CSVs exactly match `a375_flat_hash_fixed4`. Report: `a375_comparison.json`.
+
+### Allocation audit: whitelist storage and gather (2026-09-11)
+
+- `/home/lhhung/pf_larry_regression_20260911/allocation_audit/`: original audit, source/build
+  identities, sanitizer and namespace tests, failed harness attempts retained separately.
+- `whitelist_build2/STAR`: clean accepted binary; `a375_whitelist` completed in 142.72 s,
+  peak RSS 41,559,480 KiB. Control `../hierarchy/a375_larry_fix_fixed4` is 146.22 s,
+  41,816,724 KiB. `whitelist_comparison.json`: all six matrices and three guide tables exact.
+- Details and pending audit targets: `docs/ALLOCATION_FIXES_20260911.md`.

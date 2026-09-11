@@ -232,11 +232,12 @@ static bool isValidBarcodeSeq(const string& seq) {
     return true;
 }
 
-static uint64 countValidWhitelistRows(const string& whitelistPath) {
+static uint64 countValidWhitelistRows(const string& whitelistPath, bool& hasOutputMap) {
     std::ifstream in(whitelistPath.c_str());
     if (!in.is_open()) {
         return 0;
     }
+    hasOutputMap = false;
     string line;
     uint64 count = 0;
     while (std::getline(in, line)) {
@@ -248,6 +249,14 @@ static uint64 countValidWhitelistRows(const string& whitelistPath) {
         string token = (end == string::npos) ? line.substr(first) : line.substr(first, end - first);
         if (isValidBarcodeSeq(token)) {
             ++count;
+            size_t second = end == string::npos ? string::npos
+                : line.find_first_not_of(" \t,\r\n", end);
+            if (second != string::npos) {
+                size_t end2 = line.find_first_of(" \t,\r\n", second);
+                string mapped = line.substr(second, end2 == string::npos ? end2 : end2 - second);
+                if (mapped.size() == token.size() && isValidBarcodeSeq(mapped))
+                    hasOutputMap = true;
+            }
         }
     }
     return count;
@@ -334,7 +343,7 @@ static WhitelistNormalizationResult normalizeWhitelistInternal(const string& whi
 
     if (!looksLikeMultiColumnWhitelist(whitelistPath)) {
         result.assignmentNamespace = inferOneColumnNamespace(whitelistPath, result.namespaceConfidence);
-        result.normalizedRowCount = countValidWhitelistRows(whitelistPath);
+        result.normalizedRowCount = countValidWhitelistRows(whitelistPath, result.normalizedHasOutputMap);
         return result;
     }
 
@@ -372,6 +381,7 @@ static WhitelistNormalizationResult normalizeWhitelistInternal(const string& whi
         return result;
     }
     result.normalizedPath = normalizedPath;
+    result.normalizedHasOutputMap = false;
     result.normalizedRowCount = emitted;
     return result;
 }
@@ -1153,6 +1163,7 @@ WhitelistNormalizationResult normalizeWhitelistToNamespace(
 
     WhitelistNormalizationResult result = base;
     result.normalizedPath = translatedPath;
+    result.normalizedHasOutputMap = false;
     result.assignmentNamespace = desiredNamespace;
     result.normalizedRowCount = emitted;
     return result;
