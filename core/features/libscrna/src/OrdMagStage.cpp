@@ -349,15 +349,16 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
                                 nonMitoUMIs.empty() ? nullptr : &nonMitoUMIs);
     });
     
-    // The rank target does not override the configured UMI floor. Apply it
+    // The rank target does not override the configured primary floor. Apply it
     // before constructing the primary prefix, median and tail candidates:
     // primary cells receive automatic p=0 in EmptyDrops. Previously only
     // the legacy Flex wrapper removed these low-UMI passers afterward.
+    const uint32 primaryFloor = ordMagPrimaryFloor(params);
     const uint32 estimatedRetainCount = nCellsSimple;
-    while (nCellsSimple > 0 && indCount[nCellsSimple - 1].count < params.umiMin)
+    while (nCellsSimple > 0 && indCount[nCellsSimple - 1].count < primaryFloor)
         --nCellsSimple;
     if (nCellsSimple != estimatedRetainCount)
-        cout << "[OrdMag floor] umi_min=" << params.umiMin
+        cout << "[OrdMag floor] primary_umi_min=" << primaryFloor
              << " removed=" << estimatedRetainCount - nCellsSimple
              << " nCellsSimple=" << nCellsSimple << endl;
 
@@ -545,7 +546,7 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilter(
     
     // Apply the same primary floor as the bootstrap path, after the fallback
     // so that it cannot reintroduce low-count cells (including zero counts).
-    retain = max(retain, max(params.umiMin, (uint32)1));
+    retain = max(retain, max(ordMagPrimaryFloor(params), (uint32)1));
     while (ncellsSimple > 0 && totalsSorted[ncellsSimple - 1] < retain)
         --ncellsSimple;
 
@@ -675,6 +676,7 @@ void SimpleEmptyDropsStage::writeOutputs(
     summaryOut << "    \"max_percentile\": " << fixed << setprecision(6) << params.maxPercentile << ",\n";
     summaryOut << "    \"max_min_ratio\": " << params.maxMinRatio << ",\n";
     summaryOut << "    \"umi_min\": " << params.umiMin << ",\n";
+    summaryOut << "    \"primary_umi_min\": " << ordMagPrimaryFloor(params) << ",\n";
     summaryOut << "    \"umi_min_frac_median\": " << params.umiMinFracMedian << ",\n";
     summaryOut << "    \"cand_max_n\": " << params.candMaxN << ",\n";
     summaryOut << "    \"ind_min\": " << params.indMin << ",\n";

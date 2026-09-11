@@ -87,7 +87,11 @@ void SoloFeature::emptyDrops_libscrna()
     config->max_min_ratio = pSolo.cellFilter.knee.maxMinRatio;
     config->ind_min = pSolo.cellFilter.eDcr.indMin;
     config->ind_max = pSolo.cellFilter.eDcr.indMax;
-    config->umi_min = 100; // scRNA-seq: low floor to allow EmptyDrops rescue below the OrdMag knee
+    // EmptyDrops candidates start at the declared umiMin (500 by default).
+    // OrdMag primaries get no extra floor: low-depth libraries call cells
+    // well below 500, so the declared value must not trim them.
+    config->umi_min = pSolo.cellFilter.eDcr.umiMin;
+    config->primary_umi_min = 1;
     config->umi_min_frac_median = pSolo.cellFilter.eDcr.umiMinFracMedian;
     config->cand_max_n = pSolo.cellFilter.eDcr.candMaxN;
     config->fdr = pSolo.cellFilter.eDcr.FDR;
@@ -108,6 +112,7 @@ void SoloFeature::emptyDrops_libscrna()
     P.inOut->logMain << "emptyDrops_CR (libscrna) params: indMin=" << config->ind_min
                      << " indMax=" << config->ind_max
                      << " umiMin=" << config->umi_min
+                     << " primaryUmiMin=" << config->primary_umi_min
                      << " umiMinFracMedian=" << config->umi_min_frac_median
                      << " candMaxN=" << config->cand_max_n
                      << " FDR=" << config->fdr

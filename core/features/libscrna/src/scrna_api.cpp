@@ -75,6 +75,7 @@ extern "C" scrna_ed_config* scrna_ed_config_create(void) {
     config->max_percentile = 0.99;
     config->max_min_ratio = 10.0;
     config->umi_min = 500;
+    config->primary_umi_min = 0;         // Primaries trimmed at umi_min (Flex behavior)
     config->umi_min_frac_median = 0.01;
     config->cand_max_n = 20000;
     config->ind_min = 45000;
@@ -275,6 +276,7 @@ int scrnaEmptyDropsTrace(const scrna_matrix_input* input, const scrna_ed_config*
     simpleParams.maxPercentile = config->max_percentile;
     simpleParams.maxMinRatio = config->max_min_ratio;
     simpleParams.umiMin = config->umi_min;
+    simpleParams.primaryUmiMin = config->primary_umi_min;
     simpleParams.umiMinFracMedian = config->umi_min_frac_median;
     simpleParams.candMaxN = config->cand_max_n;
     simpleParams.indMin = config->ind_min;
