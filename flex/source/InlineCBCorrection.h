@@ -8,11 +8,16 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <mutex>
+#include <memory>
+#include <limits>
+#include <stdexcept>
 #include "solo/CbBayesianResolver.h"
 #include "hash_shims_cpp_compat.h" // brings in khash and pack helpers
 
 // Hash type for packed CB -> whitelist index (1-based)
 KHASH_MAP_INIT_INT64(cbwl, uint32_t)
+struct InlineCbCollisionRange { size_t offset; uint32_t count; };
+KHASH_INIT(inlineCbRanges, uint64_t, InlineCbCollisionRange, 1, kh_int64_hash_func, kh_int64_hash_equal)
 
 // Inline CB/UB correction module - ports process_features-style correction logic
 // to replace Solo's CB/UB data structures with streaming correction during R1 parsing
@@ -62,8 +67,38 @@ private:
     static khash_t(cbwl) *exactHash_;    // packed CB -> 1-based WL index
     static khash_t(cbwl) *variantHash_;  // packed 1MM variant -> 1-based WL index if unique, 0 if ambiguous
     // Collision tracker: variant -> parent whitelist indices (when ambiguous).
-    static std::unordered_map<uint64_t, std::vector<uint32_t>> variantCollisions_;
-    static std::unordered_set<uint64_t> whitelistHash_; // kept for legacy uses (N-path)
+    struct CollisionDeleter {
+        void operator()(khash_t(inlineCbRanges)* h) const { kh_destroy(inlineCbRanges, h); }
+    };
+    static std::unique_ptr<khash_t(inlineCbRanges), CollisionDeleter> variantCollisions_;
+    static std::vector<uint32_t> collisionParents_;
+    struct CandidateView {
+        const uint32_t* data;
+        size_t count;
+        const uint32_t* begin() const { return data; }
+        const uint32_t* end() const { return count ? data + count : data; }
+        size_t size() const { return count; }
+        bool empty() const { return count == 0; }
+    };
+    static CandidateView collisionCandidates(uint64_t packed);
+    template<class Visitor> static void forEachWhitelistVariant(Visitor visit) {
+        for (khiter_t it = kh_begin(exactHash_); it != kh_end(exactHash_); ++it) {
+            if (!kh_exist(exactHash_, it)) continue;
+            uint64_t packed = kh_key(exactHash_, it);
+            uint32_t index = kh_val(exactHash_, it);
+            const size_t length = (*wlStrings_)[index - 1].size();
+            for (size_t pos = 0; pos < length; ++pos) {
+                uint32_t base = (packed >> (pos * 2)) & 3;
+                for (uint32_t alternate = 0; alternate < 4; ++alternate) {
+                    if (alternate == base) continue;
+                    uint64_t variant = (packed & ~(uint64_t{3} << (pos * 2)))
+                        | (uint64_t{alternate} << (pos * 2));
+                    if (kh_get(cbwl, exactHash_, variant) == kh_end(exactHash_))
+                        visit(variant, index);
+                }
+            }
+        }
+    }
     static const std::vector<std::string>* wlStrings_;  // pointer to whitelist strings
     static bool whitelistInitialized_;
 

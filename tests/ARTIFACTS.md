@@ -1734,3 +1734,9 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
 - `a375_bridge`: full A375140.73s, peak RSS39,941,536KiB. `bridge_a375_comparison.json`
   verifies all six matrices and three guide tables against `a375_umi`.
 - Key counts and buffer counts are logged; details in `docs/ALLOCATION_FIXES_20260911.md`.
+
+### Inline barcode allocation parity (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/allocation_audit/inline_{baseline,probe_before,probe_after,probe_asan,build}`
+preserves the old source, commands, ledgers, sanitizer logs and clean-build STAR.
+Details: `docs/ALLOCATION_FIXES_20260911.md`.

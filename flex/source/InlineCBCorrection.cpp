@@ -9,8 +9,8 @@
 // Static members
 khash_t(cbwl) *InlineCBCorrection::exactHash_ = nullptr;
 khash_t(cbwl) *InlineCBCorrection::variantHash_ = nullptr;
-std::unordered_set<uint64_t> InlineCBCorrection::whitelistHash_;
-std::unordered_map<uint64_t, std::vector<uint32_t>> InlineCBCorrection::variantCollisions_;
+std::unique_ptr<khash_t(inlineCbRanges), InlineCBCorrection::CollisionDeleter> InlineCBCorrection::variantCollisions_;
+std::vector<uint32_t> InlineCBCorrection::collisionParents_;
 const std::vector<std::string>* InlineCBCorrection::wlStrings_ = nullptr;
 bool InlineCBCorrection::whitelistInitialized_ = false;
 std::vector<std::vector<uint64_t>*> InlineCBCorrection::evidenceShards_;
@@ -24,15 +24,24 @@ uint64_t InlineCBCorrection::ambigTotal_ = 0;
 
 size_t InlineCBCorrection::exactMapSize() { return exactHash_ ? kh_size(exactHash_) : 0; }
 size_t InlineCBCorrection::variantMapSize() { return variantHash_ ? kh_size(variantHash_) : 0; }
-size_t InlineCBCorrection::variantCollisionSize() { return variantCollisions_.size(); }
+size_t InlineCBCorrection::variantCollisionSize() {
+    return variantCollisions_ ? kh_size(variantCollisions_.get()) : 0;
+}
 size_t InlineCBCorrection::variantCollisionMaxFanout() {
     size_t maxFan = 0;
-    for (const auto &kv : variantCollisions_) {
-        if (kv.second.size() > maxFan) {
-            maxFan = kv.second.size();
-        }
-    }
+    const auto* ranges = variantCollisions_.get();
+    if (ranges) for (khint_t k = kh_begin(ranges); k != kh_end(ranges); ++k)
+        if (kh_exist(ranges, k) && kh_val(ranges, k).count > maxFan)
+            maxFan = kh_val(ranges, k).count;
     return maxFan;
+}
+InlineCBCorrection::CandidateView InlineCBCorrection::collisionCandidates(uint64_t packed) {
+    const auto* ranges = variantCollisions_.get();
+    if (!ranges) return {nullptr, 0};
+    const khint_t k = kh_get(inlineCbRanges, ranges, packed);
+    if (k == kh_end(ranges)) return {nullptr, 0};
+    const auto& range = kh_val(ranges, k);
+    return {collisionParents_.data() + range.offset, range.count};
 }
 uint64_t InlineCBCorrection::parentEvidenceTotal() {
     uint64_t total = 0;
@@ -106,8 +115,8 @@ void InlineCBCorrection::recordParentEvidence(uint32_t wlIndex1) {
 
 void InlineCBCorrection::recordAmbiguousCB(uint64_t packedVariant, const std::string &cbSeq, const std::string &cbQual) {
     if (packedVariant == UINT64_MAX || !whitelistInitialized_) return;
-    auto parentIt = variantCollisions_.find(packedVariant);
-    if (parentIt == variantCollisions_.end()) return;
+    const auto parents = collisionCandidates(packedVariant);
+    if (parents.empty()) return;
     // Thread-local shard pointer
     thread_local AmbigShard* shard = nullptr;
     if (!shard) {
@@ -127,7 +136,7 @@ void InlineCBCorrection::recordAmbiguousCB(uint64_t packedVariant, const std::st
                                                  rec.cbLogLikMatch,
                                                  rec.cbLogLikMismatch,
                                                  rec.evidenceReads);
-        rec.parents = parentIt->second;
+        rec.parents.assign(parents.begin(), parents.end());
         rec.count = 1;
         shard->records.push_back(std::move(rec));
         shard->index[packedVariant] = shard->records.size() - 1;
@@ -148,9 +157,7 @@ uint32_t InlineCBCorrection::resolveAmbiguousVariant(uint64_t packedVariant,
                                                     const std::string &cbQual,
                                                     const ParametersSolo &pSolo) {
     if (packedVariant == UINT64_MAX || !whitelistInitialized_ || !pSolo.cbWLyes || pSolo.cbWLstr.empty()) return 0;
-    auto parentIt = variantCollisions_.find(packedVariant);
-    if (parentIt == variantCollisions_.end()) return 0;
-    const auto &parents = parentIt->second;
+    const auto parents = collisionCandidates(packedVariant);
     if (parents.empty()) return 0;
 
     CbBayesianResolver resolver(pSolo.cbWLstr.size(), &pSolo.cbWLstr);
@@ -317,8 +324,9 @@ void InlineCBCorrection::initializeWhitelist(const ParametersSolo &pSolo) {
     if (variantHash_) kh_destroy(cbwl, variantHash_);
     exactHash_ = kh_init(cbwl);
     variantHash_ = kh_init(cbwl);
-    whitelistHash_.clear();
-    variantCollisions_.clear();
+    variantCollisions_.reset(kh_init(inlineCbRanges));
+    std::vector<uint32_t>().swap(collisionParents_);
+    if (!exactHash_ || !variantHash_ || !variantCollisions_) throw std::bad_alloc();
     // reset evidence shards
     evidenceShards_.clear();
     evidenceSize_ = pSolo.cbWLstr.size();
@@ -338,47 +346,49 @@ void InlineCBCorrection::initializeWhitelist(const ParametersSolo &pSolo) {
         int absent;
         khiter_t it = kh_put(cbwl, exactHash_, packed, &absent);
         kh_val(exactHash_, it) = static_cast<uint32_t>(i + 1);
-        whitelistHash_.insert(packed);
     }
 
-    // Build 1MM variant map (unique -> index, ambiguous -> 0) and collision tracking
-    if (wlStrings_ != nullptr) {
-        for (khiter_t it = kh_begin(exactHash_); it != kh_end(exactHash_); ++it) {
-            if (!kh_exist(exactHash_, it)) continue;
-            uint64_t packed = kh_key(exactHash_, it);
-            uint32_t idx1 = kh_val(exactHash_, it);
-            const std::string &cbStr = (*wlStrings_)[idx1 - 1];
-            int len = static_cast<int>(cbStr.length());
-            for (int pos = 0; pos < len; pos++) {
-                uint32_t baseCode = (packed >> (pos * 2)) & 3;
-                for (uint32_t altCode = 0; altCode < 4; altCode++) {
-                    if (altCode == baseCode) continue;
-                    uint64_t variant = packed;
-                    variant &= ~((uint64_t)3 << (pos * 2));
-                    variant |= ((uint64_t)altCode << (pos * 2));
-                    // Skip if this variant is an exact whitelist barcode
-                    if (kh_get(cbwl, exactHash_, variant) != kh_end(exactHash_)) {
-                        continue;
-                    }
-                    int absentVar;
-                    khiter_t itVar = kh_put(cbwl, variantHash_, variant, &absentVar);
-                    if (absentVar) {
-                        // First claim: store as unique, no collision entry yet
-                        kh_val(variantHash_, itVar) = idx1;
-                    } else {
-                        uint32_t prev = kh_val(variantHash_, itVar);
-                        if (prev != 0) {
-                            // First collision: seed collision list with previous parent
-                            variantCollisions_[variant].push_back(prev);
-                            kh_val(variantHash_, itVar) = 0; // mark ambiguous
-                        }
-                        // Record current parent for this colliding variant
-                        variantCollisions_[variant].push_back(idx1);
-                    }
-                }
+    // Count candidate ranges first, then replay the same exact-map traversal.
+    // This retains the former per-variant vector order without per-key allocations.
+    forEachWhitelistVariant([&](uint64_t variant, uint32_t index) {
+        int absent;
+        const khint_t v = kh_put(cbwl, variantHash_, variant, &absent);
+        if (absent < 0) throw std::bad_alloc();
+        if (absent) {
+            kh_val(variantHash_, v) = index;
+        } else {
+            auto* ranges = variantCollisions_.get();
+            int newRange;
+            const khint_t r = kh_put(inlineCbRanges, ranges, variant, &newRange);
+            if (newRange < 0) throw std::bad_alloc();
+            auto& range = kh_val(ranges, r);
+            if (newRange) { range.offset = 0; range.count = 2; }
+            else {
+                if (range.count == UINT32_MAX) throw std::length_error("Inline CB candidate count overflow");
+                ++range.count;
             }
+            kh_val(variantHash_, v) = 0;
         }
+    });
+    size_t total = 0;
+    auto* ranges = variantCollisions_.get();
+    for (khint_t k = kh_begin(ranges); k != kh_end(ranges); ++k) {
+        if (!kh_exist(ranges, k)) continue;
+        auto& range = kh_val(ranges, k);
+        if (range.count > collisionParents_.max_size() - total)
+            throw std::length_error("Inline CB candidate storage overflow");
+        range.offset = total;
+        total += range.count;
+        range.count = 0;
     }
+    collisionParents_.resize(total);
+    forEachWhitelistVariant([&](uint64_t variant, uint32_t index) {
+        const khint_t k = kh_get(inlineCbRanges, ranges, variant);
+        if (k != kh_end(ranges)) {
+            auto& range = kh_val(ranges, k);
+            collisionParents_[range.offset + range.count++] = index;
+        }
+    });
 
     whitelistInitialized_ = true;
 }
@@ -400,7 +410,7 @@ int InlineCBCorrection::findVariantMatch(uint64_t packedCode, int position, std:
         variant |= ((uint64_t)altCode << (position * 2));  // Set new base
         
         // Check if variant is in whitelist
-        if (whitelistHash_.find(variant) != whitelistHash_.end()) {
+        if (exactIndex(variant) != 0) {
             variants.push_back(variant);
         }
     }
@@ -567,10 +577,10 @@ int InlineCBCorrection::checkSequenceAndCorrectForN(const std::string &seq, int 
 
 // Clear whitelist hash
 void InlineCBCorrection::clearWhitelist() {
-    whitelistHash_.clear();
     if (exactHash_) { kh_destroy(cbwl, exactHash_); exactHash_ = nullptr; }
     if (variantHash_) { kh_destroy(cbwl, variantHash_); variantHash_ = nullptr; }
-    variantCollisions_.clear();
+    variantCollisions_.reset();
+    std::vector<uint32_t>().swap(collisionParents_);
     evidenceShards_.clear();
     evidenceSize_ = 0;
     wlStrings_ = nullptr;
