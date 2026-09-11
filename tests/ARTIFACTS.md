@@ -1740,3 +1740,9 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
 `/home/lhhung/pf_larry_regression_20260911/allocation_audit/inline_{baseline,probe_before,probe_after,probe_asan,build}`
 preserves the old source, commands, ledgers, sanitizer logs and clean-build STAR.
 Details: `docs/ALLOCATION_FIXES_20260911.md`.
+
+### Occupancy allocation parity (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/allocation_audit/occupancy_{baseline,before,after,asan,build}`
+contains original sources, exact ledgers, sanitizer logs and the clean-build STAR.
+See `docs/ALLOCATION_FIXES_20260911.md`.

@@ -116,9 +116,32 @@ Artifacts: `inline_baseline`, `inline_probe_before`, `inline_probe_after`,
 `inline_probe_asan`, `inline_build`. Reproduction driver:
 `tests/run_inline_cb_storage_probe.py` with a preserved `--expected-ledger`.
 
+## Occupancy grouping (audit item 10)
+
+Observed-tag occupancy packs each CB16+TAG8 into 48 bits, sorts/deduplicates the
+keys and counts adjacent GEM groups. Only rejected GEMs become output strings.
+The general Monte Carlo path sorts indices into its existing barcode strings,
+replacing two nested maps with one array. It still handles non-DNA strings and
+variable tag lengths. Removed indices now have deterministic ascending order;
+callers consume them as a set. No sixteen-tag limit was introduced.
+
+The Poisson calculation, fitted mean, lambda, percentile cutoff, simulations and
+filtering rules are unchanged. Ninety observed-fit comparisons (including up to
+80 tags per GEM), sixteen Monte Carlo/fallback comparisons, duplicates, invalid
+barcodes/percentiles and variable-length tags match the preserved implementation.
+ASan/UBSan and clean libscrna/core builds pass. Ledger SHA256:
+`4f84865f447e38747b75747ba2fe464821b0305bf469ffc7b2dbab2cc99972ec`.
+Existing observed-GEM diagnostics remain available. No full Flex performance
+measurement was made for this storage-only change.
+
+Artifacts: `occupancy_baseline`, `occupancy_before`, `occupancy_after`,
+`occupancy_asan`, `occupancy_build`. Frozen STAR SHA256:
+`be1800e803de55d20448a7d827113c93991e0c71e548b95c9bb63616466ed2bb`.
+Reproduction: `tests/run_occupancy_storage_probe.py`.
+
 ## Remaining work, in order
 
-Review conditional items 6 and 9–12 separately with their relevant fixtures;
+Review conditional items 6, 9, 11 and 12 separately with their relevant fixtures;
    preserve iteration-dependent outputs and do not infer Flex-scale savings from A375.
 
 This file records completed changes separately from pending audit directions.
