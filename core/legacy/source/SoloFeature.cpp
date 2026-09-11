@@ -475,6 +475,8 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
         if (useBridgeCompactMapping) {
             readFeatSum->applyBridgeAmbiguousAggregatedReadAccounting(
                 P, featureType, entry, bayesResolved, resolvedCbIdx);
+            if (bayesResolved && readFeatSum->bridgeReadInfoEnabled_)
+                readFeatSum->bridgeReadInfo_.resolvedCBs.emplace_back(kv.first, resolvedCbIdx);
         }
 
         if (!bayesResolved) {
@@ -557,13 +559,14 @@ size_t SoloFeature::geneProbeCacheSize() {
 // Shared helper implementations for readInfo management
 void SoloFeature::resetPackedStorage(uint32_t nReads)
 {
+    const bool bridgeReadInfo = readFeatSum && readFeatSum->bridgeReadInfoEnabled_;
     // Skip allocation when minimal memory flag is on, UNLESS trackReadIdsForTags is enabled
-    if (pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode && !pSolo.trackReadIdsForTags) {
+    if (pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode && !pSolo.trackReadIdsForTags && !bridgeReadInfo) {
         return;
     }
     // Skip allocation when inline CB correction is active (Solo structures not used)
     // UNLESS trackReadIdsForTags is enabled
-    if (pSolo.inlineCBCorrection && !pSolo.trackReadIdsForTags) {
+    if (pSolo.inlineCBCorrection && !pSolo.trackReadIdsForTags && !bridgeReadInfo) {
         // Assert that packedReadInfo stays empty
         assert(packedReadInfo.data.empty());
         return;
@@ -574,7 +577,8 @@ void SoloFeature::resetPackedStorage(uint32_t nReads)
 void SoloFeature::recordReadInfo(uint32_t readId, uint32_t cbIdx, uint32_t umiPacked, uint8_t status)
 {
     // Skip entirely when minimal memory flag is on, UNLESS trackReadIdsForTags is enabled
-    if (pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode && !pSolo.trackReadIdsForTags) {
+    if (pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode && !pSolo.trackReadIdsForTags
+        && !(readFeatSum && readFeatSum->bridgeReadInfoEnabled_)) {
         return;
     }
     if (packedReadInfo.data.empty()) {

@@ -239,8 +239,8 @@ been benchmarked here.
 
 The first no-BAM **bridge** control emitted empty Velocyto layers on the preserved
 binary. It is marked unusable for allocation parity and is not a performance
-control for the legacy-counting runs. The existing read-information gap is traced
-in `HANDOFF_NO_BAM_VELOCYTO_READINFO_20260911.md`; it is a separate correctness fix.
+control for the legacy-counting runs. The read-information gap is now fixed separately; see
+`HANDOFF_NO_BAM_VELOCYTO_READINFO_20260911.md` for the no-BAM correction and controls.
 
 Artifacts: `velocyto_baseline`, `velocyto_unit`, `velocyto_build`, `velocyto_build2`,
 `velocyto_before` (unusable empty bridge control), `velocyto_before_legacy`,
@@ -265,7 +265,8 @@ Broader directions remain explicit:
 - Item 1 retains general hashes for rare multi-feature UMIs. A shared rare-counter
   arena, per-barcode counter replacement and additional pre-sizing are deferred.
 - Full MSK paper P02 and full-scale conditional-path performance runs remain pending.
-- The discovered no-BAM bridge/Velocyto read-information gap needs its own correction.
+- The no-BAM bridge/Velocyto read-information gap is corrected in the separate
+  follow-up documented in `HANDOFF_NO_BAM_VELOCYTO_READINFO_20260911.md`.
 
 All changes are committed on the development branch. No merge, push or release
 was performed for this allocation work.
