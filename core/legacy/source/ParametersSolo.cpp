@@ -1603,13 +1603,10 @@ void ParametersSolo::initialize(Parameters *pPin)
         if (cbCorrector && cbWLyes && !cbWLstr.empty()) {
             ambiguousCbByKey.clear();
             if (std::getenv("STAR_BUILD_LEGACY_AMBIG_HASH") != nullptr) {
-                const auto& ambigVariants = cbCorrector->getAmbiguousVariants();
                 size_t cbLen = cbCorrector->getCbLength();
                 std::hash<std::string> hasher;
                 
-                for (const auto& kv : ambigVariants) {
-                    uint32_t packedKey = kv.first;
-                    const auto& indices = kv.second; // 0-based indices
+                cbCorrector->forEachAmbiguousVariant([&](uint32_t packedKey, CbCorrector::CandidateView indices) {
                     
                     // Decode packed key to CB string
                     std::string cbStr = cbCorrector->decodePackedKey(packedKey, cbLen);
@@ -1625,7 +1622,7 @@ void ParametersSolo::initialize(Parameters *pPin)
                     }
                     
                     ambiguousCbByKey[cbHash] = std::move(neighbors1Based);
-                }
+                });
                 
                 pP->inOut->logMain << "Built ambiguousCbByKey with " << ambiguousCbByKey.size() << " ambiguous CB variants" << endl;
             } else {

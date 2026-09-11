@@ -452,13 +452,21 @@ void Parameters::openReadsFiles()
         star::input::BgzfWorkPermitHooks hooks;
         {
             hooks.acquire = [](void*) -> uint64_t {
-                return g_threadChunks.mapPermitEnabled() ? g_threadChunks.mapPermitAcquire() : UINT64_MAX;
+                return g_threadChunks.mapPermitEnabled() ? g_threadChunks.mapPermitAcquireForDomain(
+                    ThreadControl::PermitDomain::MAP, ThreadControl::PermitWork::BGZF) : UINT64_MAX;
             };
             hooks.release = [](void*, uint64_t wait, uint64_t units, uint64_t bytes, uint64_t ns) {
-                if (wait != UINT64_MAX) g_threadChunks.mapPermitRelease(wait, units, bytes, ns);
+                if (wait != UINT64_MAX) g_threadChunks.mapPermitReleaseForDomain(
+                    ThreadControl::PermitDomain::MAP, wait, units, bytes, ns, ThreadControl::PermitWork::BGZF);
+            };
+            hooks.observe = [](void*, const void* reader, uint64_t ready, uint64_t outstanding,
+                               uint64_t capacity, unsigned workers, int waiting, int live) {
+                g_threadChunks.mapPermitObserveDecode(ThreadControl::PermitDomain::MAP,
+                    reader, ready, outstanding, capacity, workers, waiting, live);
             };
         }
         bgzfPipes.reset(new star::input::BgzfPipeGroup(hooks));
+        if (dynamicThreadBgzfHierarchy == 1) bgzfPipes->enablePermits();
         inOut->logMain << "BGZF raw input: active; established STAR chunk parser, " << readFilesNames.size()
                        << " mates, " << readFilesN << " lanes, ordered FILE markers, shared decode permits\n";
     }

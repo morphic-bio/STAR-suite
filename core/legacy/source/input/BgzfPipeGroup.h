@@ -44,6 +44,12 @@ class BgzfPipeGroup {
         }
         return true;
     }
+    static void observe(void* p, const void* reader, uint64_t ready, uint64_t outstanding,
+                        uint64_t capacity, unsigned workers, int waiting, int live) {
+        auto* self = static_cast<BgzfPipeGroup*>(p);
+        if (self->external_.observe) self->external_.observe(self->external_.context,
+            reader, ready, outstanding, capacity, workers, waiting, live);
+    }
 public:
     explicit BgzfPipeGroup(const BgzfWorkPermitHooks& hooks) : external_(hooks) {}
     ~BgzfPipeGroup() { join(); }
@@ -75,6 +81,7 @@ public:
                         BgzfRangeReader reader;
                         std::string message;
                         BgzfWorkPermitHooks hooks; hooks.context = this; hooks.acquire = acquire; hooks.release = release;
+                        hooks.observe = observe;
                         if (!reader.open(paths[lane], 0, UINT64_MAX, threads, crc, &message, &hooks))
                             throw std::runtime_error(message);
                         const char *data; size_t size;

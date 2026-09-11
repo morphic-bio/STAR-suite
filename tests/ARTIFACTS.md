@@ -34,6 +34,7 @@ update this file with its output location.
 
 ## Known untracked artifacts (current)
 
+- `/home/lhhung/pf_larry_regression_20260911/` (feature-search policy regression diagnostics, clean build logs, full A375 revert validation in `a375_revert_star/`, semantic feature-MEX and bytewise GEX comparisons; see `docs/HANDOFF_PF_SEARCH_REVERT_A375_VALIDATION_20260911.md`)
 - `.codespaces-demo/` (Codespaces demo cache, downloaded public fixtures, tiny indices, and walkthrough runs)
 - `plans/artifacts/parms_tests_YYYYMMDD/` (logs + report)
 - `tests/*_output*/` (smoke/regression outputs)
@@ -1612,3 +1613,181 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
 - `native_accepted`, `native_default_accepted`, `existing_accepted`, and `existing_control` retain native/materialization outputs, commands, binary hashes and wall/CPU/RSS/I/O measurements. `ACCEPTED_LARGE_RESULTS.json` is the final comparison record.
 - The large input reuses real A375 counts and explicitly synthetic OCM sample suffixes from the prior cross-module fixture. The existing-call arm uses the prior caller's 1,188 global calls. See `large_inventory.json` and `existing_inventory.json`.
 - No reference index, alignment, BAM, sidecar, cloud job or new release was needed. Reuse saved controls; the regression runner accepts `--saved-native`, `--saved-existing`, and `--saved-ordered`.
+# A375 hierarchical permit validation (2026-09-11, development)
+
+- Runbook: `docs/RUNBOOK_ADAPTIVE_PERMIT_BALANCING_A375_20260911.md`.
+- Historical command/log manifest: `docs/ADAPTIVE_PERMIT_A375_REFERENCE_RUNS_20260911.json`.
+- Artifact root: `/home/lhhung/pf_larry_regression_20260911/hierarchy/`.
+- `step1/`: clean accounting build and permit tests; `step2/`: initial hierarchy build,
+  controller/input tests and pre-worker parameter-conflict rejection.
+- `a375_inner_off/`, `a375_inner_on/`: completed full A375 same-binary comparison,
+  191.9031/189.6228 s wrapper wall and 25.451/26.2649 s feature API. Each retains
+  `execution.json`, exact argv/environment, binary/source hashes and patch, GNU time,
+  stdout/stderr, process-tree CPU samples and biological outputs. On arm has
+  `out/PermitHierarchy.tsv` at 250 ms resolution.
+- `a375_inner_comparison.json`: strict parity failed for one raw feature UMI at
+  `IL1B_sg2_HEK / GGGTCAGCACCTCACT`; GEX, filtered matrices and guide calls match.
+  This entry was also the residual in the pre-hierarchy March comparison. The later
+  zero-N and learning-order diagnostics below identify defects before merge/gather.
+- `a375_inner_tail_diagnosis.json`: MAP takes all 32 permits as soon as feature-read
+  processing ends; approximately 31 active permits in the subsequent GEX tail. Most
+  observed input waiting occurs during read overlap (4.13 s versus 0.032 s later).
+- `step2_demand/`: separate clean build and passed unit/input tests for a borrowable
+  decoder reservation only under low ordered input with pending decode work. Binary
+  SHA256 `adca5d77abab460e9a389c6691d8a5c09cd0047a0fc9e1469bd0a410c7b47d98`.
+  Full `a375_demand_off/` and `a375_demand_on/` completed in 191.88/190.40 s;
+  `a375_fixed4/` completed in 189.36 s. Six matrices and three guide tables agree exactly.
+- `step4/`: clean inner/outer build and passed legacy/new controller, input and CLI tests.
+  `a375_outer_{fixed4,inner4,balanced4}/`: same-binary 189.36/191.59/190.86 s full runs.
+  GEX, filtered feature matrices and guide tables match; raw feature singletons differ.
+  `a375_step4_summary.json` and strict comparisons retain the failed raw parity gate.
+- `umi_trace/`, `umi_trace_modes/`: target read ledgers, before/after merge snapshots,
+  source-order controls and the negative-shift UBSan failure. Same relevant producer and
+  consumer pairs; singleton differences exist before merge and are not deduplication ties.
+- `zero_n_fix/`: actual-read regression, clean fixed build, ASan/UBSan and anchor tests.
+  One expansion slot for zero-N prevents input corruption and invalid shift arithmetic.
+- `learning_order_fix/`: same 200,000 source pairs in two lanes, opposite producer delays.
+  Prior zero-N-only implementation differs in 215 raw entries; deterministic round-robin
+  learning has identical histograms and 147,638 UMIs under both delays. Exact input and
+  source identities, build commands and matrix comparisons retained.
+- `a375_corrected_{fixed4,inner4,balanced4}/`: full A375 correctness build
+  `ce9d8142f6e8f0f52d4755b669265166f4a08e673c65650be362e8ffe2577a3c`,
+  192.10/190.62/190.60 s total wall; all six matrices, three guide-call CSVs and feature
+  totals agree exactly. `a375_corrected_summary.json` records phase/CPU/RSS results;
+  `a375_correctness_cross_build_impact.json` records the separate effect of the fixes
+  versus the older build. See `docs/HANDOFF_A375_HIERARCHY_CORRECTNESS_20260911.md`.
+- These are unreleased development runs. Correctness precedes end-to-end wall time,
+  full-workload tail (including gathers), then average CPU. March's feature duration is
+  a historical diagnostic reference, not an independent performance target.
+
+- A375 exit-table probes: `/home/lhhung/pf_larry_regression_20260911/hierarchy/exit_cleanup_probe/`.
+  Same clean CbCorrector object and real 3,686,400-barcode whitelist; 88,270,080 H1 entries,
+  42,938,880 ambiguity keys. Construction ~44 s; isolated destruction 11.43 s with no
+  threads, 12.00 s after a joined thread. Full STAR's 27–28 s exit remains only partly
+  explained; these are component experiments, not new full-set timings. Source, objects,
+  binary hashes, manifests and timing files retained. No production change.
+
+- A375 CbCorrector khash/flat-array follow-up (2026-09-11):
+  `/home/lhhung/pf_larry_regression_20260911/hierarchy/cbcorrector_flat_hash/` contains preserved
+  baseline sources, clean-build logs/frozen STAR, unit/ASan/UBSan tests, component probe and
+  `results.json`. The new binary SHA256 is
+  `9fcde3060a5d5102831c1450a0d0551bf504933a31d04cae14d443c0c2e156b0`.
+  Full outputs are under sibling `a375_flat_hash_fixed4/` and `a375_flat_hash_balanced4/`, with
+  completed wrapper manifests, argv/environment/input identities, GNU time and CPU traces.
+  Full wall 145.47/146.21 s versus corrected controls 192.10/190.60 s; peak RSS ~39.8 versus ~44.2 GiB;
+  exit gap ~1 s versus ~28.4 s. All six matrices, three guide CSVs and biological feature totals
+  match in both before/after comparisons and between new scheduler arms. Component construction
+  26.44 versus 43.91 s; destruction 0.163 versus 12.00 s; RSS 3.31 versus 7.61 GiB.
+  Test runner `tests/run_cb_corrector_storage_test.py` requires a preserved baseline source directory
+  and fresh external `--out`; this artifact root retains both ordinary and sanitizer runs.
+  Details: `docs/benchmarks/A375_CB_CORRECTOR_FLAT_HASH_20260911.md`. Development work, unreleased.
+
+- MSK ES LARRY quick comparison input (2026-09-11):
+  `/home/lhhung/pf_larry_regression_20260911/larry_subset_200k/` contains 200,000 read pairs,
+  first 25,000 from each of eight lanes, in 16 ordinary-gzip FASTQs (11,357,278 compressed bytes).
+  Full 245,979-feature reference and TRU whitelist are copied unchanged. `manifest.json` retains
+  source identities, prefix/output/reference hashes, exact counts and successful paired FASTQ/CRC
+  validation. `../create_larry_subset_200k.py` preserves the reproducible creation procedure.
+  This is a deterministic prefix regression fixture, not random biological sampling. Baseline/current
+  feature assignment has not yet been run on it.
+
+### MSK LARRY search corrections (2026-09-11)
+
+- Root: `/home/lhhung/pf_larry_regression_20260911/larry_fix/`.
+- `baseline`, `build`, `build2`: preserved pre-change libraries and two clean correction builds.
+- `parity2`, `asan2`: 27 exact assignment/learning-state comparisons, including 1,600 actual reads;
+  AddressSanitizer passes on the changed translation unit and differential driver.
+- `before_1000`, `after_1000`, `after2_1000`: completed 200,000-pair diagnostic learning controls;
+  exact sparse MEX equality, wall 28.76/26.68/16.57 seconds. Threshold 1,000 is diagnostic only.
+- `after2_100000`: completed normal-learning run, 279.12 seconds, 159,035 UMIs; no matching completed
+  normal-learning baseline. `after_100000` is an intentionally stopped stack diagnostic.
+- `../larry_comparison_200k`: clean v1.4.3/current instrumented checkpoint diagnostics; not full timings.
+- Fixture `../larry_subset_200k` is now validated against both corrections. Ordinary gzip was selected
+  automatically for all eight lanes; zero BGZF inflater workers.
+- See `docs/HANDOFF_LARRY_SEARCH_CORRECTIONS_20260911.md` for scope, identities and limitations.
+- `../hierarchy/a375_larry_fix_fixed4`: full A375 passed in 146.22 s; all six matrices and
+  three guide-call CSVs exactly match `a375_flat_hash_fixed4`. Report: `a375_comparison.json`.
+
+### Allocation audit: whitelist storage and gather (2026-09-11)
+
+- `/home/lhhung/pf_larry_regression_20260911/allocation_audit/`: original audit, source/build
+  identities, sanitizer and namespace tests, failed harness attempts retained separately.
+- `whitelist_build2/STAR`: clean accepted binary; `a375_whitelist` completed in 142.72 s,
+  peak RSS 41,559,480 KiB. Control `../hierarchy/a375_larry_fix_fixed4` is 146.22 s,
+  41,816,724 KiB. `whitelist_comparison.json`: all six matrices and three guide tables exact.
+- Details and pending audit targets: `docs/ALLOCATION_FIXES_20260911.md`.
+
+### Allocation audit: inline UMI counters (2026-09-11)
+
+- Same `allocation_audit` artifact root: `umi_baseline`, `umi_build`, `umi_asan_build`,
+  `umi_probe_{before,after,asan}` preserve build identities and exact count/gather/dedup ledgers.
+- `umi_1000`: actual LARRY 200k diagnostic, 15.97 s, exact MEX versus preserved 16.57 s control.
+  `umi_larry_comparison.json` records barcode reordering and zero differing entries.
+- `a375_umi`: full A375142.78 s, peak RSS40,010,100KiB; six matrices and three guide CSVs
+  exactly match `a375_whitelist`, per `umi_a375_comparison.json`.
+- PF merge/cleanup9.717→1.775s and sample cleanup2.164→0.182s; whole-job time unchanged.
+  Details: `docs/ALLOCATION_FIXES_20260911.md`.
+
+### Allocation audit: bridge counts and output buffers (2026-09-11)
+
+- `allocation_audit/bridge_build`, `bridge_unit`: clean binary and ASan/UBSan map tests.
+- `a375_bridge`: full A375140.73s, peak RSS39,941,536KiB. `bridge_a375_comparison.json`
+  verifies all six matrices and three guide tables against `a375_umi`.
+- Key counts and buffer counts are logged; details in `docs/ALLOCATION_FIXES_20260911.md`.
+
+### Inline barcode allocation parity (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/allocation_audit/inline_{baseline,probe_before,probe_after,probe_asan,build}`
+preserves the old source, commands, ledgers, sanitizer logs and clean-build STAR.
+Details: `docs/ALLOCATION_FIXES_20260911.md`.
+
+### Occupancy allocation parity (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/allocation_audit/occupancy_{baseline,before,after,asan,build}`
+contains original sources, exact ledgers, sanitizer logs and the clean-build STAR.
+See `docs/ALLOCATION_FIXES_20260911.md`.
+
+### Flex MEX allocation parity (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/allocation_audit/mex_*` contains the
+preserved loader, generated edge fixtures, actual LARRY MEX and input hashes,
+before/after data ledgers, sanitizer logs and a clean-build STAR. See the allocation report.
+
+### Merge/import allocation parity (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/allocation_audit/` directories
+`merge_baseline`, `barcode_view_unit`, `merge_table_test`, `merge_build`, `a375_merge`
+and `merge_a375_comparison.json` retain sources, sanitizer/fixture logs, the frozen
+STAR and full A375 outputs. Six matrices and three guide tables are exact.
+
+### Ambiguity entry layout parity (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/allocation_audit/ambiguity_*` and
+`a375_ambiguity` retain the old header, evidence ledger, sanitizer logs and clean
+binary/full A375 results. The initial fixture include failure is retained separately.
+
+### Velocyto pooled-state parity (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/allocation_audit/velocyto_*` preserves the
+old merge source/header, sanitizer oracle test, clean builds, 100K-GEX A375 runs,
+full guide outputs and count/layer comparisons. `velocyto_before` exited zero but
+has empty layers and is explicitly excluded by its `validation.json`. The valid
+controls are `velocyto_before_legacy`, `velocyto_after_legacy` and
+`velocyto_after_buckets`. See `docs/ALLOCATION_FIXES_20260911.md` and the separate
+no-BAM Velocyto handoff.
+
+### No-BAM bridge Velocyto correction (2026-09-11)
+
+`/home/lhhung/pf_larry_regression_20260911/velocyto_readinfo_fix/` preserves clean
+builds/source patches, sanitizer fixtures, 100K A375 GEX/full-guide executions and
+strict count/layer comparisons. `build4/STAR` is the corrected frozen binary.
+`bridge_final` restores the layers without changing GEX/guide counts, and
+`exact_bridge_fixed` matches the preserved `exact_legacy` control on every matrix
+and layer. The earlier `bridge` and `exact_bridge` drafts are marked superseded
+after the exact-barcode control exposed an unintended no-feature-read admission.
+See `docs/HANDOFF_NO_BAM_VELOCYTO_READINFO_20260911.md` for commands, hashes and results.
+
+Final allocation guards: `gex_only_final` has no new per-read replay storage;
+`multi_feature_final` retains only the selected Gene source. Their comparison
+JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
+`build_patch_verification.json` complete the correction's provenance.

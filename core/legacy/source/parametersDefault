@@ -103,6 +103,20 @@ dynamicThreadAtacWorkEstimate   0
     int: optional estimated total ATAC work units for mode-2 ETA balancing.
          0 leaves ATAC ETA unavailable; saturation probing still applies.
 
+dynamicThreadBgzfHierarchy      0
+    int: opt-in BGZF child admission under MAP/FEATURE parent budgets.
+         Maximizes processed-read rate using ordered-buffer pressure and throughput feedback.
+         Requires dynamicThreadInterface=1, PF/ATAC controllers off, variableThreads=0,
+         single-pass non-Flex input and no concurrent ATAC. Enables FIFO admission.
+
+dynamicThreadBalance            0
+    int: opt-in MAP/FEATURE finish-time balancing within the BGZF hierarchy.
+         Requires dynamicThreadBgzfHierarchy=1. Seeds existing parent floors, then
+         reuses the ETA policy with one-permit transfers and 10 percent hysteresis.
+         Samples completed read pairs (not decoder blocks) at >=2-second intervals,
+         after the 250-ms inner controller settles. Uses automatic library estimates
+         unless dynamicThreadMapWorkEstimate/dynamicThreadFeatureWorkEstimate are supplied.
+
 dynamicThreadFifoWaiters        0
     int: FIFO waiter-queue admission. When 1, ThreadControl routes acquires
          through a queue under the permit mutex: queued waiters are served

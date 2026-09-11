@@ -173,6 +173,8 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadFeatureWorkEstimate", &dynamicThreadFeatureWorkEstimate));
     parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadAtacWorkEstimate", &dynamicThreadAtacWorkEstimate));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFifoWaiters", &dynamicThreadFifoWaiters));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadBgzfHierarchy", &dynamicThreadBgzfHierarchy));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadBalance", &dynamicThreadBalance));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreads", &variableThreads));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreadsRetuneEveryAcquires", &variableThreadsRetuneEveryAcquires));
     parArray.push_back(new ParameterInfoVector <int> (-1, -1, "variableThreadsPermitSequence", &variableThreadsPermitSequence));
@@ -2035,6 +2037,23 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                <<dynamicThreadFifoWaiters<<"\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
+    if (dynamicThreadBgzfHierarchy != 0 && dynamicThreadBgzfHierarchy != 1) {
+        exitWithError("--dynamicThreadBgzfHierarchy must be 0 or 1\n", std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if ((dynamicThreadBalance != 0 && dynamicThreadBalance != 1) ||
+        (dynamicThreadBalance == 1 && dynamicThreadBgzfHierarchy != 1)) {
+        exitWithError("--dynamicThreadBalance must be 0 or 1; balance=1 requires --dynamicThreadBgzfHierarchy 1\n",
+            std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadBgzfHierarchy == 1) {
+        if (dynamicThreadInterface != 1 || dynamicThreadPfControllerMode != "off" ||
+            dynamicThreadAtacController != 0 || chromapAtac.enabled == 1 || variableThreads != 0) {
+            exitWithError("BGZF hierarchy requires --dynamicThreadInterface 1, --dynamicThreadPfControllerMode off, "
+                "--dynamicThreadAtacController 0, --variableThreads 0 and no concurrent ATAC\n",
+                std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        dynamicThreadFifoWaiters = 1;
+    }
     // FIFO + floors/controller are now composable (Step 8f): the FIFO
     // helper updates mapPermitDomainInUse/Waiters under the lock and picks
     // the first admittable queued waiter when floors are active, so the
@@ -2425,6 +2444,21 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
 
     // openReadFiles depends on twoPass for reading SAM header
     if (runMode=="alignReads" && pGe.gLoad!="Remove" && pGe.gLoad!="LoadAndExit") {//open reads files to check if they are present
+        if (dynamicThreadBgzfHierarchy == 1) {
+            if (twoPass.yes || pSolo.flexMode) {
+                exitWithError("BGZF hierarchy currently supports single-pass non-Flex MAP/FEATURE workloads\n",
+                    std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+            }
+            // Initialize before input workers and asynchronous PF assignment.
+            // Reinitializing the pool at mapping startup would lose live leases.
+            g_threadChunks.mapPermitConfigure(true, runThreadN, dynamicThreadConstMapPermits,
+                dynamicThreadTelemetry == 1, false);
+            g_threadChunks.mapPermitConfigureDomainFloors(
+                {dynamicThreadMapFloor, dynamicThreadFeatureFloor, 0});
+            const bool featureActive = !pfMulti.pfMultiConfig.empty() && pfMulti.pfMultiConfig != "-";
+            g_threadChunks.mapPermitStartHierarchy(outFileNamePrefix + "PermitHierarchy.tsv", featureActive,
+                dynamicThreadBalance == 1, dynamicThreadMapWorkEstimate, dynamicThreadFeatureWorkEstimate);
+        }
         openReadsFiles();
 
         if (readNends > 2 && pSolo.typeStr=="None") {//could have >2 mates only for Solo

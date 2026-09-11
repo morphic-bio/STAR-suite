@@ -158,7 +158,12 @@ typedef struct feature_sequences {
 
 typedef struct feature_umi_counts {
     unsigned char sequence_umi_code[8];
+    // The common single-feature case lives entirely in the pooled record.
+    // counts is allocated only when another feature is observed for this UMI.
     khash_t(u32u32) *counts;
+    uint32_t inline_feature;
+    uint32_t inline_count;
+    uint32_t visited;
 } feature_umi_counts;
 
 typedef struct unmatched_barcodes_features_block {
@@ -291,6 +296,10 @@ typedef struct sample_args {
     void (*permit_release_hook)(void *hook_ctx, uint64_t wait_ns, uint64_t work_units, uint64_t work_bytes, uint64_t work_ns);
     void *permit_hook_ctx;
     int permit_hooks_enabled;
+    uint64_t (*bgzf_permit_acquire_hook)(void *);
+    void (*bgzf_permit_release_hook)(void *, uint64_t, uint64_t, uint64_t, uint64_t);
+    void (*bgzf_observe_hook)(void *, const void *, uint64_t, uint64_t, uint64_t, unsigned, int, int);
+    void *bgzf_permit_hook_ctx;
     khash_t(strptr) *filtered_barcodes_hash;
     int heatmap_minimum_counts;
     int min_prediction;

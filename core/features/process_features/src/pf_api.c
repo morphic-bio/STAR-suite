@@ -54,6 +54,10 @@ struct pf_config {
     pf_permit_acquire_fn permit_acquire_cb;
     pf_permit_release_fn permit_release_cb;
     void *permit_hook_ctx;
+    pf_permit_acquire_fn bgzf_acquire_cb;
+    pf_permit_release_fn bgzf_release_cb;
+    pf_bgzf_observe_fn bgzf_observe_cb;
+    void *bgzf_hook_ctx;
     int debug_enabled;
     int reverse_complement_whitelist;
     int limit_search;
@@ -460,6 +464,23 @@ void pf_config_set_permit_hooks(
     config->permit_acquire_cb = acquire_cb;
     config->permit_release_cb = release_cb;
     config->permit_hook_ctx = hook_ctx;
+}
+
+void pf_config_set_bgzf_permit_hooks(pf_config *config,
+    pf_permit_acquire_fn acquire_cb, pf_permit_release_fn release_cb,
+    pf_bgzf_observe_fn observe_cb, void *hook_ctx) {
+    if (!config) return;
+    config->bgzf_acquire_cb = acquire_cb;
+    config->bgzf_release_cb = release_cb;
+    config->bgzf_observe_cb = observe_cb;
+    config->bgzf_hook_ctx = hook_ctx;
+}
+
+static void apply_bgzf_hooks(sample_args *args, const pf_config *config) {
+    args->bgzf_permit_acquire_hook = config->bgzf_acquire_cb;
+    args->bgzf_permit_release_hook = config->bgzf_release_cb;
+    args->bgzf_observe_hook = config->bgzf_observe_cb;
+    args->bgzf_permit_hook_ctx = config->bgzf_hook_ctx;
 }
 
 void pf_config_set_debug(pf_config *config, int enable) {
@@ -1467,6 +1488,7 @@ static int pf_stream_initialize_queue(pf_record_stream *stream, int nreaders) {
     stream->sample_args.permit_acquire_hook = ctx->config->permit_acquire_cb;
     stream->sample_args.permit_release_hook = ctx->config->permit_release_cb;
     stream->sample_args.permit_hook_ctx = ctx->config->permit_hook_ctx;
+    apply_bgzf_hooks(&stream->sample_args, ctx->config);
     stream->sample_args.permit_hooks_enabled =
         (ctx->config->permit_acquire_cb != NULL &&
          ctx->config->permit_release_cb != NULL);
@@ -1855,6 +1877,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.permit_acquire_hook = ctx->config->permit_acquire_cb;
         args.permit_release_hook = ctx->config->permit_release_cb;
         args.permit_hook_ctx = ctx->config->permit_hook_ctx;
+        apply_bgzf_hooks(&args, ctx->config);
         args.permit_hooks_enabled = (ctx->config->permit_acquire_cb != NULL &&
                                      ctx->config->permit_release_cb != NULL);
         args.filtered_barcodes_hash = ctx->filtered_barcodes_hash;
@@ -2123,6 +2146,7 @@ pf_error pf_process_fastqs(pf_context *ctx,
     args.permit_acquire_hook = ctx->config->permit_acquire_cb;
     args.permit_release_hook = ctx->config->permit_release_cb;
     args.permit_hook_ctx = ctx->config->permit_hook_ctx;
+    apply_bgzf_hooks(&args, ctx->config);
     args.permit_hooks_enabled = (ctx->config->permit_acquire_cb != NULL &&
                                  ctx->config->permit_release_cb != NULL);
     args.filtered_barcodes_hash = ctx->filtered_barcodes_hash;
@@ -2427,6 +2451,7 @@ pf_error pf_direct_range_begin(pf_context *ctx,
     job->sample_args.permit_acquire_hook = ctx->config->permit_acquire_cb;
     job->sample_args.permit_release_hook = ctx->config->permit_release_cb;
     job->sample_args.permit_hook_ctx = ctx->config->permit_hook_ctx;
+    apply_bgzf_hooks(&job->sample_args, ctx->config);
     job->sample_args.permit_hooks_enabled =
         (ctx->config->permit_acquire_cb != NULL &&
          ctx->config->permit_release_cb != NULL);

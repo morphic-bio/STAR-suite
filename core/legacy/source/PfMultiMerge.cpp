@@ -1,4 +1,5 @@
 #include "PfMultiMerge.h"
+#include "BarcodeViewIndex.h"
 #include "ErrorWarning.h"
 #include "Parameters.h"
 #include "streamFuns.h"
@@ -446,12 +447,13 @@ MexData mergeMex(const MexData& gexData, const vector<MexData>& featureDataVec) 
     merged.barcodes = gexData.barcodes;
     merged.triplets = gexData.triplets;
     
-    std::unordered_map<string, uint32_t> barcodeMap;
-    barcodeMap.reserve(merged.barcodes.size() * 2);
+    BarcodeViewIndex barcodeMap;
+    barcodeMap.reserve(merged.barcodes.size());
     for (size_t i = 0; i < merged.barcodes.size(); ++i) {
-        barcodeMap[merged.barcodes[i]] = i;
+        barcodeMap.insert(merged.barcodes[i], i);
     }
     
+    std::clog << "[merge-barcode-index] keys=" << barcodeMap.size() << " copied_keys=0\n";
     uint32_t rowOffset = merged.features.size();
     uint64_t missingCount = 0;
     
@@ -468,10 +470,10 @@ MexData mergeMex(const MexData& gexData, const vector<MexData>& featureDataVec) 
             }
             const string& bc = featData.barcodes[t.cell_idx];
             auto it = barcodeMap.find(bc);
-            if (it != barcodeMap.end()) {
+            if (it) {
                 MexWriter::Triplet newT;
                 newT.gene_idx = rowOffset + t.gene_idx;
-                newT.cell_idx = it->second;
+                newT.cell_idx = *it;
                 newT.count = t.count;
                 merged.triplets.push_back(newT);
             } else {
@@ -626,7 +628,7 @@ int writeCombinedMex(const string& outputDir,
     size_t originalBarcodeCount = data.barcodes.size();
     bool useGexFilter = !gexBarcodes.empty();
     
-    auto stripSuffix = [](const string& bc) -> string {
+    auto stripSuffix = [](const string& bc) -> BarcodeView {
         size_t dashPos = bc.find_last_of('-');
         if (dashPos != string::npos && dashPos < bc.size() - 1) {
             bool allDigits = true;
@@ -637,17 +639,17 @@ int writeCombinedMex(const string& outputDir,
                 }
             }
             if (allDigits) {
-                return bc.substr(0, dashPos);
+                return BarcodeView(bc.data(), dashPos);
             }
         }
-        return bc;
+        return BarcodeView(bc);
     };
     
-    std::unordered_set<string> gexBarcodeSet;
+    BarcodeViewIndex gexBarcodeSet;
     if (useGexFilter) {
-        gexBarcodeSet.reserve(gexBarcodes.size() * 2);
+        gexBarcodeSet.reserve(gexBarcodes.size());
         for (const auto& bc : gexBarcodes) {
-            gexBarcodeSet.insert(stripSuffix(bc));
+            gexBarcodeSet.insert(stripSuffix(bc), 0);
         }
         logStream << "CR-compat MEX filtering: Using GEX barcodes only (" << gexBarcodeSet.size() << " barcodes)\n";
     } else {
@@ -672,8 +674,8 @@ int writeCombinedMex(const string& outputDir,
     if (useGexFilter) {
         filteredBarcodes.reserve(gexBarcodeSet.size());
         for (size_t i = 0; i < data.barcodes.size(); ++i) {
-            string baseBc = stripSuffix(data.barcodes[i]);
-            if (gexBarcodeSet.count(baseBc)) {
+            const auto baseBc = stripSuffix(data.barcodes[i]);
+            if (gexBarcodeSet.find(baseBc)) {
                 oldToCompact[i] = filteredBarcodes.size();
                 filteredBarcodes.push_back(data.barcodes[i]);
             }
@@ -760,33 +762,40 @@ int writeCombinedMex(const string& outputDir,
                   << gemWell << ", keeping existing suffix\n";
     }
     
-    // Duplicate detection with unordered_map
+    // Sort barcodes lexicographically
+    vector<size_t> sortIndices(suffixedBarcodes.size());
+    for (size_t i = 0; i < sortIndices.size(); ++i) {
+        sortIndices[i] = i;
+    }
+
+    std::sort(sortIndices.begin(), sortIndices.end(),
+              [&](size_t a, size_t b) {
+                  return suffixedBarcodes[a] < suffixedBarcodes[b];
+              });
+
+    // The output sort also supplies duplicate runs; no copied-key count map.
     {
-        std::unordered_map<string, size_t> barcodeDupCounts;
-        barcodeDupCounts.reserve(suffixedBarcodes.size() * 2);
-        for (const auto& bc : suffixedBarcodes) {
-            barcodeDupCounts[bc]++;
+        size_t duplicateGroups = 0;
+        ostringstream examples;
+        for (size_t first = 0; first < sortIndices.size();) {
+            size_t end = first + 1;
+            const string& barcode = suffixedBarcodes[sortIndices[first]];
+            while (end < sortIndices.size() && suffixedBarcodes[sortIndices[end]] == barcode) ++end;
+            if (end - first > 1) {
+                if (duplicateGroups < 10)
+                    examples << "  " << barcode << " (appears " << end - first << " times)\n";
+                ++duplicateGroups;
+            }
+            first = end;
         }
-        vector<string> duplicates;
-        for (const auto& pair : barcodeDupCounts) {
-            if (pair.second > 1) {
-                duplicates.push_back(pair.first);
-            }
-        }
-        if (!duplicates.empty()) {
-            ostringstream err;
-            err << "ERROR: Duplicate barcodes after suffixing (e.g., mixed suffixed/unsuffixed input):\n";
-            for (size_t i = 0; i < duplicates.size() && i < 10; ++i) {
-                err << "  " << duplicates[i] << " (appears " << barcodeDupCounts[duplicates[i]] << " times)\n";
-            }
-            if (duplicates.size() > 10) {
-                err << "  ... and " << (duplicates.size() - 10) << " more\n";
-            }
-            cerr << err.str();
+        if (duplicateGroups != 0) {
+            cerr << "ERROR: Duplicate barcodes after suffixing (e.g., mixed suffixed/unsuffixed input):\n"
+                 << examples.str();
+            if (duplicateGroups > 10) cerr << "  ... and " << duplicateGroups - 10 << " more\n";
             return -1;
         }
     }
-    
+
     const bool emitNamespaceArtifacts = needsNamespaceTranslation(inputChemistry, outputChemistry);
     vector<string> nativeSuffixedBarcodes = suffixedBarcodes;
     if (emitNamespaceArtifacts) {
@@ -795,17 +804,6 @@ int writeCombinedMex(const string& outputDir,
         }
     }
 
-    // Sort barcodes lexicographically
-    vector<size_t> sortIndices(suffixedBarcodes.size());
-    for (size_t i = 0; i < sortIndices.size(); ++i) {
-        sortIndices[i] = i;
-    }
-    
-    std::sort(sortIndices.begin(), sortIndices.end(), 
-              [&](size_t a, size_t b) {
-                  return suffixedBarcodes[a] < suffixedBarcodes[b];
-              });
-    
     // Vector-based O(1) compact_idx -> sorted_idx
     vector<uint32_t> compactToSorted(suffixedBarcodes.size(), UINT32_MAX);
     vector<string> sortedBarcodes;

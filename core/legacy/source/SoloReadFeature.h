@@ -14,6 +14,8 @@
 #include "ReadAlign.h"
 #include "hash_shims_cpp_compat.h"
 #include "SoloBinarySpool.h"
+#include "BridgeReadCounts.h"
+#include "BridgeReadInfo.h"
 #include "FlexGdna.h"
 #include "CbBucketStore.h"
 #include <functional>
@@ -57,6 +59,8 @@ public:
     // Maps readId -> packed(cbIdx, umi24, status) for populating packedReadInfo after collapse
     // Only allocated when pSolo.trackReadIdsForTags is true
     khash_t(readid_cbumi) *readIdTracker_; // nullptr if not tracking readIds
+    bool bridgeReadInfoEnabled_ = false;
+    BridgeReadInfo bridgeReadInfo_;
     
     // Extended ambiguous entry to store gene/tag info for hash re-keying after resolution
     struct ExtendedAmbiguousEntry : public ReadAlign::AmbiguousEntry {
@@ -77,9 +81,8 @@ public:
         bool flexPayloadInvalid = false;
         // Non-Flex direct bridge: aggregate (umi24,gene16) -> read counts (no per-read observation vector)
         std::unordered_map<uint64_t, uint32_t> bridgeAmbigUmiGene_;
-        std::vector<double> cbLogLikMatch;
-        std::vector<double> cbLogLikMismatch;
-        uint32_t cbEvidenceReads = 0;
+        // Quality evidence is inherited from AmbiguousEntry. Do not shadow its
+        // vectors/counter with a second, separately allocated copy here.
         // Per-key ambiguous read accounting (non-Flex bridge): no per-read replay vectors
         uint32_t bridgeAmbigGeneFeatU_ = 0;
         uint32_t bridgeAmbigGeneFeatM_ = 0;
@@ -138,7 +141,7 @@ public:
     };
     std::unordered_map<ReadAlign::AmbigKey, BridgeAmbigReadInfoOrphanEntry> bridgeAmbigReadInfoOrphan_;
 
-    std::unordered_map<uint32_t, uint64_t> bridgeImmediateReadCounts_; // key: wlCb, value: low32=unique, high32=multi
+    BridgeReadCounts bridgeImmediateReadCounts_; // key: wlCb, value: low32=unique, high32=multi
     // Filled during resolvePendingAmbiguousToHash (aggregated ambiguous accounting)
     std::vector<uint32_t> bridgePinNreadUnique_;
     std::vector<uint32_t> bridgePinNreadMulti_;

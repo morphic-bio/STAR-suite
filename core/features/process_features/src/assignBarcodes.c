@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <time.h>
 #include "pf_bgzf_input.h"
 #include "../include/common.h"
 #include "../include/barcode_match.h"
@@ -22,6 +23,31 @@
 #ifndef PF_FASTQ_GZBUFFER_SIZE
 #define PF_FASTQ_GZBUFFER_SIZE (1U << 20)
 #endif
+
+typedef struct {
+    double wall;
+    double coordinator_cpu;
+} pf_phase_clock;
+
+static pf_phase_clock pf_phase_now(void) {
+    struct timespec wall, cpu;
+    clock_gettime(CLOCK_MONOTONIC, &wall);
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu);
+    pf_phase_clock value = {wall.tv_sec + wall.tv_nsec * 1e-9,
+                           cpu.tv_sec + cpu.tv_nsec * 1e-9};
+    return value;
+}
+
+static pf_phase_clock pf_phase_report(const char *phase, const char *directory,
+                                       pf_phase_clock start) {
+    const pf_phase_clock end = pf_phase_now();
+    // Coordinator CPU excludes MAP and worker threads, even inside STAR.
+    // It is useful for serial merge/finalization; it is NOT read-worker CPU.
+    fprintf(stderr, "[pf-phase] phase=%s wall_seconds=%.6f coordinator_cpu_seconds=%.6f monotonic_end=%.6f directory=%s\n",
+            phase, end.wall - start.wall, end.coordinator_cpu - start.coordinator_cpu,
+            end.wall, directory ? directory : "-");
+    return end;
+}
 
 static gzFile open_fastq_gz_reader(const char *path, const char *role) {
     gzFile file = gzopen(path, "rb");
@@ -985,6 +1011,7 @@ static const feature_arrays *pf_anchor_group_features = NULL;
 static pf_anchor_group_entry *pf_anchor_groups = NULL;
 static int pf_anchor_group_count = 0;
 static int pf_anchor_group_capacity = 0;
+static int pf_uniform_bootstrap_anchor = 0;
 static int *pf_feature_prefix_group_ids = NULL;
 static int *pf_feature_suffix_group_ids = NULL;
 
@@ -1001,6 +1028,7 @@ static void pf_anchor_group_cache_reset_locked(void) {
     pf_anchor_groups = NULL;
     pf_anchor_group_count = 0;
     pf_anchor_group_capacity = 0;
+    pf_uniform_bootstrap_anchor = 0;
     pf_feature_prefix_group_ids = NULL;
     pf_feature_suffix_group_ids = NULL;
     pf_anchor_group_features = NULL;
@@ -1116,6 +1144,18 @@ static int pf_ensure_anchor_group_cache(const feature_arrays *features) {
         }
     }
 
+    /* One shared anchor and barcode layout permits direct use of a resolved
+     * feature index. During learning, modes remain unset until finalize(). */
+    pf_uniform_bootstrap_anchor =
+        pf_anchor_group_count == 1 &&
+        pf_anchor_groups[0].feature_count == n_features &&
+        features->number_of_mismatched_features == 0 &&
+        features->common_length > 0 && feature_mode_offsets != NULL;
+    for (int j = 0; pf_uniform_bootstrap_anchor && j < n_features; ++j) {
+        if (features->feature_offsets[j] != features->feature_offsets[0] ||
+            feature_mode_offsets[j] >= 0)
+            pf_uniform_bootstrap_anchor = 0;
+    }
     pf_anchor_group_features = features;
     const int ok = pf_anchor_group_count > 0;
     pthread_mutex_unlock(&pf_anchor_group_cache_mutex);
@@ -1763,12 +1803,12 @@ static int find_matches_at_code_offset(unsigned char *sequence_code,
 
 int checkSequenceAndCorrectForN(char *line, char *corrected_lines[], char *buffer,int sequence_length, int maxN){
     int nCount=0;
-    int indices[maxN];
+    int indices[maxN > 0 ? maxN : 1];
     corrected_lines[0]=line;
     for (int i=0; i<sequence_length; i++){
         if (line[i] == 'N'){
+            if (nCount >= maxN) return 0;
             indices[nCount++]=i;
-            if (nCount > maxN) return 0;
             
         }
         else if (line[i] != 'A' && line[i] != 'C' && line[i] != 'G' && line[i] != 'T'){
@@ -1872,8 +1912,10 @@ static int exactCorrectFeature(char *line, feature_arrays *features, int maxN){
     }
 
     const size_t length=strlen(line)-1;
-    char buffer[(length+1) * (4 << ((maxN-1)*2))];
-    char *corrected_seqs[ 4 << ((maxN-1)*2)];
+    // Even with N expansion disabled, the original sequence needs one slot.
+    const int max_alts = maxN > 0 ? (4 << ((maxN-1)*2)) : 1;
+    char buffer[(length+1) * max_alts];
+    char *corrected_seqs[max_alts];
     int nAlts=checkSequenceAndCorrectForN(line, corrected_seqs, buffer, length, maxN);
     if (nAlts <= 0){
         return 0;
@@ -2042,6 +2084,46 @@ int simple_hamming_search(feature_arrays *features, char *line, int maxHammingDi
     }
     return 0;
 }
+/* A missing entry in a complete cumulative prehash rules out a match. Use
+ * this only as a negative filter: possible hits still take the original
+ * search, preserving its frame/feature order and ambiguity decisions. */
+static int pf_broad_search_may_match(
+    const feature_arrays *features,
+    unsigned char codes[][LINE_LENGTH / 2 + 1], const int *code_lengths,
+    int max_hamming)
+{
+    const int length = features->common_length;
+    if (features->number_of_features < 150 ||
+        features->number_of_mismatched_features != 0 ||
+        length <= 0 || length > MAX_FEATURE_SEQUENCE_LENGTH || length % 4 != 0)
+        return 1;
+    const seq_hash_t *table = NULL;
+    if (max_hamming == 0) table = &features->feature_code_hash;
+    else if (max_hamming == 1 && features->feature_hamming_le1_enabled)
+        table = &features->feature_hamming_le1_hash;
+    else if (max_hamming == 2 && features->feature_hamming_le2_enabled)
+        table = &features->feature_hamming_le2_hash;
+    else return 1;
+    const seq_key_mode_t mode = features->code_hash_mode;
+    if ((mode == SEQ_KEY_64 && !table->h64) ||
+        (mode != SEQ_KEY_64 && !table->h128)) return 1;
+
+    const int bytes = length / 4;
+    char query[MAX_FEATURE_SEQUENCE_LENGTH + 1];
+    for (int frame = 0; frame < 4; ++frame) {
+        for (int offset = 0; offset + bytes <= code_lengths[frame]; ++offset) {
+            /* Decode the same packed windows as the old scan, including its
+             * zero-padded final byte. Do not silently change short-tail rules. */
+            code2string(codes[frame] + offset, query, bytes);
+            const uint32_t hit = mode == SEQ_KEY_64
+                ? seq_hash_get_64(table, seq_encode_64_fixed(query, length))
+                : seq_hash_get_128(table, seq_encode_128_fixed(query, length));
+            if (hit) return 1; // Ambiguous payloads also require the old search.
+        }
+    }
+    return 0;
+}
+
 int find_feature_match_single(feature_arrays *features, char *lineR2, int maxHammingDistance,int *bestScore, char **matching_sequence, uint16_t *match_position){
     // convert lineR2 to 4 codes
     // do a quick check to see if there is a perfect match the constant feature
@@ -2049,6 +2131,8 @@ int find_feature_match_single(feature_arrays *features, char *lineR2, int maxHam
     unsigned char codes[4][LINE_LENGTH/2+1];
     int code_lengths[4];
     string2all_codes(lineR2, codes, code_lengths);
+    if (!pf_broad_search_may_match(features, codes, code_lengths, maxHammingDistance))
+        return 0;
     int best_feature=0;
     /* Keep >max as the no-match sentinel so callers can distinguish
      * true ambiguity (<=max with feature_index=0) from no hit. */
@@ -2336,85 +2420,63 @@ void update_feature_counts_from_code(unsigned char *code, char *umi, uint32_t fe
         }
     }
 }
-void update_umi_counts(unsigned char *code, char *umi,  uint32_t feature_index,data_structures *hashes, memory_pool_collection *pools){
-    unsigned char code8[8];
-    memset(code8,0,8);
-    memcpy(code8,code,barcode_code_length);
-    string2code(umi, umi_length, code8+barcode_code_length);
-
-    uint64_t key = *(uint64_t*)code8;
-    khint_t k = kh_get(u64ptr, hashes->sequence_umi_hash, key);
-    feature_umi_counts *s;
-    
-    if (k == kh_end(hashes->sequence_umi_hash)) {
-        // Logic for a NEW barcode-UMI combination
-        s = (feature_umi_counts*) allocate_memory_from_pool(pools->feature_umi_counts_pool);
-        if (s == NULL) return; // Error check
-
-        memcpy(s->sequence_umi_code, code8, 8);
-        
-        // Create the new inner hash table for this UMI's feature counts
-        s->counts = kh_init(u32u32);
-        
-        // Set initial count for this feature to 1
-        int ret;
-        khint_t kh2 = kh_put(u32u32, s->counts, feature_index, &ret);
-        kh_val(s->counts, kh2) = 1;
-        // Mark as unvisited for the connected components algorithm by setting key '0' to 0.
-        khint_t kh3 = kh_put(u32u32, s->counts, 0, &ret);
-        kh_val(s->counts, kh3) = 0;
-
-        khint_t kh = kh_put(u64ptr, hashes->sequence_umi_hash, key, &ret);
-        kh_val(hashes->sequence_umi_hash, kh) = s;
-    } else {
-        s = (feature_umi_counts*)kh_val(hashes->sequence_umi_hash, k);
-        // Logic for an EXISTING barcode-UMI combination
-        khint_t k2 = kh_get(u32u32, s->counts, feature_index);
-        uint32_t current_count = 1;
-        if (k2 != kh_end(s->counts)) {
-            current_count = kh_val(s->counts, k2) + 1;
-            kh_val(s->counts, k2) = current_count;
-        } else {
-            int ret;
-            khint_t kh2 = kh_put(u32u32, s->counts, feature_index, &ret);
-            kh_val(s->counts, kh2) = current_count;
-        }
+static void pf_umi_add_count(feature_umi_counts *entry, uint32_t feature, uint32_t count) {
+    if (!entry->counts && (entry->inline_feature == 0 || entry->inline_feature == feature)) {
+        entry->inline_feature = feature;
+        entry->inline_count += count;
+        return;
     }
+    if (!entry->counts) {
+        entry->counts = kh_init(u32u32);
+        if (!entry->counts) { perror("UMI feature counter allocation"); exit(EXIT_FAILURE); }
+        int absent;
+        khint_t k = kh_put(u32u32, entry->counts, entry->inline_feature, &absent);
+        if (absent < 0) { perror("UMI feature counter insertion"); exit(EXIT_FAILURE); }
+        kh_val(entry->counts, k) = entry->inline_count;
+    }
+    int absent;
+    khint_t k = kh_put(u32u32, entry->counts, feature, &absent);
+    if (absent < 0) { perror("UMI feature counter insertion"); exit(EXIT_FAILURE); }
+    if (absent) kh_val(entry->counts, k) = count;
+    else kh_val(entry->counts, k) += count;
 }
-char check_neighbor(uint64_t code64,uint32_t *counts, data_structures *hashes){
+
+void update_umi_counts(unsigned char *code, char *umi, uint32_t feature_index,
+                       data_structures *hashes, memory_pool_collection *pools) {
+    unsigned char code8[8] = {0};
+    memcpy(code8, code, barcode_code_length);
+    string2code(umi, umi_length, code8 + barcode_code_length);
+    uint64_t key;
+    memcpy(&key, code8, sizeof(key));
+    khint_t k = kh_get(u64ptr, hashes->sequence_umi_hash, key);
+    feature_umi_counts *entry;
+    if (k == kh_end(hashes->sequence_umi_hash)) {
+        entry = allocate_memory_from_pool(pools->feature_umi_counts_pool);
+        if (!entry) return;
+        memset(entry, 0, sizeof(*entry));
+        memcpy(entry->sequence_umi_code, code8, sizeof(code8));
+        int absent;
+        k = kh_put(u64ptr, hashes->sequence_umi_hash, key, &absent);
+        kh_val(hashes->sequence_umi_hash, k) = entry;
+    } else entry = kh_val(hashes->sequence_umi_hash, k);
+    pf_umi_add_count(entry, feature_index, 1);
+}
+
+char check_neighbor(uint64_t code64, uint32_t *counts, data_structures *hashes) {
     khint_t k = kh_get(u64ptr, hashes->sequence_umi_hash, code64);
-    feature_umi_counts *result = (k != kh_end(hashes->sequence_umi_hash)) ? kh_val(hashes->sequence_umi_hash, k) : NULL;
-
-    if (result && result->counts) {
-        // Check if this node has been visited using key '0'
-        khint_t k2 = kh_get(u32u32, result->counts, 0);
-        uint32_t visited_flag = (k2 != kh_end(result->counts)) ? kh_val(result->counts, k2) : 0;
-        
-        if (visited_flag == 0) { // If not visited
-            // --- NEW: Iterate through the hash table to sum counts ---
-            khint_t iter;
-            for (iter = kh_begin(result->counts); iter != kh_end(result->counts); ++iter) {
-                if (kh_exist(result->counts, iter)) {
-                    uint32_t feature_index = kh_key(result->counts, iter);
-                    if (feature_index > 0) { // Don't add the visited flag to the temp counts array
-                        counts[feature_index] += kh_val(result->counts, iter);
-                    }
-                }
-            }
-
-            // Mark as visited by replacing the value at key '0' with 1
-            khint_t k3 = kh_get(u32u32, result->counts, 0);
-            if (k3 != kh_end(result->counts)) {
-                kh_val(result->counts, k3) = 1;
-            } else {
-                int ret;
-                khint_t kh3 = kh_put(u32u32, result->counts, 0, &ret);
-                kh_val(result->counts, kh3) = 1;
-            }
-            return 1; // Indicate success
+    if (k == kh_end(hashes->sequence_umi_hash)) return 0;
+    feature_umi_counts *entry = kh_val(hashes->sequence_umi_hash, k);
+    if (!entry || entry->visited) return 0;
+    if (entry->counts) {
+        for (khint_t j = kh_begin(entry->counts); j != kh_end(entry->counts); ++j) {
+            if (kh_exist(entry->counts, j) && kh_key(entry->counts, j) > 0)
+                counts[kh_key(entry->counts, j)] += kh_val(entry->counts, j);
         }
+    } else if (entry->inline_feature > 0) {
+        counts[entry->inline_feature] += entry->inline_count;
     }
-    return 0; // Not found or already visited
+    entry->visited = 1;
+    return 1;
 }
 int find_neighbors(uint64_t key64, uint64_t *neighbors, uint32_t *counts, data_structures *hashes){
     int neighbor_count=0;
@@ -2437,6 +2499,7 @@ int find_neighbors(uint64_t key64, uint64_t *neighbors, uint32_t *counts, data_s
 }
 void find_deduped_counts(data_structures *hashes, khash_t(u32ptr)* barcode_to_deduped_counts, uint16_t stringency, uint16_t min_counts){
     uint32_t clique_counts[number_of_features+1];
+    uint64_t multi_feature_umis = 0;
     
     // Create tracking set for barcodes that might need cleanup (empty after deduping)
     khash_t(u32ptr) *empty_candidates = kh_init(u32ptr);
@@ -2455,9 +2518,8 @@ void find_deduped_counts(data_structures *hashes, khash_t(u32ptr)* barcode_to_de
         uint64_t lookup_key = kh_key(hashes->sequence_umi_hash, k);
         feature_umi_counts *umi_counts = (feature_umi_counts*)kh_val(hashes->sequence_umi_hash, k);
         
-        khint_t k2 = kh_get(u32u32, umi_counts->counts, 0);
-        uint32_t visited = (k2 != kh_end(umi_counts->counts)) ? kh_val(umi_counts->counts, k2) : 0;
-        if (visited) {
+        if (umi_counts->counts) ++multi_feature_umis;
+        if (umi_counts->visited) {
             continue; // Already processed if the flag is 1
         }
         memset(clique_counts, 0, sizeof(clique_counts));
@@ -2569,6 +2631,10 @@ void find_deduped_counts(data_structures *hashes, khash_t(u32ptr)* barcode_to_de
         }
     }
     kh_destroy(u32ptr, empty_candidates);
+    fprintf(stderr, "[pf-umi-storage] entries=%llu inline=%llu multi_feature=%llu\n",
+            (unsigned long long)kh_size(hashes->sequence_umi_hash),
+            (unsigned long long)(kh_size(hashes->sequence_umi_hash) - multi_feature_umis),
+            (unsigned long long)multi_feature_umis);
 }
 
 void find_connected_component(uint64_t start_key, uint32_t *counts, data_structures *hashes){
@@ -3748,8 +3814,9 @@ int simpleCorrectFeature(char *line, feature_arrays *features, int maxN, int max
     }
 
     const size_t length = strlen(line) - 1;
-    char buffer[(length + 1) * (4 << ((maxN - 1) * 2))];
-    char *corrected_seqs[4 << ((maxN - 1) * 2)];
+    const int max_alts = maxN > 0 ? (4 << ((maxN - 1) * 2)) : 1;
+    char buffer[(length + 1) * max_alts];
+    char *corrected_seqs[max_alts];
     int nAlts = checkSequenceAndCorrectForN(line, corrected_seqs, buffer, length, maxN);
     const int multi_alt = (nAlts > 1);
     if (nAlts <= 0) {
@@ -3792,8 +3859,9 @@ int simpleCorrectFeature(char *line, feature_arrays *features, int maxN, int max
 }
 int checkAndCorrectFeature(char *line, feature_arrays *features,int maxHammingDistance, int nThreads, int *hamming_distance, char *matching_sequence, int maxN,char *ambiguous, uint16_t *match_position, statistics *stats){
     const size_t length=strlen(line)-1;
-    char buffer[(length+1) * (4 << ((maxN-1)*2))];
-    char *corrected_seqs[ 4 << ((maxN-1)*2)];
+    const int max_alts = maxN > 0 ? (4 << ((maxN-1)*2)) : 1;
+    char buffer[(length+1) * max_alts];
+    char *corrected_seqs[max_alts];
 
     if (ambiguous) {
         *ambiguous = 0;
@@ -4111,10 +4179,11 @@ int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint1
         return 0;
     }
     //The return code should indicate whether we should calculate the barcode or not
-    char buffer[(barcode_length + 1) * (4 << ((max_barcode_n-1)*2))];
-    char *corrected_seqs[ 4 << ((max_barcode_n-1)*2)];
+    const int max_alts = maxN > 0 ? (4 << ((maxN-1)*2)) : 1;
+    char buffer[(barcode_length + 1) * max_alts];
+    char *corrected_seqs[max_alts];
     char *candidateBarcode = sequence;
-    memset (buffer, 0, (barcode_length + 1) * (4 << ((max_barcode_n-1)*2)));
+    memset (buffer, 0, sizeof(buffer));
 
     pf_trace_namespace_init_once();
     char raw_barcode[barcode_length + 1];
@@ -4282,7 +4351,9 @@ int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint1
 
 
 void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, int legacy_cb_rescue, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int emptydrops_use_fdr, int skip_qc_outputs, int *error_out, sample_args *sample){
+    pf_phase_clock phase_clock = pf_phase_now();
     process_pending_barcodes(hashes, pools, stats, min_posterior, legacy_cb_rescue);
+    phase_clock = pf_phase_report("pending_barcode_rescue", directory, phase_clock);
     double elapsed_time = get_time_in_seconds() - stats->start_time;
     fprintf(stderr, "Finished processing %ld reads in %.2f seconds (%.1f thousand reads/second)\n", stats->number_of_reads, elapsed_time, stats->number_of_reads / (double)elapsed_time / 1000.0);
 
@@ -4292,6 +4363,7 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
     // Create and populate the deduped counts using modular pf_counts API.
     // pf_build_deduped_counts() internally calls find_deduped_counts().
     pf_counts_result *counts_result = pf_build_deduped_counts(hashes, features->number_of_features, stringency, min_counts);
+    phase_clock = pf_phase_report("umi_dedup", directory, phase_clock);
     if (!counts_result) {
         fprintf(stderr, "Error: failed to build deduped counts\n");
         return;
@@ -4323,6 +4395,7 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
         filtered_barcodes_hash,  // May be NULL
         &active_filter
     );
+    phase_clock = pf_phase_report("barcode_filter", directory, phase_clock);
     
     // Handle filter status
     if (filter_status == PF_FILTER_FAILED) {
@@ -4461,7 +4534,9 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
     }
     
     // Clean up the counts result (frees all nested hash tables and arrays)
+    phase_clock = pf_phase_report("mex_and_qc_output", directory, phase_clock);
     pf_counts_result_free(counts_result);
+    pf_phase_report("counts_cleanup", directory, phase_clock);
 }
 
 void open_fastq_files(const char *barcode_fastq, const char *forward_fastq, const char *reverse_fastq, gzFile *barcode_fastqgz, gzFile *forward_fastqgz, gzFile *reverse_fastqgz) {
@@ -4539,7 +4614,13 @@ static void *read_bgzf_by_set(fastq_reader_set *set) {
     const size_t lines = 2 * n;
     sample_args *args = set->input_args;
     pf_bgzf_permits permits = {args->permit_hook_ctx,
-                               args->permit_acquire_hook, args->permit_release_hook};
+                               args->permit_acquire_hook, args->permit_release_hook, NULL};
+    if (args->bgzf_permit_acquire_hook && args->bgzf_permit_release_hook) {
+        permits.context = args->bgzf_permit_hook_ctx;
+        permits.acquire = args->bgzf_permit_acquire_hook;
+        permits.release = args->bgzf_permit_release_hook;
+        permits.observe = args->bgzf_observe_hook;
+    }
     char error[1024] = "";
     pf_bgzf_input *input = NULL;
     long long count = 0;
@@ -4796,6 +4877,93 @@ void process_multiple_feature_sequences(int nsequences, char **sequences, int *o
         }
     }
 }
+static int pf_bootstrap_already_matched(const uint32_t *matched, int count, uint32_t feature) {
+    for (int i = 0; i < count; ++i)
+        if (matched[i] == feature) return 1;
+    return 0;
+}
+
+/* The general anchor loop visits every feature even after an offset lookup
+ * has identified its only possible winner. For a single uniform anchor group,
+ * skip those guaranteed mismatches. Keep the original feature/offset order:
+ * it controls adaptive Hamming ceilings, first positions and learned counts. */
+static void pf_bootstrap_uniform_anchor_search(
+    char *sequence, int read_len, feature_arrays *features,
+    int max_hamming, int max_n, statistics *stats,
+    uint32_t *cached_index, int *cached_hamming, unsigned char *cache_valid,
+    uint32_t *best_feature, int *best_hamming, uint16_t *best_position, char *ambiguous)
+{
+    const pf_anchor_group_entry *group = &pf_anchor_groups[0];
+    const int feature_len = features->common_length;
+    const int expected_offset = features->feature_offsets[0];
+    const int deltas[3] = {0, -1, 1};
+    /* Each accepted feature came from a distinct cached offset, so the number
+     * of accepted features cannot exceed the number of positions in a read. */
+    uint32_t matched[read_len > 0 ? read_len : 1];
+    int matched_count = 0;
+    int anchor_pos = pf_find_anchor_position(sequence, (size_t)read_len,
+        group->anchor, group->anchor_len, 0);
+    while (anchor_pos >= 0) {
+        const int bc_pos = pf_anchor_bc_position(group->kind, anchor_pos,
+                                               expected_offset, feature_len);
+        int j = 0;
+        while (j < features->number_of_features) {
+            if (pf_bootstrap_already_matched(matched, matched_count, (uint32_t)j + 1)) {
+                ++j;
+                continue;
+            }
+            for (int k = 0; k < 3; ++k) {
+                const int offset = bc_pos + deltas[k];
+                if (offset < 0 || offset + feature_len > read_len) continue;
+                if (!cache_valid[offset]) {
+                    const int ceiling = adaptive_query_max_hamming(
+                        features, max_hamming, *best_hamming, *best_feature);
+                    int distance = max_hamming + 1;
+                    cached_index[offset] = simpleCorrectFeature(sequence + offset,
+                        features, max_n, ceiling, &distance, stats);
+                    cached_hamming[offset] = distance;
+                    cache_valid[offset] = 1;
+                }
+                if (cached_index[offset] != (uint32_t)j + 1) continue;
+                matched[matched_count++] = cached_index[offset];
+                feature_mode_record((int)cached_index[offset], offset);
+                if (cached_hamming[offset] < *best_hamming) {
+                    *best_hamming = cached_hamming[offset];
+                    *best_feature = cached_index[offset];
+                    *best_position = (uint16_t)offset;
+                    *ambiguous = 0;
+                } else if (cached_hamming[offset] == *best_hamming &&
+                           *best_feature != cached_index[offset]) {
+                    *ambiguous = 1;
+                }
+                break;
+            }
+
+            /* After a match, later offsets may still be unqueried. Visit the
+             * next feature first, exactly as the general loop would. Once all
+             * valid offsets are cached, only their returned indices can match. */
+            int next = features->number_of_features;
+            for (int k = 0; k < 3; ++k) {
+                const int offset = bc_pos + deltas[k];
+                if (offset < 0 || offset + feature_len > read_len) continue;
+                if (!cache_valid[offset]) {
+                    next = j + 1;
+                    break;
+                }
+                const uint32_t candidate = cached_index[offset];
+                if (candidate > (uint32_t)j + 1 &&
+                    candidate <= (uint32_t)features->number_of_features &&
+                    !pf_bootstrap_already_matched(matched, matched_count, candidate) &&
+                    (int)candidate - 1 < next)
+                    next = (int)candidate - 1;
+            }
+            j = next;
+        }
+        anchor_pos = pf_find_anchor_position(sequence, (size_t)read_len,
+            group->anchor, group->anchor_len, anchor_pos + 1);
+    }
+}
+
 static void process_feature_sequence_internal(char *sequence, feature_arrays *features, int maxHammingDistance, int nThreads, int feature_constant_offset, int max_feature_n, uint32_t *feature_index, int *hamming_distance, char *matching_sequence, uint16_t *match_position, statistics *stats, seq_hash_t *hot_d0) {
     const size_t read_len = strlen(sequence);
     if (feature_mode_bootstrap_reads > 0 && features && features->feature_offsets &&
@@ -4932,13 +5100,18 @@ static void process_feature_sequence_internal(char *sequence, feature_arrays *fe
         uint16_t bestPos = 0;
         char ambiguous = 0;
 
+        const int have_anchor_groups = pf_ensure_anchor_group_cache(features);
+        if (have_anchor_groups && pf_uniform_bootstrap_anchor) {
+            pf_bootstrap_uniform_anchor_search(sequence, (int)read_len, features,
+                maxHammingDistance, max_feature_n, stats, offset_cached_idx,
+                offset_cached_hamming, offset_cache_valid,
+                &bestFeature, &bestHamming, &bestPos, &ambiguous);
+        } else {
         const int n_features = features->number_of_features;
         unsigned char mode_anchor_seen_flags[n_features > 0 ? n_features : 1];
         unsigned char fallback_done_flags[n_features > 0 ? n_features : 1];
         memset(mode_anchor_seen_flags, 0, sizeof(mode_anchor_seen_flags));
         memset(fallback_done_flags, 0, sizeof(fallback_done_flags));
-
-        const int have_anchor_groups = pf_ensure_anchor_group_cache(features);
 
         // First pass: fast mode-centered checks around learned per-feature offsets.
         for (int j = 0; j < n_features; j++) {
@@ -5131,6 +5304,8 @@ static void process_feature_sequence_internal(char *sequence, feature_arrays *fe
                 }
             }
         }
+
+        } // General anchor geometry.
 
         if (!bestFeature &&
             __atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE) == 0) {
@@ -5822,14 +5997,14 @@ void *consume_reads(void *arg) {
     const int nThreads = sample_args->nThreads;
     int nreaders=(reader_sets[0]->forward_reader && reader_sets[0]->reverse_reader)?3:2;
     const int lines_per_block=2*nreaders;           /* NEW – 4 or 6 lines */
-    const int bootstrap_serial_waiter =
-        (thread_id != 0 &&
-         feature_mode_bootstrap_reads > 0 &&
+    const int bootstrap_ordered_mode =
+        (feature_mode_bootstrap_reads > 0 &&
          features &&
          features->feature_offsets &&
          feature_mode_hist &&
          feature_mode_offsets &&
          pf_has_anchor_arrays(features));
+    const int bootstrap_serial_waiter = thread_id != 0 && bootstrap_ordered_mode;
     pf_trace_reads_init_once();
     pf_trace_anchor_init_once();
     seq_hash_t thread_hot_d0;
@@ -5897,9 +6072,15 @@ void *consume_reads(void *arg) {
             usleep(100 * (empty_sweeps > 8 ? 8 : empty_sweeps));
 
         int data_available = 0;
-        for (int sweep = 0; sweep < nsets; sweep++) {
+        // During learning, wait for the next lane in round-robin order. Taking
+        // whichever lane is ready changes the training population and which
+        // reads receive the broader bootstrap search when decoder scheduling changes.
+        const int ordered_bootstrap = bootstrap_ordered_mode &&
+            __atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE) != 1;
+        for (int sweep = 0; sweep < (ordered_bootstrap ? 1 : nsets); sweep++) {
             int i = (rr_start + sweep) % nsets;
             if (done_flags[i]){
+                if (ordered_bootstrap) rr_start = (i + 1) % nsets;
                 continue;
             }
             fastq_reader_set *set = reader_sets[i];
@@ -5915,6 +6096,7 @@ void *consume_reads(void *arg) {
             if (set->filled < lines_per_block) {
                 if (set->done && set->filled == 0) {
                     done_flags[i] = 1;
+                    if (ordered_bootstrap) rr_start = (i + 1) % nsets;
                 }
                 pthread_mutex_unlock(&set->mutex);
                 continue;
@@ -6359,48 +6541,29 @@ void merge_feature_counts(uint32_t key, void *value, void *user_data)
     }
 }
 
-void merge_feature_umi_counts(uint64_t key, void *value, void *user_data)
-{
-    merge_context *ctx = (merge_context *)user_data;
-    khash_t(u64ptr) *dst = (khash_t(u64ptr)*)ctx->dst_hash;
-    feature_umi_counts *src_ent = (feature_umi_counts *)value;
+void merge_feature_umi_counts(uint64_t key, void *value, void *user_data) {
+    merge_context *ctx = user_data;
+    khash_t(u64ptr) *dst = ctx->dst_hash;
+    const feature_umi_counts *source = value;
     khint_t k = kh_get(u64ptr, dst, key);
-    feature_umi_counts *dst_ent = (k != kh_end(dst)) ? (feature_umi_counts*)kh_val(dst, k) : NULL;
-
-    if (dst_ent) {
-        /* Same barcode-UMI already present – add the counters */
-        khint_t ksrc;
-        for (ksrc = kh_begin(src_ent->counts); ksrc != kh_end(src_ent->counts); ++ksrc) {
-            if (!kh_exist(src_ent->counts, ksrc)) continue;
-            uint32_t feat_key = kh_key(src_ent->counts, ksrc);
-            uint32_t add_val = kh_val(src_ent->counts, ksrc);
-            khint_t kdst = kh_get(u32u32, dst_ent->counts, feat_key);
-            if (kdst != kh_end(dst_ent->counts)) {
-                kh_val(dst_ent->counts, kdst) += add_val;
-            } else {
-                int ret;
-                khint_t kh = kh_put(u32u32, dst_ent->counts, feat_key, &ret);
-                kh_val(dst_ent->counts, kh) = add_val;
-            }
-        }
+    feature_umi_counts *entry;
+    if (k == kh_end(dst)) {
+        entry = allocate_memory_from_pool(ctx->dst_pool->feature_umi_counts_pool);
+        memset(entry, 0, sizeof(*entry));
+        memcpy(entry->sequence_umi_code, source->sequence_umi_code, 8);
+        int absent;
+        k = kh_put(u64ptr, dst, key, &absent);
+        kh_val(dst, k) = entry;
+    } else entry = kh_val(dst, k);
+    // Keep source ownership intact: callers can free or reuse its pool after merging.
+    if (source->counts) {
+        for (khint_t j = kh_begin(source->counts); j != kh_end(source->counts); ++j)
+            if (kh_exist(source->counts, j))
+                pf_umi_add_count(entry, kh_key(source->counts, j), kh_val(source->counts, j));
     } else {
-        /* Key not present – copy the whole struct into the dst pool and table  */
-        dst_ent = (feature_umi_counts*) allocate_memory_from_pool(ctx->dst_pool->feature_umi_counts_pool);
-        memcpy(dst_ent->sequence_umi_code, src_ent->sequence_umi_code, 8);
-        dst_ent->counts = kh_init(u32u32);
-        khint_t ksrc;
-        for (ksrc = kh_begin(src_ent->counts); ksrc != kh_end(src_ent->counts); ++ksrc) {
-            if (!kh_exist(src_ent->counts, ksrc)) continue;
-            uint32_t feat_key = kh_key(src_ent->counts, ksrc);
-            uint32_t feat_val = kh_val(src_ent->counts, ksrc);
-            int ret;
-            khint_t kh = kh_put(u32u32, dst_ent->counts, feat_key, &ret);
-            kh_val(dst_ent->counts, kh) = feat_val;
-        }
-        int ret;
-        khint_t kh = kh_put(u64ptr, dst, key, &ret);
-        kh_val(dst, kh) = dst_ent;
+        pf_umi_add_count(entry, source->inline_feature, source->inline_count);
     }
+    entry->visited += source->visited;
 }
 
 void merge_feature_sequences(const char *key, void *value, void *user_data) {
@@ -6515,6 +6678,7 @@ static int pf_bgzf_assign_batch(void *opaque, unsigned worker,
 }
 
 void process_files_in_sample(sample_args *args) {
+    pf_phase_clock phase_clock = pf_phase_now();
     //allocate buffers here
     //number of lines to read into the buffer
     double  min_posterior=args->min_posterior;
@@ -6638,6 +6802,7 @@ void process_files_in_sample(sample_args *args) {
     }
 
     int input_error = 0;
+    phase_clock = pf_phase_report("reader_setup", args->directory, phase_clock);
     const int direct = native_count == sample_size && fastq_files->forward_fastq &&
         !fastq_files->reverse_fastq && !args->legacy_cb_rescue &&
         feature_mode_bootstrap_reads == 0 && !args->chem_detect && !args->probe_only;
@@ -6654,7 +6819,13 @@ void process_files_in_sample(sample_args *args) {
                 paths[2*i] = fastq_files->barcode_fastq[sample_offset+i];
                 paths[2*i+1] = fastq_files->forward_fastq[sample_offset+i];
             }
-            pf_bgzf_permits permits = {args->permit_hook_ctx, args->permit_acquire_hook, args->permit_release_hook};
+            pf_bgzf_permits permits = {args->permit_hook_ctx, args->permit_acquire_hook, args->permit_release_hook, NULL};
+            if (args->bgzf_permit_acquire_hook && args->bgzf_permit_release_hook) {
+                permits.context = args->bgzf_permit_hook_ctx;
+                permits.acquire = args->bgzf_permit_acquire_hook;
+                permits.release = args->bgzf_permit_release_hook;
+                permits.observe = args->bgzf_observe_hook;
+            }
             char error[1024] = "";
             input_error = !pf_bgzf_process_batches(paths, sample_size, 2, nconsumers,
                 args->bgzf_threads, args->bgzf_crc_check, max_reads > 0 ? max_reads : 0,
@@ -6694,6 +6865,7 @@ void process_files_in_sample(sample_args *args) {
     for (int i = 0; i < sample_size; ++i) input_error |= reader_sets[i]->input_error;
     }
     if (input_error && args->error_out) *args->error_out = 1;
+    phase_clock = pf_phase_report("read_assign_and_join", args->directory, phase_clock);
     // Merge data from all threads into the first thread's data structures
     for (int i = 1; i < nconsumers; i++) {
         merge_stats(&args->stats[0], &args->stats[i]);
@@ -6729,11 +6901,13 @@ void process_files_in_sample(sample_args *args) {
         free_memory_pool_collection(args->pools[i]);
         //[i] = NULL; // Avoid double-free in later cleanup
     }
+    phase_clock = pf_phase_report("thread_hash_merge_and_cleanup", args->directory, phase_clock);
     if (!args->probe_only && !input_error) {
         // Since merging is not required, finalize using the first thread's data.
         finalize_processing(args->features, &args->hashes[0], args->directory, args->pools[0], &args->stats[0], args->stringency, args->min_counts, min_posterior, args->legacy_cb_rescue, args->filtered_barcodes_hash, args->skip_emptydrops, args->emptydrops_failure_fatal, args->expected_cells, args->emptydrops_use_fdr, args->skip_qc_outputs, args->error_out, args);
     }
    
+    phase_clock = pf_phase_now();
     // Free the reader sets
     for (int i = 0; i < sample_size; ++i)
         free_fastq_reader_set(reader_sets[i]);
@@ -6753,6 +6927,7 @@ void process_files_in_sample(sample_args *args) {
     args->stats = NULL;
     args->hashes = NULL;
     args->pools = NULL;
+    pf_phase_report("sample_cleanup", args->directory, phase_clock);
 }
 
 void initialize_data_structures(data_structures *hashes){

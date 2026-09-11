@@ -362,6 +362,34 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
         return;
     }
 
+    const bool keepReadInfo = readFeatSum->bridgeReadInfoEnabled_;
+    BridgeReadInfo &readInfo = readFeatSum->bridgeReadInfo_;
+    if (keepReadInfo) {
+        size_t directN = 0, pendingN = 0;
+        for (int ii = 0; ii < P.runThreadN; ++ii) {
+            if (!readFeatAll[ii]) continue;
+            directN += readFeatAll[ii]->bridgeReadInfo_.reads.size();
+            pendingN += readFeatAll[ii]->bridgeReadInfo_.pending.size();
+        }
+        readInfo.reads.reserve(directN + pendingN);
+        readInfo.pending.reserve(pendingN);
+        for (int ii = 0; ii < P.runThreadN; ++ii)
+            if (readFeatAll[ii]) readInfo.append(readFeatAll[ii]->bridgeReadInfo_);
+        if (pSolo.CBmatchWL.oneExact &&
+            (!readBarSum || readBarSum->cbReadCountExact.size() < pSolo.cbWLsize)) {
+            exitWithError("EXITING because bridge readInfo oneExact gating requires exact barcode counts.\n",
+                          std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+        const size_t resolvedKeys = readInfo.resolvedCBs.size();
+        readInfo.prepare([&](uint32_t cb) {
+            return cb < pSolo.cbWLsize && (!pSolo.CBmatchWL.oneExact
+                || readBarSum->cbReadCountExact[cb] > 0);
+        });
+        P.inOut->logMain << "Direct bridge readInfo: direct=" << directN
+                         << " ambiguous=" << pendingN << " resolved_cb_keys=" << resolvedKeys
+                         << " gene_reads=" << readInfo.reads.size() << endl;
+    }
+
     size_t rawThreadHashSize = 0;
     size_t threadHashCount = 0;
     for (int ii = 0; ii < P.runThreadN; ++ii) {
@@ -646,6 +674,9 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     countMatMult.i.assign(nCB + 1, 0);
 
     struct ThreadScratch {
+        std::vector<BridgeReadInfo::Decision> readDecisions;
+        uint64_t readInfoAccepted = 0, readInfoRejected = 0, readInfoCorrected = 0;
+        std::vector<uint32_t> outputRows;
         std::vector<uint32_t> umiArray;
         std::vector<MgRow> mgBuf;
         std::vector<std::pair<uint32_t, uint32_t>> aggGene;
@@ -691,7 +722,9 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     };
 
     std::vector<uint32_t> cbRowCounts(nCB, 0);
-    std::vector<std::vector<uint32_t>> cbRows(nCB);
+    // One append buffer per worker; each barcode records its stable slice.
+    std::vector<size_t> cbRowOffsets(nCB, 0);
+    std::vector<uint32_t> cbRowThreads(nCB, 0);
     std::vector<BridgeStageDigest> cbDetPreCr;
     std::vector<BridgeStageDigest> cbDetPostCr;
     std::vector<BridgeStageDigest> cbDetResolved;
@@ -720,7 +753,7 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
             nGenePerCB[iCB] = 0;
             nUMIperCB[iCB] = 0;
             cbRowCounts[iCB] = 0;
-            cbRows[iCB].clear();
+            if (keepReadInfo) ts.readDecisions.clear();
             if (hdMoleculeOut) {
                 ts.hdRecords.clear();
             }
@@ -946,6 +979,16 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                 const uint32_t maxg = resolution.accepted
                     ? resolution.gene : static_cast<uint32_t>(-1);
 
+                if (keepReadInfo) {
+                    for (size_t i = p; i < q; ++i) {
+                        const auto &row = ts.mgBuf[i];
+                        ts.readDecisions.push_back({ts.gID[row.geneIdx], row.orig,
+                            resolution.accepted && row.geneIdx == maxg ? cu : UINT32_MAX});
+                        if (resolution.accepted && row.geneIdx == maxg && row.orig != cu)
+                            ++ts.readInfoCorrected;
+                    }
+                }
+
                 if (shouldTraceCollapseBarcode(pSolo, indCB[iCB])) {
                     const int64_t chosenGene = (maxg + 1u == 0u) ? -1 : static_cast<int64_t>(ts.gID[maxg]);
                     P.inOut->logMain << "[GENEFULL-CR-TRACE] mode=bridge"
@@ -992,14 +1035,24 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                 p = q;
             }
 
+            if (keepReadInfo) {
+                readInfo.replay(wlCb, ts.readDecisions,
+                    [&](uint32_t read, uint32_t cb, uint32_t umi, uint8_t status) {
+                        recordReadInfo(read, cb, umi, status);
+                        if (status == 1) ++ts.readInfoAccepted;
+                        else ++ts.readInfoRejected;
+                    });
+            }
+
             size_t cbNonzeroGenes = 0;
             for (uint32_t ig = 0; ig < nGenes; ++ig)
                 if (ts.geneCounts[ig] != 0)
                     ++cbNonzeroGenes;
 
             cbRowCounts[iCB] = static_cast<uint32_t>(cbNonzeroGenes);
-            std::vector<uint32_t> &rows = cbRows[iCB];
-            rows.reserve(cbNonzeroGenes * countMatStride);
+            std::vector<uint32_t> &rows = ts.outputRows;
+            cbRowOffsets[iCB] = rows.size();
+            cbRowThreads[iCB] = static_cast<uint32_t>(omp_get_thread_num());
             for (uint32_t ig = 0; ig < nGenes; ++ig) {
                 if (ts.geneCounts[ig] == 0)
                     continue;
@@ -1026,6 +1079,19 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                 }
             }
         }
+    }
+
+    if (keepReadInfo) {
+        uint64_t accepted = 0, rejected = 0, corrected = 0;
+        for (const auto &ts : scratch) {
+            accepted += ts.readInfoAccepted;
+            rejected += ts.readInfoRejected;
+            corrected += ts.readInfoCorrected;
+        }
+        P.inOut->logMain << "Direct bridge readInfo: accepted_gene_reads=" << accepted
+                         << " rejected_gene_reads=" << rejected
+                         << " corrected_umi_keys=" << corrected << endl;
+        std::vector<BridgeReadInfo::Read>().swap(readInfo.reads);
     }
 
     if (hdMoleculeOut) {
@@ -1081,11 +1147,16 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     countCellGeneUMI.assign(finalMatSlots, 0);
 
     for (uint32_t iCB = 0; iCB < nCB; ++iCB) {
-        const std::vector<uint32_t> &rows = cbRows[iCB];
-        if (!rows.empty())
-            std::copy(rows.begin(), rows.end(), countCellGeneUMI.begin() + countCellGeneUMIindex[iCB]);
-        std::vector<uint32_t>().swap(cbRows[iCB]);
+        const size_t slots = static_cast<size_t>(cbRowCounts[iCB]) * countMatStride;
+        if (slots != 0) {
+            const auto& rows = scratch[cbRowThreads[iCB]].outputRows;
+            std::copy_n(rows.begin() + cbRowOffsets[iCB], slots,
+                        countCellGeneUMI.begin() + countCellGeneUMIindex[iCB]);
+        }
     }
+    P.inOut->logMain << "NOTICE: bridge output rows barcodes=" << nCB
+                     << " worker_buffers=" << scratch.size()
+                     << " output_slots=" << finalMatSlots << "\n";
 
     if (bridgeDeterminismTrace) {
         writeBridgeDeterminismDigest(bridgeDeterminismPath,

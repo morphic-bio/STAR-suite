@@ -27,17 +27,8 @@ namespace {
 
 static int velocytoReferenceFeatureIndex(const ParametersSolo &pSolo)
 {
-    const int candidates[] = {
-        SoloFeatureTypes::Gene,
-        SoloFeatureTypes::GeneFull,
-        SoloFeatureTypes::GeneFull_Ex50pAS,
-        SoloFeatureTypes::GeneFull_ExonOverIntron,
-    };
-    for (auto featureType : candidates) {
-        if (pSolo.featureInd[featureType] >= 0)
-            return pSolo.featureInd[featureType];
-    }
-    return -1;
+    const int featureType = pSolo.velocytoReadInfoFeature();
+    return featureType < 0 ? -1 : pSolo.featureInd[featureType];
 }
 
 static SoloFeature *velocytoReferenceFeature(const ParametersSolo &pSolo,
@@ -51,7 +42,12 @@ static SoloFeature *velocytoReferenceFeature(const ParametersSolo &pSolo,
                           "SOLUTION: re-run STAR adding GeneFull or another gene-like feature to --soloFeatures.\n",
                       std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
     }
-    return soloFeatAll[refIndex];
+    SoloFeature *source = soloFeatAll[refIndex];
+    if (source->nReadsInput > 1 && source->packedReadInfo.data.empty()) {
+        exitWithError("EXITING because Velocyto's gene-like source did not populate per-read CB/UMI storage.\n",
+                      std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+    }
+    return source;
 }
 
 struct VelocytoSortedRecord {
@@ -67,32 +63,17 @@ struct VelocytoBucketRecord {
     std::vector<trTypeStruct> trT;
 };
 
-/** Merge one stream record into per-(CB,UMI) transcript vectors (intersection + mask OR). */
-inline void applyVelocytoMerge(std::unordered_map<uintUMI, std::vector<trTypeStruct>> &cuMap,
-                               uintUMI umi,
-                               const std::vector<trTypeStruct> &trT)
+using VelocytoGeneCounts = std::array<uint32_t, 3>;
+KHASH_INIT(velocytoGeneCounts, uint32_t, VelocytoGeneCounts, 1, __ac_Wang_hash, kh_int_hash_equal)
+struct VelocytoGeneCountsDeleter {
+    void operator()(khash_t(velocytoGeneCounts)* table) const { kh_destroy(velocytoGeneCounts, table); }
+};
+
+/** Preserve intersection and type-mask OR while updating the UMI's pooled slice. */
+inline void applyVelocytoMerge(VelocytoUmiMap& cuMap, uintUMI umi,
+                               const std::vector<trTypeStruct>& trT)
 {
-    auto it = cuMap.find(umi);
-    if (it != cuMap.end() && it->second.empty())
-        return;
-    if (it == cuMap.end()) {
-        cuMap[umi] = trT;
-        return;
-    }
-    const std::vector<trTypeStruct> &oldV = it->second;
-    uint32 inew = 0;
-    std::vector<trTypeStruct> trT1;
-    trT1.reserve(oldV.size());
-    for (uint32 iold = 0; iold < oldV.size(); iold++) {
-        while (inew < trT.size() && oldV[iold].tr > trT[inew].tr)
-            ++inew;
-        if (inew == trT.size())
-            break;
-        if (oldV[iold].tr == trT[inew].tr) {
-            trT1.push_back({trT[inew].tr, (uint8)(oldV[iold].type | trT[inew].type)});
-        }
-    }
-    cuMap[umi] = std::move(trT1);
+    cuMap.merge(umi, trT);
 }
 
 template <class T>
@@ -183,7 +164,7 @@ static uint32_t velocytoInitialMapReserve(uint32_t readCount)
     return estimate;
 }
 
-static void reserveVelocytoCuMaps(vector<unordered_map<uintUMI, vector<trTypeStruct>>> &cuTrTypes,
+static void reserveVelocytoCuMaps(vector<VelocytoUmiMap> &cuTrTypes,
                                   const vector<uint32> &cbReadCount,
                                   uint32 nCB,
                                   Parameters &P,
@@ -210,7 +191,7 @@ static void reserveVelocytoCuMaps(vector<unordered_map<uintUMI, vector<trTypeStr
                      << endl;
 }
 
-static void reserveVelocytoCuMapsRange(vector<unordered_map<uintUMI, vector<trTypeStruct>>> &cuTrTypes,
+static void reserveVelocytoCuMapsRange(vector<VelocytoUmiMap> &cuTrTypes,
                                        const vector<uint32> &cbReadCount,
                                        uint32 cbBegin,
                                        uint32 cbEnd)
@@ -278,7 +259,7 @@ void SoloFeature::countVelocytoStreamThreads()
 
     nReadPerCB.resize(nCB);
 
-    vector<unordered_map<uintUMI, vector<trTypeStruct>>> cuTrTypes(nCB);
+    vector<VelocytoUmiMap> cuTrTypes(nCB);
     reserveVelocytoCuMaps(cuTrTypes, readFeatSum->cbReadCount, nCB, P, "stream_threads");
 
     {
@@ -309,7 +290,7 @@ void SoloFeature::countVelocytoStreamThreads()
             uint32 iCB = indCBwl[cb];
             nReadPerCB[iCB]++;
 
-            if (cuTrTypes[iCB].count(umi) > 0 && cuTrTypes[iCB][umi].empty()) {
+            if (cuTrTypes[iCB].rejected(umi)) {
                 streamReads->ignore((uint32)-1, '\n');
                 continue;
             }
@@ -355,7 +336,7 @@ void SoloFeature::countVelocytoSortedReplay()
 
     nReadPerCB.resize(nCB);
 
-    vector<unordered_map<uintUMI, vector<trTypeStruct>>> cuTrTypes(nCB);
+    vector<VelocytoUmiMap> cuTrTypes(nCB);
     reserveVelocytoCuMaps(cuTrTypes, readFeatSum->cbReadCount, nCB, P, "sorted_replay");
 
     // Full in-memory vector of every Velocyto-positive stream record — can dominate RSS on very large
@@ -437,7 +418,7 @@ void SoloFeature::countVelocytoSortedReplayCBuckets()
 
     if (velocytoIntegratedHashInMemory()) {
         // Debug / A–B only: holds every Velocyto-positive record in RAM (per-CB vectors).
-        vector<unordered_map<uintUMI, vector<trTypeStruct>>> cuTrTypes(nCB);
+        vector<VelocytoUmiMap> cuTrTypes(nCB);
         reserveVelocytoCuMaps(cuTrTypes, readFeatSum->cbReadCount, nCB, P, "integrated_hash_inmemory");
         vector<vector<VelocytoBucketRecord>> perCB(nCB);
         for (uint32 ii = 0; ii < nCB; ii++) {
@@ -609,14 +590,14 @@ void SoloFeature::countVelocytoSortedReplayCBuckets()
         std::string p = spillDir + "/bucket_" + std::to_string((unsigned long)b) + ".bin";
         struct stat st {};
         if (::stat(p.c_str(), &st) != 0) {
-            unordered_map<uintUMI, vector<trTypeStruct>> empty;
+            VelocytoUmiMap empty;
             for (uint32 iCB = cbBegin; iCB < cbEnd; iCB++)
                 countVelocytoFinalizeOneCb(iCB, empty);
             continue;
         }
         if (st.st_size == 0) {
             std::remove(p.c_str());
-            unordered_map<uintUMI, vector<trTypeStruct>> empty;
+            VelocytoUmiMap empty;
             for (uint32 iCB = cbBegin; iCB < cbEnd; iCB++)
                 countVelocytoFinalizeOneCb(iCB, empty);
             continue;
@@ -678,7 +659,7 @@ void SoloFeature::countVelocytoSortedReplayCBuckets()
             return a.iread < b.iread;
         });
 
-        vector<unordered_map<uintUMI, vector<trTypeStruct>>> cuTrTypes(cbEnd - cbBegin);
+        vector<VelocytoUmiMap> cuTrTypes(cbEnd - cbBegin);
         reserveVelocytoCuMapsRange(cuTrTypes, readFeatSum->cbReadCount, cbBegin, cbEnd);
         for (const auto &rec : chunk)
             applyVelocytoMerge(cuTrTypes[rec.iCB - cbBegin], rec.umi, rec.trT);
@@ -686,7 +667,7 @@ void SoloFeature::countVelocytoSortedReplayCBuckets()
         vector<VelocytoSortedRecord>().swap(chunk);
         for (uint32 iCB = cbBegin; iCB < cbEnd; iCB++)
             countVelocytoFinalizeOneCb(iCB, cuTrTypes[iCB - cbBegin]);
-        vector<unordered_map<uintUMI, vector<trTypeStruct>>>().swap(cuTrTypes);
+        vector<VelocytoUmiMap>().swap(cuTrTypes);
     }
 
     if (::rmdir(spillDir.c_str()) != 0) {
@@ -703,6 +684,7 @@ void SoloFeature::countVelocytoSortedReplayCBuckets()
 
 void SoloFeature::countVelocytoFinalizeInit()
 {
+    velocytoUmiKeys_ = velocytoTranscriptSlots_ = velocytoLiveSlots_ = 0;
     nUMIperCB.assign(nCB, 0);
     nGenePerCB.assign(nCB, 0);
 
@@ -713,10 +695,24 @@ void SoloFeature::countVelocytoFinalizeInit()
     countCellGeneUMIindex[0] = 0;
 }
 
-void SoloFeature::countVelocytoFinalizeOneCb(uint32 iCB, unordered_map<uintUMI, vector<trTypeStruct>> &cuMap)
+void SoloFeature::countVelocytoFinalizeOneCb(uint32 iCB, VelocytoUmiMap &cuMap)
 {
-    map<uint32, array<uint32, 3>> geneC;
-    for (auto &umi : cuMap) {
+    velocytoUmiKeys_ += cuMap.size();
+    velocytoTranscriptSlots_ += cuMap.allocatedSlots();
+    velocytoLiveSlots_ += cuMap.liveSlots();
+    std::unique_ptr<khash_t(velocytoGeneCounts), VelocytoGeneCountsDeleter> geneC;
+    auto increment = [&](uint32_t gene, uint32_t layer) {
+        if (!geneC) {
+            geneC.reset(kh_init(velocytoGeneCounts));
+            if (!geneC) throw std::bad_alloc();
+        }
+        int absent;
+        const khint_t k = kh_put(velocytoGeneCounts, geneC.get(), gene, &absent);
+        if (absent < 0) throw std::bad_alloc();
+        if (absent) kh_val(geneC.get(), k) = VelocytoGeneCounts{{0, 0, 0}};
+        ++kh_val(geneC.get(), k)[layer];
+    };
+    for (const auto umi : cuMap) {
         if (umi.second.empty())
             continue;
         uint32 geneI = Trans.trGene[umi.second[0].tr];
@@ -748,11 +744,11 @@ void SoloFeature::countVelocytoFinalizeOneCb(uint32 iCB, unordered_map<uintUMI, 
             continue;
 
         if (exonModel && !intronModel && !mixedModel) {
-            geneC[geneI][0]++;
+            increment(geneI, 0);
         } else if (spanModel || ((intronModel || mixedModel) && !exonModel)) {
-            geneC[geneI][1]++;
+            increment(geneI, 1);
         } else {
-            geneC[geneI][2]++;
+            increment(geneI, 2);
         }
 
         nUMIperCB[iCB]++;
@@ -761,26 +757,35 @@ void SoloFeature::countVelocytoFinalizeOneCb(uint32 iCB, unordered_map<uintUMI, 
     countCellGeneUMIindex[iCB + 1] = countCellGeneUMIindex[iCB];
 
     if (nUMIperCB[iCB] == 0) {
-        unordered_map<uintUMI, vector<trTypeStruct>>().swap(cuMap);
+        cuMap.clearAndFree();
         return;
     }
 
-    nGenePerCB[iCB] += geneC.size();
+    nGenePerCB[iCB] += kh_size(geneC.get());
     readFeatSum->stats.V[readFeatSum->stats.yesUMIs] += nUMIperCB[iCB];
     ++readFeatSum->stats.V[readFeatSum->stats.yesCellBarcodes];
 
-    for (auto &gg : geneC) {
-        countCellGeneUMI.push_back(gg.first);
+    vector<uint32_t> genes;
+    genes.reserve(kh_size(geneC.get()));
+    for (khint_t k = kh_begin(geneC.get()); k != kh_end(geneC.get()); ++k)
+        if (kh_exist(geneC.get(), k)) genes.push_back(kh_key(geneC.get(), k));
+    sort(genes.begin(), genes.end()); // Preserve the former std::map output order.
+    for (uint32_t gene : genes) {
+        const auto& counts = kh_val(geneC.get(), kh_get(velocytoGeneCounts, geneC.get(), gene));
+        countCellGeneUMI.push_back(gene);
         for (uint32 ii = 0; ii < 3; ii++)
-            countCellGeneUMI.push_back(gg.second[ii]);
+            countCellGeneUMI.push_back(counts[ii]);
         countCellGeneUMIindex[iCB + 1] += countMatStride;
     }
 
-    unordered_map<uintUMI, vector<trTypeStruct>>().swap(cuMap);
+    cuMap.clearAndFree();
 }
 
 void SoloFeature::countVelocytoFinalizeFinish()
 {
+    P.inOut->logMain << "[velocyto-storage] cells=" << nCB << " umi_keys=" << velocytoUmiKeys_
+                    << " transcript_slots=" << velocytoTranscriptSlots_
+                    << " live_transcripts=" << velocytoLiveSlots_ << " pooled_buffers=per_cell" << endl;
     time_t rawTime;
 
     nReadPerCBtotal = nReadPerCB;
@@ -792,7 +797,7 @@ void SoloFeature::countVelocytoFinalizeFinish()
                      << linuxProcMemory() << flush;
 }
 
-void SoloFeature::countVelocytoFinalizeFromCuMaps(vector<unordered_map<uintUMI, vector<trTypeStruct>>> &cuTrTypes)
+void SoloFeature::countVelocytoFinalizeFromCuMaps(vector<VelocytoUmiMap> &cuTrTypes)
 {
     countVelocytoFinalizeInit();
     for (uint32 iCB = 0; iCB < nCB; iCB++) {
