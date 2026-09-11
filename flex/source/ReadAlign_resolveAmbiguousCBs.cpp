@@ -52,7 +52,7 @@ void ReadAlign::resolveAmbiguousCBs() {
     }
     
     // Get whitelist sequences from CbCorrector
-    const std::vector<std::string> &whitelistSeqs = P.pSolo.cbCorrector->whitelist();
+    const std::vector<std::string> &whitelistSeqs = P.pSolo.cbWLstr;
     
     // Create Bayesian resolver
     CbBayesianResolver resolver(whitelistSeqs.size(), &whitelistSeqs);

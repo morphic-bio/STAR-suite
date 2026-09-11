@@ -13,16 +13,16 @@ CbCorrector::CbCorrector(const std::vector<std::string> &whitelist, int maxHammi
     
     if (whitelist.size() > std::numeric_limits<uint32_t>::max())
         throw std::length_error("CbCorrector whitelist exceeds 32-bit indices");
-    whitelist_ = whitelist;
-    cbLength_ = whitelist_.empty() ? 0 : whitelist_[0].length();
+    whitelistSize_ = whitelist.size();
+    cbLength_ = whitelist.empty() ? 0 : whitelist[0].length();
     exactMap_.reset(kh_init(cbCorrectorLookup));
     variantMap_.reset(kh_init(cbCorrectorLookup));
     ambiguousRanges_.reset(kh_init(cbCorrectorRanges));
     if (!exactMap_ || !variantMap_ || !ambiguousRanges_) throw std::bad_alloc();
 
-    for (size_t i = 0; i < whitelist_.size(); ++i) {
+    for (size_t i = 0; i < whitelist.size(); ++i) {
         PackedCB packed;
-        if (!encodeCB(whitelist_[i], packed)) continue;
+        if (!encodeCB(whitelist[i], packed)) continue;
         int absent;
         const khint_t k = kh_put(cbCorrectorLookup, exactMap_.get(), packed.key, &absent);
         if (absent < 0) throw std::bad_alloc();
@@ -32,7 +32,7 @@ CbCorrector::CbCorrector(const std::vector<std::string> &whitelist, int maxHammi
 
     // Pass 1: preserve unique-hit/sentinel semantics and count ambiguity sizes.
     // No per-key vectors are allocated, including during construction.
-    forEachVariant([&](uint32_t key, uint32_t index) {
+    forEachVariant(whitelist, [&](uint32_t key, uint32_t index) {
         int absent;
         const khint_t k = kh_put(cbCorrectorLookup, variantMap_.get(), key, &absent);
         if (absent < 0) throw std::bad_alloc();
@@ -71,7 +71,7 @@ CbCorrector::CbCorrector(const std::vector<std::string> &whitelist, int maxHammi
 
     // Pass 2: replay the original whitelist/base traversal so each candidate
     // list has exactly the former vector's order (including duplicate hits).
-    forEachVariant([&](uint32_t key, uint32_t index) {
+    forEachVariant(whitelist, [&](uint32_t key, uint32_t index) {
         const khint_t k = kh_get(cbCorrectorRanges, ranges, key);
         if (k != kh_end(ranges)) {
             auto& range = kh_val(ranges, k);
