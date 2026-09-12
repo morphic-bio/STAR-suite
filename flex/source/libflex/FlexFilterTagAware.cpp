@@ -81,7 +81,8 @@ int FlexFilter::runTagAware(const SampleMatrixData& matrix,
             if (sampleTags.size() > std::numeric_limits<uint32_t>::max() / 90000u)
                 throw std::runtime_error("Too many tags for caller rank limits");
             const uint32_t nTags = static_cast<uint32_t>(sampleTags.size());
-            std::vector<std::string> barcodes;
+            auto& output = outputs->tagResults[group];
+            auto& barcodes = output.tagBarcodes;
             std::vector<uint32_t> umi, starts, nGenes;
             for (uint32_t cell = 0; cell < matrix.nCells; ++cell) {
                 if (!matrix.nUMIperCB[cell] || !barcodeHasAnyFlexTag(matrix.barcodes[cell], sampleTags)) continue;
@@ -100,11 +101,9 @@ int FlexFilter::runTagAware(const SampleMatrixData& matrix,
                 if (config.enableInvariantChecks && summed != umi.back())
                     throw std::runtime_error("Sparse counts do not match total UMIs for " + barcodes.back());
             }
-            auto& output = outputs->tagResults[group];
             output.sampleLabel = label;
             output.tag = sampleTags.front();
             output.expectedCells = 0;
-            output.tagBarcodes = barcodes;
             output.retainBarcodes = barcodes; // ED cell indices refer to this group matrix.
             if (barcodes.empty()) {
                 return;

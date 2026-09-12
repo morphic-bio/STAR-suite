@@ -9,6 +9,7 @@
 #include "ErrorWarning.h"
 #include "streamFuns.h"
 #include "MexWriter.h"
+#include "BorrowedBarcodeIndex.h"
 #include <atomic>
 #include <chrono>
 #include <fstream>
@@ -349,10 +350,9 @@ void SoloFeature::runFlexFilterInline(
     std::cout << "  Processed " << outputs.tagResults.size() << " sample groups\n";
     std::cout << "Writing per-sample MEX outputs...\n";
 
-    std::unordered_map<std::string, uint32_t> barcodeToIdx;
-    barcodeToIdx.reserve(inlineMatrix.matrixData.nCells * 2);
+    BorrowedBarcodeIndex barcodeToIdx(inlineMatrix.matrixData.nCells);
     for (uint32_t idx = 0; idx < inlineMatrix.matrixData.nCells; ++idx) {
-        barcodeToIdx[inlineMatrix.matrixData.barcodes[idx]] = idx;
+        barcodeToIdx.insert(inlineMatrix.matrixData.barcodes[idx], idx);
     }
 
     auto printTagLog = [&](const FlexFilter::Outputs::TagResults& tagResult, const std::string& label){
@@ -437,7 +437,7 @@ void SoloFeature::runFlexFilterInline(
     for (size_t sample = 0; sample < nSamples; ++sample) {
         const auto& tagResult = outputs.tagResults[sample];
         for (const auto& bc : tagResult.passingBarcodes) {
-            if (barcodeToIdx.find(bc) != barcodeToIdx.end()) {
+            if (barcodeToIdx.find(bc) != UINT32_MAX) {
                 hasMappedBarcode[sample] = 1;
                 break;
             }
@@ -479,10 +479,9 @@ void SoloFeature::runFlexFilterInline(
             std::vector<std::string> filteredBarcodes;
             filteredBarcodes.reserve(tagResult.passingBarcodes.size());
             for (const auto& bc : tagResult.passingBarcodes) {
-                auto it = barcodeToIdx.find(bc);
-                if (it == barcodeToIdx.end())
+                const uint32_t oldIdx = barcodeToIdx.find(bc);
+                if (oldIdx == UINT32_MAX)
                     continue;
-                uint32_t oldIdx = it->second;
                 if (oldToNew.find(oldIdx) != oldToNew.end())
                     continue;
                 uint32_t newIdx = static_cast<uint32_t>(filteredBarcodes.size());
@@ -522,10 +521,9 @@ void SoloFeature::runFlexFilterInline(
             // Preserve the established summary accounting, including any
             // duplicate barcode entries in the filter result.
             for (const auto& bc : tagResult.passingBarcodes) {
-                auto it = barcodeToIdx.find(bc);
-                if (it != barcodeToIdx.end())
-                    sampleResult.sampleUMI +=
-                        inlineMatrix.matrixData.nUMIperCB[it->second];
+                const uint32_t cell = barcodeToIdx.find(bc);
+                if (cell != UINT32_MAX)
+                    sampleResult.sampleUMI += inlineMatrix.matrixData.nUMIperCB[cell];
             }
         }
     };
@@ -651,10 +649,10 @@ void SoloFeature::runFlexFilterInline(
         std::vector<int32_t> sampleByCell(inlineMatrix.matrixData.nCells, -1);
         for (size_t sample = 0; sample < outputs.tagResults.size(); ++sample) {
             for (const std::string& barcode : outputs.tagResults[sample].passingBarcodes) {
-                const auto it = barcodeToIdx.find(barcode);
-                if (it == barcodeToIdx.end())
+                const uint32_t cell = barcodeToIdx.find(barcode);
+                if (cell == UINT32_MAX)
                     continue;
-                int32_t& assignment = sampleByCell[it->second];
+                int32_t& assignment = sampleByCell[cell];
                 if (assignment >= 0 && assignment != static_cast<int32_t>(sample)) {
                     assignment = -2;
                     identityComplete = false;
