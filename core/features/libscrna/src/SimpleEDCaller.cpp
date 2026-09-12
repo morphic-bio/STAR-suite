@@ -129,6 +129,29 @@ int runSimpleEDWithAmbient(const vector<string>& barcodes,
                            const vector<uint8_t>& mitochondrial_features,
                            scrna_ed_result* result,
                            SimpleEDRunInfo* info) {
+    if (sparse_cell_index.size() < umi_counts.size() || n_genes_per_cell.size() < umi_counts.size())
+        return -1;
+    SparseCountView matrix;
+    matrix.genes = sparse_gene_ids.data();
+    matrix.counts = sparse_counts.data();
+    matrix.geneWords = sparse_gene_ids.size();
+    matrix.countWords = sparse_counts.size();
+    matrix.offsets = sparse_cell_index.data();
+    matrix.entries = n_genes_per_cell.data();
+    matrix.cells = umi_counts.size();
+    return runSimpleEDWithAmbientView(barcodes, umi_counts, matrix, n_features,
+        config, options, mitochondrial_features, result, info);
+}
+
+int runSimpleEDWithAmbientView(const vector<string>& barcodes,
+                           const vector<uint32_t>& umi_counts,
+                           const SparseCountView& matrix,
+                           uint32_t n_features,
+                           const scrna_ed_config* config,
+                           const SimpleEDOptions& options,
+                           const vector<uint8_t>& mitochondrial_features,
+                           scrna_ed_result* result,
+                           SimpleEDRunInfo* info) {
     const bool use_legacy_rank_ambient = options.legacyRankAmbient;
     const bool use_guarded_rank_ambient = options.guardedRankAmbient;
     const uint32_t ambient_fallback_min_abs = options.ambientFallbackMinAbs;
@@ -139,6 +162,9 @@ int runSimpleEDWithAmbient(const vector<string>& barcodes,
     if (!config || !result) {
         return -1;
     }
+
+    if (barcodes.size() != umi_counts.size()) return -1;
+    if (!umi_counts.empty()) matrix.validate(umi_counts.size());
 
     std::vector<std::pair<uint32_t, uint32_t>> umi_idx;
     umi_idx.reserve(umi_counts.size());
@@ -192,11 +218,11 @@ int runSimpleEDWithAmbient(const vector<string>& barcodes,
     vector<uint32_t> seen_genes(n_features, std::numeric_limits<uint32_t>::max());
     for (uint32_t rank = 0; rank < simple_count; ++rank) {
         const uint32_t cell = retain_indices[rank];
-        const uint32_t start = sparse_cell_index[cell];
+        const size_t start = static_cast<size_t>(matrix.start(cell));
         const OrdMagCellQuality quality = ordMagCellQuality(
-            sparse_gene_ids.data() + start, sparse_counts.data() + start,
-            n_genes_per_cell[cell], seen_genes, rank,
-            mitochondrial_features.empty() ? nullptr : mitochondrial_features.data());
+            matrix.genes + start, matrix.counts + start,
+            matrix.entries[cell], seen_genes, rank,
+            mitochondrial_features.empty() ? nullptr : mitochondrial_features.data(), matrix.stride);
         simple_genes.push_back(quality.detectedGenes);
         if (!mitochondrial_features.empty()) simple_non_mito_umis.push_back(quality.nonMitoUMIs);
         simple_barcodes.push_back(barcodes[cell]);
@@ -301,12 +327,10 @@ int runSimpleEDWithAmbient(const vector<string>& barcodes,
             continue;
         }
         uint32_t orig_idx = retain_indices[retain_idx];
-        uint32_t start = sparse_cell_index[orig_idx];
-        uint32_t n_genes = n_genes_per_cell[orig_idx];
+        uint32_t n_genes = matrix.entries[orig_idx];
         for (uint32_t g = 0; g < n_genes; g++) {
-            size_t pos = static_cast<size_t>(start + g);
-            uint32_t gene_id = sparse_gene_ids[pos];
-            uint32_t count = sparse_counts[pos];
+            uint32_t gene_id = matrix.gene(orig_idx, g);
+            uint32_t count = matrix.count(orig_idx, g);
             if (gene_id < n_features) {
                 amb_count[gene_id] += count;
             }
@@ -326,22 +350,6 @@ int runSimpleEDWithAmbient(const vector<string>& barcodes,
 
     AmbientProfile amb_profile = EmptyDropsMultinomial::computeAmbientProfile(
         amb_count, n_features, feat_det_vec, feat_det_vec.size());
-
-    std::vector<uint32_t> count_cell_gene_umi;
-    std::vector<uint32_t> count_cell_gene_umiindex(umi_counts.size(), 0);
-    std::vector<uint32_t> n_gene_per_cb(umi_counts.size(), 0);
-    count_cell_gene_umi.reserve(sparse_counts.size() * 2);
-    for (uint32_t cell_idx = 0; cell_idx < umi_counts.size(); cell_idx++) {
-        count_cell_gene_umiindex[cell_idx] = static_cast<uint32_t>(count_cell_gene_umi.size());
-        uint32_t start = sparse_cell_index[cell_idx];
-        uint32_t n_genes = n_genes_per_cell[cell_idx];
-        n_gene_per_cb[cell_idx] = n_genes;
-        for (uint32_t g = 0; g < n_genes; g++) {
-            size_t pos = static_cast<size_t>(start + g);
-            count_cell_gene_umi.push_back(sparse_gene_ids[pos]);
-            count_cell_gene_umi.push_back(sparse_counts[pos]);
-        }
-    }
 
     std::vector<uint32_t> candidate_orig_indices;
     std::vector<uint32_t> candidate_counts;
@@ -374,9 +382,9 @@ int runSimpleEDWithAmbient(const vector<string>& barcodes,
         amb_profile,
         candidate_orig_indices,
         candidate_counts,
-        count_cell_gene_umi,
-        count_cell_gene_umiindex,
-        n_gene_per_cb,
+        std::vector<uint32_t>(),
+        std::vector<uint32_t>(),
+        std::vector<uint32_t>(),
         2,
         1,
         ed_params,
@@ -385,7 +393,8 @@ int runSimpleEDWithAmbient(const vector<string>& barcodes,
         static_cast<uint32_t>(umi_counts.size()),
         "",
         "",
-        options.invariantChecks
+        options.invariantChecks,
+        &matrix
     );
 
     std::vector<string> passing_barcodes;
