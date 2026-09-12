@@ -1791,3 +1791,19 @@ Final allocation guards: `gex_only_final` has no new per-read replay storage;
 `multi_feature_final` retains only the selected Gene source. Their comparison
 JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
 `build_patch_verification.json` complete the correction's provenance.
+
+## FLEX RAM experiments, 2026-09-12
+
+- Local builds, source patches, hashes, unit/fixture outputs and remote execution
+  manifests: `/mnt/pikachu/star_suite_paper/analysis/flex_ram_20260912/`.
+- Cloud inputs and distinct run outputs: `/scratch/flex_ram_20260912/` on
+  `i-037683d7964956c63`; 48 threads, RAM buckets, no BAM/sidecar/index loading.
+- S3 archive: `s3://star-suite-320k-benchmark-alt-171440768238-us-west-2-20260904/analysis-tools/flex_ram_20260912/`.
+- Runbook: `/mnt/pikachu/star_suite_paper/RUNBOOK_FLEX_RAM_320K_20260912.md`.
+- CSR writer and borrowed-barcode tests create unique temporary directories or
+  use the local experiment root. Binaries and generated matrices remain untracked.
+
+- R11 eight-byte/overflow fixture and sanitizer build: `analysis/flex_ram_20260912/r11/`
+  in the paper workspace. It creates and removes its own `star_compact_bucket_*`
+  temporary directories; legacy compatibility fixtures are retained with the
+  experiment. These unit checks are separate from the real full-set benchmarks.
