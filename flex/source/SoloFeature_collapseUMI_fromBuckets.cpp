@@ -41,8 +41,9 @@ struct BucketResult {
     std::vector<MexWriter::Triplet> triplets;
     std::vector<uint32_t> cellUmis;
     std::vector<uint32_t> cellGenes;
-    std::vector<uint64_t> moleculeKeys;
-    std::vector<uint8_t> moleculeRegions;
+    std::vector<FlexGdnaCellSummary> gdnaCells;
+    std::vector<FlexGdnaGeneCount> gdnaGeneCounts;
+    uint64_t finalMolecules = 0;
     BucketMetrics metrics;
     uint64_t inputRecords = 0;
     uint64_t inputCounts = 0;
@@ -160,6 +161,9 @@ void SoloFeature::collapseUMIall_fromBuckets()
                      << " s, geneIds+allowed " << tGeneIdsAndAllowed << " s"
                      << endl << std::flush;
 
+    const bool collectGdna = pSolo.runFlexFilter && pSolo.flexMode
+        && pSolo.flexGdnaMode != ParametersSolo::FlexGdnaOff;
+    const size_t gdnaGeneSlots = FlexGdnaProbeMetadata::instance().geneProbeCounts().size();
     const uint32_t bucketCount = pSolo.cbBucketStore->bucket_count();
     std::vector<BucketResult> results(bucketCount);
     pSolo.cbBucketStore->reset_bucket_claims();
@@ -196,10 +200,6 @@ void SoloFeature::collapseUMIall_fromBuckets()
             for (const auto &segment : segments)
                 totalRecords += segment.size();
             out.inputRecords = totalRecords;
-            // Reserve address space only; append touches final molecules. This
-            // upper bound avoids reallocating the output during streaming.
-            out.moleculeKeys.reserve(totalRecords);
-            out.moleculeRegions.reserve(totalRecords);
 
             // append_segment sorted each producer-local run before publishing
             // it. Merge the runs here while other bucket threads do the same;
@@ -288,11 +288,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
                     out.cbIndices.push_back(cb);
                     previousCb = cb;
                 }
-                for (const auto &record : group) {
-                    out.moleculeKeys.push_back(record.key);
-                    out.moleculeRegions.push_back(static_cast<uint8_t>(
-                        flexGdnaValueRegion(record.value)));
-                }
+                out.finalMolecules += group.size();
                 if (tag != 0 && cb < pSolo.cbWLstr.size()
                     && tag < gCanonicalTags.size()
                     && !gCanonicalTags[tag].empty()) {
@@ -303,8 +299,16 @@ void SoloFeature::collapseUMIall_fromBuckets()
                         out.cbTagKeys.push_back(cbTag);
                         out.cellUmis.push_back(0);
                         out.cellGenes.push_back(0);
+                        if (collectGdna) out.gdnaCells.emplace_back();
                         cell = static_cast<uint32_t>(out.barcodes.size() - 1);
                         previousCbTag = cbTag;
+                    }
+                    if (collectGdna) {
+                        uint32_t regionCounts[4] = {0, 0, 0, 0};
+                        for (const auto& record : group)
+                            ++regionCounts[flexGdnaValueRegion(record.value)];
+                        flexGdnaAccumulateGroup(out.gdnaCells.back(), out.gdnaGeneCounts,
+                                                gene, gdnaGeneSlots, regionCounts);
                     }
                     if (gene > 0 && gene <= geneIds.size()) {
                         const uint32_t moleculeCount = static_cast<uint32_t>(group.size());
@@ -359,25 +363,13 @@ void SoloFeature::collapseUMIall_fromBuckets()
     uint32_t maxGeneIdx = 0;
     uint64_t totalInputRecords = 0;
     uint64_t totalInputCounts = 0;
+    uint64_t totalFinalMolecules = 0;
     size_t nTripletGroups = 0;
-    // Fan the 256 bucket results into the final vectors.
-    //
-    // This used to be one serial pass of `insert`/`push_back` onto vectors that
-    // started empty, so each grew by repeated reallocation: gdnaMoleculeKeys
-    // alone reaches 224.9 M entries (1.8 GB) and the triplets were appended one
-    // at a time. Measured at ~21 s, it was the largest single block in the Flex
-    // tail - larger than flexfilter, and three times the bucket sort that three
-    // separate optimisation attempts had been aimed at.
-    //
-    // Sizes are all known in advance, so: one cheap serial pass for the prefix
-    // offsets, the error check and the scalar metrics, then size each
-    // destination once and let the buckets write into disjoint ranges in
-    // parallel. Output order is unchanged - each bucket lands exactly where the
-    // serial append would have put it.
+    // Prefix offsets fix output order while workers fill disjoint final ranges.
     const auto fanInStart = std::chrono::steady_clock::now();
     std::vector<size_t> offCells(bucketCount + 1, 0);
     std::vector<size_t> offTriplets(bucketCount + 1, 0);
-    std::vector<size_t> offMolecules(bucketCount + 1, 0);
+    std::vector<size_t> offGdnaCounts(bucketCount + 1, 0);
     std::vector<size_t> offCbIndices(bucketCount + 1, 0);
     for (uint32_t bucket = 0; bucket < bucketCount; ++bucket) {
         BucketResult &part = results[bucket];
@@ -389,12 +381,13 @@ void SoloFeature::collapseUMIall_fromBuckets()
         }
         totalInputRecords += part.inputRecords;
         totalInputCounts += part.inputCounts;
+        totalFinalMolecules += part.finalMolecules;
         nTripletGroups += part.tripletGroups;
         maxGeneIdx = std::max(maxGeneIdx, part.maxGene);
 
         offCells[bucket + 1] = offCells[bucket] + part.barcodes.size();
         offTriplets[bucket + 1] = offTriplets[bucket] + part.triplets.size();
-        offMolecules[bucket + 1] = offMolecules[bucket] + part.moleculeKeys.size();
+        offGdnaCounts[bucket + 1] = offGdnaCounts[bucket] + part.gdnaGeneCounts.size();
         offCbIndices[bucket + 1] = offCbIndices[bucket] + part.cbIndices.size();
 
         umisBeforeTotal += part.metrics.umisBefore;
@@ -426,8 +419,9 @@ void SoloFeature::collapseUMIall_fromBuckets()
     inlineMatrix.cbTagKeys.resize(offCells[bucketCount]);
     inlineMatrix.matrixData.nUMIperCB.resize(offCells[bucketCount]);
     inlineMatrix.matrixData.nGenePerCB.resize(offCells[bucketCount]);
-    inlineMatrix.gdnaMoleculeKeys.resize(offMolecules[bucketCount]);
-    inlineMatrix.gdnaMoleculeRegions.resize(offMolecules[bucketCount]);
+    inlineMatrix.gdnaCountsReady = collectGdna;
+    if (collectGdna) inlineMatrix.gdnaCells.resize(offCells[bucketCount]);
+    inlineMatrix.gdnaGeneCounts.resize(offGdnaCounts[bucketCount]);
     indCB.resize(offCbIndices[bucketCount]);
 
 #pragma omp parallel for schedule(dynamic, 1) num_threads(tailThreads)
@@ -454,10 +448,15 @@ void SoloFeature::collapseUMIall_fromBuckets()
                 matrix.countCellGeneUMI[at++] = triplet.count;
             }
         }
-        std::copy(part.moleculeKeys.begin(), part.moleculeKeys.end(),
-                  inlineMatrix.gdnaMoleculeKeys.begin() + offMolecules[bucket]);
-        std::copy(part.moleculeRegions.begin(), part.moleculeRegions.end(),
-                  inlineMatrix.gdnaMoleculeRegions.begin() + offMolecules[bucket]);
+        if (collectGdna) {
+            for (size_t cell = 0; cell < part.gdnaCells.size(); ++cell) {
+                auto summary = part.gdnaCells[cell];
+                summary.begin += offGdnaCounts[bucket];
+                inlineMatrix.gdnaCells[cellBase + cell] = summary;
+            }
+            std::copy(part.gdnaGeneCounts.begin(), part.gdnaGeneCounts.end(),
+                      inlineMatrix.gdnaGeneCounts.begin() + offGdnaCounts[bucket]);
+        }
         std::copy(part.cbIndices.begin(), part.cbIndices.end(),
                   indCB.begin() + offCbIndices[bucket]);
         // Metrics were collected above; release each source as soon as its
@@ -503,7 +502,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
                      << " streamed_records=" << totalInputRecords
                      << " aggregated_counts=" << totalInputCounts
                      << " final_molecules="
-                     << inlineMatrix.gdnaMoleculeKeys.size()
+                     << totalFinalMolecules
                      << " buckets=" << bucketCount
                      << " tail_threads=" << tailThreads
                      << " async_merges="

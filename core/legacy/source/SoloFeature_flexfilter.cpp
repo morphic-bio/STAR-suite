@@ -119,21 +119,21 @@ struct GdnaMoleculeBucket {
 
 void addGdnaMolecule(GdnaMoleculeBucket& bucket,
                      uint16_t gene,
-    FlexGdnaRegion region) {
+    FlexGdnaRegion region, uint32_t count = 1) {
     if (gene == 0 || gene >= bucket.genes.size()) {
-        ++bucket.unassigned;
+        bucket.unassigned += count;
         return;
     }
     if (region == FlexGdnaSpliced) {
-        ++bucket.genes[gene].spliced;
-        ++bucket.classified;
+        bucket.genes[gene].spliced += count;
+        bucket.classified += count;
     } else if (region == FlexGdnaUnspliced) {
-        ++bucket.genes[gene].unspliced;
-        ++bucket.classified;
+        bucket.genes[gene].unspliced += count;
+        bucket.classified += count;
     } else if (region == FlexGdnaConflicting) {
-        ++bucket.conflicting;
+        bucket.conflicting += count;
     } else {
-        ++bucket.unknown;
+        bucket.unknown += count;
     }
 }
 
@@ -697,6 +697,31 @@ void SoloFeature::runFlexFilterInline(
                     flexGdnaValueRegion(kh_val(hash, iter));
                 addGdnaMolecule(buckets[static_cast<size_t>(sample)], gene, region);
                 addGdnaMolecule(libraryBucket, gene, region);
+            }
+        } else if (identityComplete && inlineMatrix.gdnaCountsReady
+                   && inlineMatrix.gdnaCells.size() == inlineMatrix.matrixData.nCells) {
+            for (size_t cell = 0; cell < inlineMatrix.gdnaCells.size(); ++cell) {
+                const auto& summary = inlineMatrix.gdnaCells[cell];
+                if (summary.begin > inlineMatrix.gdnaGeneCounts.size()
+                    || summary.entries > inlineMatrix.gdnaGeneCounts.size() - summary.begin) {
+                    identityComplete = false;
+                    break;
+                }
+                const int32_t sample = sampleByCell[cell];
+                if (sample < 0) continue;
+                auto& bucket = buckets[static_cast<size_t>(sample)];
+                bucket.unknown += summary.unknown;
+                bucket.conflicting += summary.conflicting;
+                bucket.unassigned += summary.unassigned;
+                libraryBucket.unknown += summary.unknown;
+                libraryBucket.conflicting += summary.conflicting;
+                libraryBucket.unassigned += summary.unassigned;
+                for (uint32_t entry = 0; entry < summary.entries; ++entry) {
+                    const auto& count = inlineMatrix.gdnaGeneCounts[summary.begin + entry];
+                    const auto region = static_cast<FlexGdnaRegion>(count.region);
+                    addGdnaMolecule(bucket, count.gene, region, count.count);
+                    addGdnaMolecule(libraryBucket, count.gene, region, count.count);
+                }
             }
         } else if (identityComplete
                    && inlineMatrix.gdnaMoleculeKeys.size()

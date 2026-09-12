@@ -60,6 +60,51 @@ void testPackedValue()
             "count saturation");
 }
 
+void testCompactMoleculeCounts()
+{
+    for (size_t slots : {size_t(0), size_t(8)}) {
+        std::vector<FlexGdnaCellSummary> cells(3);
+        std::vector<FlexGdnaGeneCount> classified;
+        std::vector<std::vector<uint64_t>> reference(3, std::vector<uint64_t>(slots * 2 + 3, 0));
+        for (size_t cell = 0; cell < cells.size(); ++cell) {
+            for (uint16_t gene = 0; gene < 10; ++gene) {
+                uint32_t counts[4];
+                for (uint32_t region = 0; region < 4; ++region) {
+                    counts[region] = (gene * 7 + region * 3 + cell) % 17;
+                    // Independent molecule-by-molecule reference, including
+                    // unavailable metadata and out-of-universe genes.
+                    for (uint32_t molecule = 0; molecule < counts[region]; ++molecule) {
+                        if (gene == 0 || gene >= slots) ++reference[cell][slots * 2 + 2];
+                        else if (region == FlexGdnaSpliced) ++reference[cell][gene * 2];
+                        else if (region == FlexGdnaUnspliced) ++reference[cell][gene * 2 + 1];
+                        else if (region == FlexGdnaUnknown) ++reference[cell][slots * 2];
+                        else ++reference[cell][slots * 2 + 1];
+                    }
+                }
+                flexGdnaAccumulateGroup(cells[cell], classified, gene, slots, counts);
+            }
+        }
+        for (size_t cell = 0; cell < cells.size(); ++cell) {
+            const auto& compact = cells[cell];
+            std::vector<uint64_t> observed(slots * 2 + 3, 0);
+            observed[slots * 2] = compact.unknown;
+            observed[slots * 2 + 1] = compact.conflicting;
+            observed[slots * 2 + 2] = compact.unassigned;
+            for (uint32_t i = 0; i < compact.entries; ++i) {
+                const auto& count = classified[compact.begin + i];
+                observed[count.gene * 2 + (count.region == FlexGdnaUnspliced)] += count.count;
+            }
+            require(observed == reference[cell], "compact gDNA totals equal the molecule ledger");
+        }
+        if (slots == 0) require(classified.empty(), "unavailable metadata needs no per-gene storage");
+    }
+    FlexGdnaCellSummary large;
+    std::vector<FlexGdnaGeneCount> classified;
+    const uint32_t counts[4] = {UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX};
+    flexGdnaAccumulateGroup(large, classified, 1, 0, counts);
+    require(large.unassigned == UINT64_C(4) * UINT32_MAX, "cell totals do not overflow 32 bits");
+}
+
 void writeFixture(const std::string& directory,
                   std::string& probeListPath,
                   std::string& probeCsvPath)
@@ -432,6 +477,7 @@ int main()
 {
     const std::string directory = makeTempDirectory();
     testPackedValue();
+    testCompactMoleculeCounts();
     testMetadataAndEstimator(directory);
     testCacheEncoding(directory);
     testOffsetZeroH0H1Routing(directory);

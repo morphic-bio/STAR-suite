@@ -23,6 +23,7 @@ using VelocytoUmiMap = PooledTranscriptMap<trTypeStruct>;
 
 #include "libscrna/SampleMatrixData.h"
 #include "MexWriter.h"
+#include "FlexGdna.h"
 
 // Forward declaration
 class ProbeListIndex;
@@ -153,6 +154,9 @@ public:
         // diagnostic when the global inline hash is absent.
         std::vector<uint64_t> gdnaMoleculeKeys;
         std::vector<uint8_t> gdnaMoleculeRegions;
+        bool gdnaCountsReady = false;
+        std::vector<FlexGdnaCellSummary> gdnaCells;
+        std::vector<FlexGdnaGeneCount> gdnaGeneCounts;
     };
 
     // Write MEX directly from inline-hash dedup data (no Solo, no replayer)
