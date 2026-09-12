@@ -1,6 +1,7 @@
 #ifndef H_FlexGdna
 #define H_FlexGdna
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -70,6 +71,44 @@ struct FlexGdnaGeneMoleculeCounts {
     uint64_t spliced = 0;
     uint64_t unspliced = 0;
 };
+
+// Only classified molecules need a gene coordinate after UMI correction.
+// Unknown, conflicting and unassigned totals are sufficient per cell.
+struct FlexGdnaGeneCount {
+    uint32_t count;
+    uint16_t gene;
+    uint8_t region;
+    uint8_t reserved;
+};
+static_assert(sizeof(FlexGdnaGeneCount) == 8, "Compact gDNA count layout");
+
+struct FlexGdnaCellSummary {
+    uint64_t unknown = 0;
+    uint64_t conflicting = 0;
+    uint64_t unassigned = 0;
+    uint64_t begin = 0;
+    uint32_t entries = 0;
+};
+
+inline void flexGdnaAccumulateGroup(FlexGdnaCellSummary& cell,
+                                   std::vector<FlexGdnaGeneCount>& classified,
+                                   uint16_t gene, std::size_t geneSlots,
+                                   const uint32_t regionCounts[4])
+{
+    if (gene == 0 || gene >= geneSlots) {
+        for (unsigned int region = 0; region < 4; ++region)
+            cell.unassigned += regionCounts[region];
+        return;
+    }
+    cell.unknown += regionCounts[FlexGdnaUnknown];
+    cell.conflicting += regionCounts[FlexGdnaConflicting];
+    for (uint8_t region : {uint8_t(FlexGdnaSpliced), uint8_t(FlexGdnaUnspliced)}) {
+        if (!regionCounts[region]) continue;
+        if (cell.entries == 0) cell.begin = classified.size();
+        classified.push_back({regionCounts[region], gene, region, 0});
+        ++cell.entries;
+    }
+}
 
 struct FlexGdnaEstimate {
     bool valid = false;
