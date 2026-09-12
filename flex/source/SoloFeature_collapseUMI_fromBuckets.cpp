@@ -412,11 +412,20 @@ void SoloFeature::collapseUMIall_fromBuckets()
             componentSizeHist[i] += part.metrics.componentHist[i];
     }
 
+    SampleMatrixData &matrix = inlineMatrix.matrixData;
+    matrix.countMatStride = 3;
+    const size_t matrixWords = offTriplets[bucketCount] * matrix.countMatStride;
+    if (matrixWords > UINT32_MAX) {
+        exitWithError("EXITING because the Flex sparse matrix exceeds its offset range\n",
+                      std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+    }
+    matrix.countCellGeneUMI.resize(matrixWords);
+    matrix.countCellGeneUMIindex.resize(offCells[bucketCount] + 1);
+    inlineMatrix.rawMexFromCsr = true;
     inlineMatrix.matrixData.barcodes.resize(offCells[bucketCount]);
     inlineMatrix.cbTagKeys.resize(offCells[bucketCount]);
     inlineMatrix.matrixData.nUMIperCB.resize(offCells[bucketCount]);
     inlineMatrix.matrixData.nGenePerCB.resize(offCells[bucketCount]);
-    inlineMatrix.triplets.resize(offTriplets[bucketCount]);
     inlineMatrix.gdnaMoleculeKeys.resize(offMolecules[bucketCount]);
     inlineMatrix.gdnaMoleculeRegions.resize(offMolecules[bucketCount]);
     indCB.resize(offCbIndices[bucketCount]);
@@ -433,10 +442,18 @@ void SoloFeature::collapseUMIall_fromBuckets()
                   inlineMatrix.matrixData.nUMIperCB.begin() + cellBase);
         std::copy(part.cellGenes.begin(), part.cellGenes.end(),
                   inlineMatrix.matrixData.nGenePerCB.begin() + cellBase);
-        size_t at = offTriplets[bucket];
-        for (MexWriter::Triplet triplet : part.triplets) {
-            triplet.cell_idx += static_cast<uint32_t>(cellBase);
-            inlineMatrix.triplets[at++] = triplet;
+        // Build the caller's storage directly in the final cell order. The
+        // raw MEX writer reads this same storage, so no final COO copy exists.
+        size_t at = offTriplets[bucket] * matrix.countMatStride;
+        size_t entry = 0;
+        for (size_t cell = 0; cell < part.barcodes.size(); ++cell) {
+            matrix.countCellGeneUMIindex[cellBase + cell] = static_cast<uint32_t>(at);
+            while (entry < part.triplets.size() && part.triplets[entry].cell_idx == cell) {
+                const auto& triplet = part.triplets[entry++];
+                matrix.countCellGeneUMI[at++] = triplet.gene_idx;
+                matrix.countCellGeneUMI[at++] = triplet.count;
+                matrix.countCellGeneUMI[at++] = 0;
+            }
         }
         std::copy(part.moleculeKeys.begin(), part.moleculeKeys.end(),
                   inlineMatrix.gdnaMoleculeKeys.begin() + offMolecules[bucket]);
@@ -444,7 +461,11 @@ void SoloFeature::collapseUMIall_fromBuckets()
                   inlineMatrix.gdnaMoleculeRegions.begin() + offMolecules[bucket]);
         std::copy(part.cbIndices.begin(), part.cbIndices.end(),
                   indCB.begin() + offCbIndices[bucket]);
+        // Metrics were collected above; release each source as soon as its
+        // disjoint output range is complete, before writer/caller allocation.
+        part = BucketResult{};
     }
+    matrix.countCellGeneUMIindex.back() = static_cast<uint32_t>(matrixWords);
     P.inOut->logMain << "Solo timing: bucket fan-in "
                      << std::chrono::duration<double>(
                             std::chrono::steady_clock::now() - fanInStart).count()
@@ -471,37 +492,10 @@ void SoloFeature::collapseUMIall_fromBuckets()
 
     const double tIndexWl = stepTick();
 
-    SampleMatrixData &matrix = inlineMatrix.matrixData;
     matrix.nCells = static_cast<uint32_t>(matrix.barcodes.size());
     matrix.nGenes = static_cast<uint32_t>(geneIds.size());
-    matrix.countMatStride = 3;
     matrix.features = std::move(geneIds);
-    matrix.countCellGeneUMIindex.assign(matrix.nCells + 1, 0);
-    // Exactly countMatStride entries per triplet, and the triplet count is
-    // already known: 98.9 M on the JAX set, so this vector reaches 296.7 M
-    // entries (1.19 GB). Growing into that by reallocation copied ~2.4 GB and
-    // ended with a fresh 1.2 GB region to fault in, which measured ~19 s and
-    // was the largest single block left in the Flex tail.
-    matrix.countCellGeneUMI.reserve(
-        inlineMatrix.triplets.size() * matrix.countMatStride);
-    const double tReserve = stepTick();
-    uint32_t matrixOffset = 0;
-    size_t tripletIndex = 0;
-    for (uint32_t cell = 0; cell < matrix.nCells; ++cell) {
-        matrix.countCellGeneUMIindex[cell] = matrixOffset;
-        while (tripletIndex < inlineMatrix.triplets.size()
-               && inlineMatrix.triplets[tripletIndex].cell_idx == cell) {
-            matrix.countCellGeneUMI.push_back(
-                inlineMatrix.triplets[tripletIndex].gene_idx);
-            matrix.countCellGeneUMI.push_back(
-                inlineMatrix.triplets[tripletIndex].count);
-            matrix.countCellGeneUMI.push_back(0);
-            matrixOffset += matrix.countMatStride;
-            ++tripletIndex;
-        }
-    }
-    matrix.countCellGeneUMIindex[matrix.nCells] = matrixOffset;
-    const double tTripletLoop = stepTick();
+    const double tMatrixSetup = stepTick();
 
     P.inOut->logMain << "[CB-BUCKET] backend="
                      << (pSolo.cbBucketStore->using_spill() ? "spill" : "ram")
@@ -522,7 +516,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
     P.inOut->logMain << "Found " << matrix.nCells
                      << " unique (CB, TAG) combinations" << endl;
     P.inOut->logMain << "  Genes: " << matrix.nGenes
-                     << ", Entries: " << inlineMatrix.triplets.size() << endl;
+                     << ", Entries: " << offTriplets[bucketCount] << endl;
 
     nReadPerCB.assign(nCB, 0);
     nReadPerCBunique.assign(nCB, 0);
@@ -540,8 +534,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
 
     const double tPerCbVectors = stepTick();
     P.inOut->logMain << "Solo timing: post-fan-in setup: indexWl " << tIndexWl
-                     << " s, reserve " << tReserve
-                     << " s, tripletLoop " << tTripletLoop
+                     << " s, matrixSetup " << tMatrixSetup
                      << " s, perCbVectors " << tPerCbVectors << " s"
                      << endl << std::flush;
 

@@ -144,6 +144,7 @@ public:
     
     struct InlineMatrixBundle {
         SampleMatrixData matrixData;
+        bool rawMexFromCsr = false;
         std::vector<MexWriter::Triplet> triplets;
         // Parallel to matrixData.barcodes. Encodes the original corrected
         // barcode index and Flex sample tag as (cbIdx << 8) | tag.

@@ -111,6 +111,17 @@ int writeMex(const std::string& outputPrefix,
              int cb_len,
              unsigned int matrix_threads);
 
+// Read the caller's cell-major sparse storage directly. Each entry begins
+// [gene index, count]; any remaining stride words are ignored. Offsets are
+// word offsets, including the final sentinel. Preserves cell/entry order.
+int writeMexCsr(const std::string& outputPrefix,
+                const std::vector<std::string>& barcodes,
+                const std::vector<std::string>& featureIds,
+                const std::vector<uint32_t>& words,
+                const std::vector<uint32_t>& cellOffsets,
+                uint32_t stride,
+                unsigned int matrixThreads);
+
 } // namespace MexWriter
 
 #endif
