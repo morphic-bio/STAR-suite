@@ -8,6 +8,8 @@
 #include <cstring>
 #include <deque>
 #include <memory>
+#include <algorithm>
+#include <stdexcept>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -75,6 +77,84 @@ struct PackedCbRecord {
                        PackedCbRecord *record);
 };
 
+// RAM-only run encoding. Compact words are
+// [local CB12][TAG5][GENE15][UMI24][REGION2][COUNT6]. Count 63 escapes to
+// a sorted, contiguous overflow vector; counts are never narrowed or capped.
+// Spill files and the legacy byte API keep their original 12-byte schema.
+struct EncodedCbRun {
+    struct OverflowCount { std::uint64_t record; std::uint32_t count; };
+    std::vector<std::uint8_t> bytes;
+    std::vector<OverflowCount> overflow;
+    std::uint32_t cbBase = 0;
+    bool compact = false;
+
+    std::size_t record_bytes() const { return compact ? 8 : PackedCbRecord::kSerializedBytes; }
+    std::size_t record_count() const { return bytes.size() / record_bytes(); }
+    static std::uint64_t word_at(const std::uint8_t* source) {
+        std::uint64_t word = 0;
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+        std::memcpy(&word, source, sizeof(word));
+#else
+        for (unsigned i = 0; i < 8; ++i) word |= std::uint64_t(source[i]) << (8 * i);
+#endif
+        return word;
+    }
+    static void put_word(std::uint8_t* target, std::uint64_t word) {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+        std::memcpy(target, &word, sizeof(word));
+#else
+        for (unsigned i = 0; i < 8; ++i) target[i] = word >> (8 * i);
+#endif
+    }
+    std::uint32_t overflow_count(std::size_t index) const {
+        const auto found = std::lower_bound(overflow.begin(), overflow.end(), index,
+            [](const OverflowCount& item, std::size_t at) { return item.record < at; });
+        if (found == overflow.end() || found->record != index)
+            throw std::runtime_error("Missing compact CB record count overflow");
+        return found->count;
+    }
+    std::uint64_t sort_key(std::size_t index) const {
+        if (compact) return (std::uint64_t(cbBase) << 44) + (word_at(bytes.data() + index * 8) >> 8);
+        return PackedCbRecord::from_encoded(bytes.data() + index * 12).group_sort_key();
+    }
+    PackedCbRecord record_at(std::size_t index) const {
+        if (!compact) return PackedCbRecord::from_encoded(bytes.data() + index * 12);
+        const std::uint64_t word = word_at(bytes.data() + index * 8);
+        const std::uint32_t count = (word & 63) == 63 ? overflow_count(index) : word & 63;
+        PackedCbRecord record;
+        record.key = (std::uint64_t(cbBase + (word >> 52)) << 44)
+                   | (((word >> 8) & 0xFFFFFFu) << 20)
+                   | (((word >> 32) & 0x7FFFu) << 5) | ((word >> 47) & 31);
+        record.value = count | (std::uint32_t((word >> 6) & 3) << 30);
+        return record;
+    }
+    // Called in increasing index order after bytes has been sized once.
+    void set_record(std::size_t index, const PackedCbRecord& record) {
+        if (!compact) { record.encode(bytes.data() + index * 12); return; }
+        const std::uint32_t cb = record.cb_index();
+        if (cb < cbBase || cb - cbBase >= 4096)
+            throw std::out_of_range("Compact CB record exceeds its bucket-relative range");
+        const std::uint32_t count = record.value & 0x3FFFFFFFu;
+        const std::uint64_t word = (std::uint64_t(cb - cbBase) << 52)
+            | (std::uint64_t(record.tag5()) << 47) | (std::uint64_t(record.gene15()) << 32)
+            | (std::uint64_t(record.umi24()) << 8) | (std::uint64_t(record.value >> 30) << 6)
+            | std::min<std::uint32_t>(count, 63);
+        put_word(bytes.data() + index * 8, word);
+        if (count >= 63) overflow.push_back({index, count});
+    }
+    std::vector<std::uint8_t> legacy_bytes() const {
+        if (!compact) return bytes;
+        std::vector<std::uint8_t> result(record_count() * PackedCbRecord::kSerializedBytes);
+        for (std::size_t i = 0; i < record_count(); ++i)
+            record_at(i).encode(result.data() + i * PackedCbRecord::kSerializedBytes);
+        return result;
+    }
+    void release() {
+        std::vector<std::uint8_t>().swap(bytes);
+        std::vector<OverflowCount>().swap(overflow);
+    }
+};
+
 class CbBucketStore {
   public:
     enum class Mode { Ram, Spill, Auto };
@@ -131,6 +211,10 @@ class CbBucketStore {
         std::uint32_t bucketIndex,
         std::vector<std::vector<std::uint8_t>> *segments,
         std::string *error);
+    // Production consumer: preserve compact RAM words and count overflows.
+    bool consume_compact_segments(std::uint32_t bucketIndex,
+                                 std::vector<EncodedCbRun>* segments,
+                                 std::string* error);
     bool load_bucket_bytes(std::uint32_t bucketIndex,
                            std::vector<std::uint8_t> *bytes,
                            std::string *error) const;
@@ -149,7 +233,7 @@ class CbBucketStore {
         std::uint64_t sequence = 0;
         std::uint32_t worker = 0;
         std::uint32_t level = 0;
-        std::vector<std::uint8_t> bytes;
+        EncodedCbRun records;
     };
     struct RamBucket {
         mutable std::mutex mutex;
@@ -172,7 +256,7 @@ class CbBucketStore {
     bool validate_config(std::string *error) const;
     bool ensure_spill_files(std::string *error);
     bool append_ram(std::uint32_t workerIndex, std::uint32_t bucketIndex,
-                    std::vector<std::uint8_t> bytes, std::string *error);
+                    EncodedCbRun records, std::string *error);
     bool append_spill(std::uint32_t bucketIndex,
                       const std::vector<std::uint8_t> &bytes,
                       std::string *error);
