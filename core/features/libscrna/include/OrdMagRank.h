@@ -17,13 +17,15 @@ struct OrdMagCellQuality {
 // Initialize seen to UINT32_MAX; cell tokens must be smaller than UINT32_MAX.
 inline OrdMagCellQuality ordMagCellQuality(const uint32* geneIds, const uint32* counts,
                                           std::size_t nEntries, vector<uint32>& seen,
-                                          uint32 cellToken, const uint8_t* mitochondrial = nullptr)
+                                          uint32 cellToken, const uint8_t* mitochondrial = nullptr,
+                                          std::size_t stride = 1)
 {
     OrdMagCellQuality quality;
     for (std::size_t i = 0; i < nEntries; ++i) {
-        const uint32 gene = geneIds[i];
-        if (counts[i] == 0 || gene >= seen.size() || (mitochondrial && mitochondrial[gene])) continue;
-        quality.nonMitoUMIs += counts[i];
+        const std::size_t pos = i * stride;
+        const uint32 gene = geneIds[pos];
+        if (counts[pos] == 0 || gene >= seen.size() || (mitochondrial && mitochondrial[gene])) continue;
+        quality.nonMitoUMIs += counts[pos];
         if (seen[gene] != cellToken) {
             seen[gene] = cellToken;
             ++quality.detectedGenes;

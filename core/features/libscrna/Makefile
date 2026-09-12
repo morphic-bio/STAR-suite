@@ -120,4 +120,4 @@ test: lib
 	@echo "Run: make -C ../../../tests/emptydrops test"
 	$(MAKE) -C ../../../tests/emptydrops test
 
-src/SimpleEDCaller.o: include/SimpleEDCaller.h include/OrdMagStage.h include/OrdMagRank.h include/AdaptiveAmbientWindow.h include/EmptyDropsMultinomial.h include/scrna_api.h
+src/SimpleEDCaller.o: include/SparseCountView.h include/SimpleEDCaller.h include/OrdMagStage.h include/OrdMagRank.h include/AdaptiveAmbientWindow.h include/EmptyDropsMultinomial.h include/scrna_api.h

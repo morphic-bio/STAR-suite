@@ -115,8 +115,47 @@ bool writeAllAt(int fd, const char* data, size_t length, uint64_t offset)
     return true;
 }
 
+// Sources expose a sequential cursor per output block. CSR needs one cell
+// lookup per block, then advances through cell boundaries without a per-entry
+// search or a materialized COO copy.
+struct TripletSource {
+    const std::vector<MexWriter::Triplet>& entries;
+    size_t size() const { return entries.size(); }
+    struct Cursor {
+        const MexWriter::Triplet* at;
+        MexWriter::Triplet next() { return *at++; }
+    };
+    Cursor cursor(size_t entry) const { return {entries.data() + entry}; }
+};
+
+struct CsrSource {
+    const std::vector<uint32_t>& words;
+    const std::vector<uint32_t>& offsets;
+    uint32_t stride;
+    size_t size() const { return words.size() / stride; }
+    struct Cursor {
+        const CsrSource& source;
+        size_t at;
+        size_t cell;
+        MexWriter::Triplet next() {
+            while (source.offsets[cell + 1] <= at) ++cell;
+            const MexWriter::Triplet entry = {
+                static_cast<uint32_t>(cell), source.words[at], source.words[at + 1]};
+            at += source.stride;
+            return entry;
+        }
+    };
+    Cursor cursor(size_t entry) const {
+        const size_t at = entry * stride;
+        const size_t cell = static_cast<size_t>(
+            std::upper_bound(offsets.begin(), offsets.end(), at) - offsets.begin() - 1);
+        return {*this, at, cell};
+    }
+};
+
+template <typename Source>
 int writeMatrix(const std::string& path,
-                const std::vector<MexWriter::Triplet>& triplets,
+                const Source& triplets,
                 size_t nBarcodes,
                 size_t nFeatures,
                 unsigned int matrixThreads)
@@ -139,7 +178,7 @@ int writeMatrix(const std::string& path,
     // Small chunks keep concurrent mmap residency bounded on very large
     // matrices while still amortizing the mmap/munmap calls.
     static const size_t kEntriesPerBlock = 1u << 18;
-    const size_t nBlocks = triplets.empty()
+    const size_t nBlocks = triplets.size() == 0
         ? 0u : 1u + (triplets.size() - 1u) / kEntriesPerBlock;
     std::vector<MatrixBlock> blocks(nBlocks);
     for (size_t block = 0; block < nBlocks; ++block) {
@@ -152,10 +191,12 @@ int writeMatrix(const std::string& path,
 
     parallelBlocks(nBlocks, matrixThreads, [&](size_t block) {
         uint64_t bytes = 0;
+        auto cursor = triplets.cursor(blocks[block].begin);
         for (size_t index = blocks[block].begin;
              index < blocks[block].end; ++index) {
-            if (validTriplet(triplets[index], nBarcodes, nFeatures))
-                bytes += tripletTextBytes(triplets[index]);
+            const auto triplet = cursor.next();
+            if (validTriplet(triplet, nBarcodes, nFeatures))
+                bytes += tripletTextBytes(triplet);
         }
         blocks[block].textBytes = bytes;
     });
@@ -219,8 +260,9 @@ int writeMatrix(const std::string& path,
 
         char* output = static_cast<char*>(mapping) + prefix;
         char* const expectedEnd = output + block.textBytes;
+        auto cursor = triplets.cursor(block.begin);
         for (size_t index = block.begin; index < block.end; ++index) {
-            const MexWriter::Triplet& triplet = triplets[index];
+            const auto triplet = cursor.next();
             if (!validTriplet(triplet, nBarcodes, nFeatures))
                 continue;
             output = appendUnsigned(output, triplet.gene_idx + 1u);
@@ -265,10 +307,11 @@ int writeMex(const std::string& outputPrefix,
     return writeMex(outputPrefix, barcodes, features, triplets, cb_len, 1u);
 }
 
-int writeMex(const std::string& outputPrefix,
+template <typename Source>
+int writeMexImpl(const std::string& outputPrefix,
              const std::vector<std::string>& barcodes,
              const std::vector<Feature>& features,
-             const std::vector<Triplet>& triplets,
+             const Source& triplets,
              int cb_len,
              unsigned int matrix_threads)
 {
@@ -362,6 +405,46 @@ int writeMex(const std::string& outputPrefix,
     const int barcodeClose = fclose(barcodes_fp);
     const int featureClose = fclose(features_fp);
     return barcodeClose == 0 && featureClose == 0 ? 0 : -1;
+}
+
+int writeMex(const std::string& outputPrefix,
+             const std::vector<std::string>& barcodes,
+             const std::vector<Feature>& features,
+             const std::vector<Triplet>& triplets,
+             int cb_len,
+             unsigned int matrix_threads)
+{
+    return writeMexImpl(outputPrefix, barcodes, features,
+                        TripletSource{triplets}, cb_len, matrix_threads);
+}
+
+int writeMexCsr(const std::string& outputPrefix,
+                const std::vector<std::string>& barcodes,
+                const std::vector<std::string>& featureIds,
+                const std::vector<uint32_t>& words,
+                const std::vector<uint32_t>& cellOffsets,
+                uint32_t stride,
+                unsigned int matrixThreads)
+{
+    if (stride < 2 || cellOffsets.size() != barcodes.size() + 1
+        || cellOffsets.front() != 0 || cellOffsets.back() != words.size()) {
+        std::fprintf(stderr, "[MexWriter] ERROR: invalid CSR dimensions/stride\n");
+        return -1;
+    }
+    uint32_t previous = 0;
+    for (uint32_t offset : cellOffsets) {
+        if (offset < previous || offset % stride != 0) {
+            std::fprintf(stderr, "[MexWriter] ERROR: invalid CSR cell offset\n");
+            return -1;
+        }
+        previous = offset;
+    }
+    std::vector<Feature> features;
+    features.reserve(featureIds.size());
+    for (const auto& id : featureIds)
+        features.emplace_back(id, id, "Gene Expression");
+    return writeMexImpl(outputPrefix, barcodes, features,
+                        CsrSource{words, cellOffsets, stride}, -1, matrixThreads);
 }
 
 int writeMex(const std::string& outputPrefix,

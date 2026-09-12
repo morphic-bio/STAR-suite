@@ -102,6 +102,19 @@ int main(int argc, char** argv) {
     // Vary group scheduling and MC workers while preserving bootstrap streams.
     const auto serial = result;
     for (uint32_t budget : {7u, 2u}) {
+        if (budget == 2) {
+            // Exercise a second physical layout against the same serial
+            // scientific result, including noncontiguous paired-tag rows.
+            std::vector<uint32_t> pairs;
+            pairs.reserve(m.countCellGeneUMI.size() / 3 * 2);
+            for (size_t i = 0; i < m.countCellGeneUMI.size(); i += 3) {
+                pairs.push_back(m.countCellGeneUMI[i]);
+                pairs.push_back(m.countCellGeneUMI[i + 1]);
+            }
+            for (auto& offset : m.countCellGeneUMIindex) offset = offset / 3 * 2;
+            m.countCellGeneUMI.swap(pairs);
+            m.countMatStride = 2;
+        }
         config.totalThreads = budget;
         config.useThreadPermits = true;
         config.debugOutputDir = root + "/parallel_" + std::to_string(budget);

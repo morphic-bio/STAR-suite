@@ -24,13 +24,16 @@ void SoloFeature::writeMexFromInlineHashDedup(
     }
 
     const auto mexStart = std::chrono::steady_clock::now();
-    int result = MexWriterUtil::writeMexFromDedup(
-        outputPrefix,
-        bundle.matrixData.barcodes,
-        bundle.matrixData.features,
-        bundle.triplets,
-        static_cast<unsigned int>(std::max(1, P.runThreadN))
-    );
+    const auto& matrix = bundle.matrixData;
+    const unsigned int threads = static_cast<unsigned int>(std::max(1, P.runThreadN));
+    const size_t entries = bundle.rawMexFromCsr
+        ? matrix.countCellGeneUMI.size() / matrix.countMatStride : bundle.triplets.size();
+    const int result = bundle.rawMexFromCsr
+        ? MexWriter::writeMexCsr(outputPrefix, matrix.barcodes, matrix.features,
+                                matrix.countCellGeneUMI, matrix.countCellGeneUMIindex,
+                                matrix.countMatStride, threads)
+        : MexWriterUtil::writeMexFromDedup(outputPrefix, matrix.barcodes,
+                                          matrix.features, bundle.triplets, threads);
     P.inOut->logMain << "Solo timing: raw MEX "
                      << std::chrono::duration<double>(
                             std::chrono::steady_clock::now() - mexStart).count()
@@ -49,7 +52,7 @@ void SoloFeature::writeMexFromInlineHashDedup(
         P.inOut->logMain << "  " << featuresPath << endl;
         P.inOut->logMain << "  Cells (CB+TAG combos): " << bundle.matrixData.nCells << endl;
         P.inOut->logMain << "  Features: " << bundle.matrixData.nGenes << endl;
-        P.inOut->logMain << "  Entries: " << bundle.triplets.size() << endl;
+        P.inOut->logMain << "  Entries: " << entries << endl;
     } else {
         P.inOut->logMain << "ERROR: Failed to write MEX format" << endl;
     }

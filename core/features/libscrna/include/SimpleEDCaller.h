@@ -3,6 +3,7 @@
 
 #include "scrna_api.h"
 #include "OrdMagStage.h"
+#include "SparseCountView.h"
 #include <vector>
 #include <string>
 
@@ -35,6 +36,18 @@ int runSimpleEDWithAmbient(const std::vector<std::string>& barcodes,
                            const std::vector<uint32_t>& sparse_counts,
                            const std::vector<uint32_t>& sparse_cell_index,
                            const std::vector<uint32_t>& n_genes_per_cell,
+                           uint32_t n_features,
+                           const scrna_ed_config* config,
+                           const SimpleEDOptions& options,
+                           const std::vector<uint8_t>& mitochondrial_features,
+                           scrna_ed_result* result,
+                           SimpleEDRunInfo* info = nullptr);
+
+// Borrow the sparse counts for the synchronous call; sample offsets may refer
+// to disjoint rows in a shared matrix. Statistics and row identities are unchanged.
+int runSimpleEDWithAmbientView(const std::vector<std::string>& barcodes,
+                           const std::vector<uint32_t>& umi_counts,
+                           const SparseCountView& matrix,
                            uint32_t n_features,
                            const scrna_ed_config* config,
                            const SimpleEDOptions& options,

@@ -41,10 +41,14 @@ struct BucketResult {
     std::vector<MexWriter::Triplet> triplets;
     std::vector<uint32_t> cellUmis;
     std::vector<uint32_t> cellGenes;
-    std::vector<uint64_t> moleculeKeys;
-    std::vector<uint8_t> moleculeRegions;
+    std::vector<FlexGdnaCellSummary> gdnaCells;
+    std::vector<FlexGdnaGeneCount> gdnaGeneCounts;
+    uint64_t finalMolecules = 0;
     BucketMetrics metrics;
     uint64_t inputRecords = 0;
+    uint64_t compactRecords = 0;
+    uint64_t countOverflowRecords = 0;
+    uint64_t encodedRecordBytes = 0;
     uint64_t inputCounts = 0;
     uint32_t maxGene = 0;
     size_t tripletGroups = 0;
@@ -160,6 +164,9 @@ void SoloFeature::collapseUMIall_fromBuckets()
                      << " s, geneIds+allowed " << tGeneIdsAndAllowed << " s"
                      << endl << std::flush;
 
+    const bool collectGdna = pSolo.runFlexFilter && pSolo.flexMode
+        && pSolo.flexGdnaMode != ParametersSolo::FlexGdnaOff;
+    const size_t gdnaGeneSlots = FlexGdnaProbeMetadata::instance().geneProbeCounts().size();
     const uint32_t bucketCount = pSolo.cbBucketStore->bucket_count();
     std::vector<BucketResult> results(bucketCount);
     pSolo.cbBucketStore->reset_bucket_claims();
@@ -171,7 +178,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
     // also covers the MEX write and flexfilter, so it is not a measure of this
     // loop; three optimisation attempts were aimed at the sort on the strength
     // of profile *sample* shares before anyone measured the phases directly.
-    double tLoad = 0, tMerge = 0, tCompact = 0, tUmi = 0, tMolecules = 0, tEmit = 0;
+    double tLoad = 0, tStream = 0, tUmi = 0;
     const auto parallelStart = std::chrono::steady_clock::now();
     auto tick = [](std::chrono::steady_clock::time_point &mark) {
         const auto now = std::chrono::steady_clock::now();
@@ -181,23 +188,26 @@ void SoloFeature::collapseUMIall_fromBuckets()
     };
 
 #pragma omp parallel num_threads(tailThreads) \
-    reduction(+:tLoad, tMerge, tCompact, tUmi, tMolecules, tEmit)
+    reduction(+:tLoad, tStream, tUmi)
     {
         uint32_t bucket = 0;
         while (pSolo.cbBucketStore->claim_bucket(&bucket)) {
             BucketResult &out = results[bucket];
-            std::vector<std::vector<star::solo::PackedCbRecord> > segments;
-            std::vector<star::solo::PackedCbRecord> records;
+            std::vector<star::solo::EncodedCbRun> segments;
             auto mark = std::chrono::steady_clock::now();
-            if (!pSolo.cbBucketStore->load_sorted_segments(
+            if (!pSolo.cbBucketStore->consume_compact_segments(
                     bucket, &segments, &out.error))
                 continue;
             tLoad += tick(mark);
             size_t totalRecords = 0;
-            for (const auto &segment : segments)
-                totalRecords += segment.size();
+            for (const auto &segment : segments) {
+                totalRecords += segment.record_count();
+                if (segment.compact) out.compactRecords += segment.record_count();
+                out.countOverflowRecords += segment.overflow.size();
+                out.encodedRecordBytes += segment.bytes.size()
+                    + segment.overflow.size() * sizeof(star::solo::EncodedCbRun::OverflowCount);
+            }
             out.inputRecords = totalRecords;
-            records.reserve(totalRecords);
 
             // append_segment sorted each producer-local run before publishing
             // it. Merge the runs here while other bucket threads do the same;
@@ -206,13 +216,15 @@ void SoloFeature::collapseUMIall_fromBuckets()
             const size_t sentinel = segments.size();
             std::vector<size_t> next(sentinel, 0);
             std::vector<uint64_t> currentKey(sentinel, 0);
+            std::vector<star::solo::PackedCbRecord> currentRecord(sentinel);
             size_t leafCount = 1;
             while (leafCount < std::max<size_t>(1, sentinel))
                 leafCount <<= 1;
             std::vector<size_t> tournament(leafCount * 2, sentinel);
             for (size_t segment = 0; segment < sentinel; ++segment) {
-                if (!segments[segment].empty()) {
-                    currentKey[segment] = segments[segment][0].group_sort_key();
+                if (segments[segment].record_count() != 0) {
+                    currentRecord[segment] = segments[segment].record_at(0);
+                    currentKey[segment] = currentRecord[segment].group_sort_key();
                     tournament[leafCount + segment] = segment;
                 }
             }
@@ -229,145 +241,87 @@ void SoloFeature::collapseUMIall_fromBuckets()
             for (size_t node = leafCount; node-- > 1;)
                 tournament[node] = winner(tournament[node * 2],
                                           tournament[node * 2 + 1]);
-            while (tournament[1] != sentinel) {
-                const size_t segment = tournament[1];
-                records.push_back(segments[segment][next[segment]]);
-                ++next[segment];
-                const size_t leaf = leafCount + segment;
-                if (next[segment] == segments[segment].size()) {
-                    tournament[leaf] = sentinel;
-                } else {
-                    currentKey[segment] =
-                        segments[segment][next[segment]].group_sort_key();
-                }
-                for (size_t node = leaf / 2; node > 0; node /= 2)
-                    tournament[node] = winner(tournament[node * 2],
-                                              tournament[node * 2 + 1]);
-            }
-            tMerge += tick(mark);
-            // Reproduce the old fused hash aggregation exactly, including
-            // saturated read counts and probe-region conflict propagation.
-            size_t compact = 0;
-            for (size_t i = 0; i < records.size();) {
-                star::solo::PackedCbRecord merged = records[i++];
-                while (i < records.size() && records[i].key == merged.key)
-                    merged.value = flexGdnaMergeValue(
-                        merged.value, records[i++].value);
-                out.inputCounts += flexGdnaValueCount(merged.value);
-                records[compact++] = merged;
-            }
-            records.resize(compact);
-            tCompact += tick(mark);
-
-            std::vector<star::solo::PackedCbRecord> molecules;
-            molecules.reserve(records.size());
-            // Same reasoning per bucket: one molecule per surviving record is
-            // the upper bound, and these reach ~880 K entries each.
-            out.moleculeKeys.reserve(records.size());
-            out.moleculeRegions.reserve(records.size());
+            // Each bucket worker still runs concurrently. Keep the complete
+            // current [CB, tag, gene] group for UMI correction, then emit its
+            // final counts immediately; no full merged/molecule arrays.
+            std::vector<star::solo::PackedCbRecord> group;
             std::vector<UMICount> counts;
-            for (size_t begin = 0; begin < records.size();) {
-                size_t end = begin + 1;
-                while (end < records.size()
-                       && sameGroup(records[begin], records[end]))
-                    ++end;
-
-                const uint32_t cb = records[begin].cb_index();
-                const uint8_t tag = records[begin].tag5();
-                const uint16_t gene = records[begin].gene15();
+            uint32_t previousCb = UINT32_MAX;
+            uint64_t previousCbTag = UINT64_MAX;
+            uint32_t cell = 0;
+            auto finishGroup = [&]() {
+                if (group.empty()) return;
+                const uint32_t cb = group.front().cb_index();
+                const uint8_t tag = group.front().tag5();
+                const uint16_t gene = group.front().gene15();
                 const bool correctGroup = pSolo.umiCorrectionMode > 0
                     && cb < cbAllowed.size() && cbAllowed[cb] != 0;
-                UMICorrectionResult correction;
+                uint64_t groupReads = 0;
+                for (const auto &record : group)
+                    groupReads += flexGdnaValueCount(record.value);
+                out.inputCounts += groupReads;
                 if (correctGroup) {
                     counts.clear();
-                    counts.reserve(end - begin);
-                    uint64_t groupReads = 0;
-                    for (size_t i = begin; i < end; ++i) {
-                        const uint32_t readCount =
-                            flexGdnaValueCount(records[i].value);
-                        counts.emplace_back(records[i].umi24(), readCount);
-                        groupReads += readCount;
-                    }
+                    counts.reserve(group.size());
+                    for (const auto &record : group)
+                        counts.emplace_back(record.umi24(),
+                                            flexGdnaValueCount(record.value));
                     auto umiMark = std::chrono::steady_clock::now();
-                    correction = UMICorrector::correctClique(
+                    const auto correction = UMICorrector::correctClique(
                         counts, correctionParams);
                     tUmi += tick(umiMark);
                     out.metrics.readsGrouped += groupReads;
                     out.metrics.readsBefore += groupReads;
                     out.metrics.readsAfter += groupReads;
                     addComponentMetrics(correction, &out.metrics);
-                }
-
-                const size_t moleculeBegin = molecules.size();
-                for (size_t i = begin; i < end; ++i) {
-                    star::solo::PackedCbRecord corrected = records[i];
-                    if (correctGroup) {
-                        const auto found =
-                            correction.urToUb.find(corrected.umi24());
+                    for (auto &record : group) {
+                        const auto found = correction.urToUb.find(record.umi24());
                         if (found != correction.urToUb.end())
-                            corrected.key = packCgAggKey(
-                                cb, found->second, gene, tag);
+                            record.key = packCgAggKey(cb, found->second, gene, tag);
                     }
-                    molecules.push_back(corrected);
                 }
-                std::sort(molecules.begin() + moleculeBegin, molecules.end(),
+                std::sort(group.begin(), group.end(),
                           [](const star::solo::PackedCbRecord &left,
                              const star::solo::PackedCbRecord &right) {
                               return left.key < right.key;
                           });
-                size_t write = moleculeBegin;
-                for (size_t i = moleculeBegin; i < molecules.size();) {
-                    star::solo::PackedCbRecord merged = molecules[i++];
-                    while (i < molecules.size()
-                           && molecules[i].key == merged.key)
-                        merged.value = flexGdnaMergeValue(
-                            merged.value, molecules[i++].value);
-                    molecules[write++] = merged;
+                size_t write = 0;
+                for (size_t i = 0; i < group.size();) {
+                    auto merged = group[i++];
+                    while (i < group.size() && group[i].key == merged.key)
+                        merged.value = flexGdnaMergeValue(merged.value,
+                                                          group[i++].value);
+                    group[write++] = merged;
                 }
-                molecules.resize(write);
-                begin = end;
-            }
-            tMolecules += tick(mark);
-
-            uint32_t previousCb = UINT32_MAX;
-            uint64_t previousCbTag = UINT64_MAX;
-            uint32_t cell = 0;
-            for (size_t begin = 0; begin < molecules.size();) {
-                size_t end = begin + 1;
-                while (end < molecules.size()
-                       && sameGroup(molecules[begin], molecules[end]))
-                    ++end;
-                const uint32_t cb = molecules[begin].cb_index();
-                const uint8_t tag = molecules[begin].tag5();
-                const uint16_t gene = molecules[begin].gene15();
-
+                group.resize(write);
                 if (cb != previousCb) {
                     out.cbIndices.push_back(cb);
                     previousCb = cb;
                 }
-                for (size_t i = begin; i < end; ++i) {
-                    out.moleculeKeys.push_back(molecules[i].key);
-                    out.moleculeRegions.push_back(static_cast<uint8_t>(
-                        flexGdnaValueRegion(molecules[i].value)));
-                }
-
+                out.finalMolecules += group.size();
                 if (tag != 0 && cb < pSolo.cbWLstr.size()
                     && tag < gCanonicalTags.size()
                     && !gCanonicalTags[tag].empty()) {
                     const uint64_t cbTag =
                         (static_cast<uint64_t>(cb) << 8) | tag;
                     if (cbTag != previousCbTag) {
-                        out.barcodes.push_back(
-                            pSolo.cbWLstr[cb] + gCanonicalTags[tag]);
+                        out.barcodes.push_back(pSolo.cbWLstr[cb] + gCanonicalTags[tag]);
                         out.cbTagKeys.push_back(cbTag);
                         out.cellUmis.push_back(0);
                         out.cellGenes.push_back(0);
+                        if (collectGdna) out.gdnaCells.emplace_back();
                         cell = static_cast<uint32_t>(out.barcodes.size() - 1);
                         previousCbTag = cbTag;
                     }
+                    if (collectGdna) {
+                        uint32_t regionCounts[4] = {0, 0, 0, 0};
+                        for (const auto& record : group)
+                            ++regionCounts[flexGdnaValueRegion(record.value)];
+                        flexGdnaAccumulateGroup(out.gdnaCells.back(), out.gdnaGeneCounts,
+                                                gene, gdnaGeneSlots, regionCounts);
+                    }
                     if (gene > 0 && gene <= geneIds.size()) {
-                        const uint32_t moleculeCount =
-                            static_cast<uint32_t>(end - begin);
+                        const uint32_t moleculeCount = static_cast<uint32_t>(group.size());
                         out.triplets.push_back(
                             {cell, static_cast<uint32_t>(gene - 1), moleculeCount});
                         out.cellUmis.back() += moleculeCount;
@@ -376,45 +330,57 @@ void SoloFeature::collapseUMIall_fromBuckets()
                     }
                     ++out.tripletGroups;
                 }
-                begin = end;
+                group.clear();
+            };
+            while (tournament[1] != sentinel) {
+                const size_t segment = tournament[1];
+                const auto record = currentRecord[segment];
+                if (!group.empty() && !sameGroup(group.front(), record))
+                    finishGroup();
+                // Equal packed keys are adjacent in the global merge. Fold
+                // them with exactly the same saturated-count/region operator.
+                if (!group.empty() && group.back().key == record.key)
+                    group.back().value = flexGdnaMergeValue(group.back().value,
+                                                           record.value);
+                else
+                    group.push_back(record);
+                ++next[segment];
+                const size_t leaf = leafCount + segment;
+                if (next[segment] == segments[segment].record_count()) {
+                    tournament[leaf] = sentinel;
+                    segments[segment].release();
+                } else {
+                    currentRecord[segment] = segments[segment].record_at(next[segment]);
+                    currentKey[segment] = currentRecord[segment].group_sort_key();
+                }
+                for (size_t node = leaf / 2; node > 0; node /= 2)
+                    tournament[node] = winner(tournament[node * 2],
+                                              tournament[node * 2 + 1]);
             }
-            tEmit += tick(mark);
+            finishGroup();
+            tStream += tick(mark);
         }
     }
     P.inOut->logMain << "Solo timing: bucket loop wall "
                      << std::chrono::duration<double>(
                             std::chrono::steady_clock::now() - parallelStart).count()
                      << " s; thread-seconds load " << tLoad
-                     << ", kway_merge " << tMerge
-                     << ", compact " << tCompact
-                     << ", umi_correct " << tUmi
-                     << ", molecules " << tMolecules
-                     << ", emit " << tEmit << endl << std::flush;
+                     << ", stream_merge_correct_emit " << tStream
+                     << ", umi_correct_subset " << tUmi << endl << std::flush;
 
     InlineMatrixBundle inlineMatrix;
     indCB.clear();
     uint32_t maxGeneIdx = 0;
     uint64_t totalInputRecords = 0;
+    uint64_t totalCompactRecords = 0, totalCountOverflowRecords = 0, totalEncodedRecordBytes = 0;
     uint64_t totalInputCounts = 0;
+    uint64_t totalFinalMolecules = 0;
     size_t nTripletGroups = 0;
-    // Fan the 256 bucket results into the final vectors.
-    //
-    // This used to be one serial pass of `insert`/`push_back` onto vectors that
-    // started empty, so each grew by repeated reallocation: gdnaMoleculeKeys
-    // alone reaches 224.9 M entries (1.8 GB) and the triplets were appended one
-    // at a time. Measured at ~21 s, it was the largest single block in the Flex
-    // tail - larger than flexfilter, and three times the bucket sort that three
-    // separate optimisation attempts had been aimed at.
-    //
-    // Sizes are all known in advance, so: one cheap serial pass for the prefix
-    // offsets, the error check and the scalar metrics, then size each
-    // destination once and let the buckets write into disjoint ranges in
-    // parallel. Output order is unchanged - each bucket lands exactly where the
-    // serial append would have put it.
+    // Prefix offsets fix output order while workers fill disjoint final ranges.
     const auto fanInStart = std::chrono::steady_clock::now();
     std::vector<size_t> offCells(bucketCount + 1, 0);
     std::vector<size_t> offTriplets(bucketCount + 1, 0);
-    std::vector<size_t> offMolecules(bucketCount + 1, 0);
+    std::vector<size_t> offGdnaCounts(bucketCount + 1, 0);
     std::vector<size_t> offCbIndices(bucketCount + 1, 0);
     for (uint32_t bucket = 0; bucket < bucketCount; ++bucket) {
         BucketResult &part = results[bucket];
@@ -425,13 +391,17 @@ void SoloFeature::collapseUMIall_fromBuckets()
                           EXIT_CODE_INCONSISTENT_DATA, P);
         }
         totalInputRecords += part.inputRecords;
+        totalCompactRecords += part.compactRecords;
+        totalCountOverflowRecords += part.countOverflowRecords;
+        totalEncodedRecordBytes += part.encodedRecordBytes;
         totalInputCounts += part.inputCounts;
+        totalFinalMolecules += part.finalMolecules;
         nTripletGroups += part.tripletGroups;
         maxGeneIdx = std::max(maxGeneIdx, part.maxGene);
 
         offCells[bucket + 1] = offCells[bucket] + part.barcodes.size();
         offTriplets[bucket + 1] = offTriplets[bucket] + part.triplets.size();
-        offMolecules[bucket + 1] = offMolecules[bucket] + part.moleculeKeys.size();
+        offGdnaCounts[bucket + 1] = offGdnaCounts[bucket] + part.gdnaGeneCounts.size();
         offCbIndices[bucket + 1] = offCbIndices[bucket] + part.cbIndices.size();
 
         umisBeforeTotal += part.metrics.umisBefore;
@@ -449,13 +419,23 @@ void SoloFeature::collapseUMIall_fromBuckets()
             componentSizeHist[i] += part.metrics.componentHist[i];
     }
 
+    SampleMatrixData &matrix = inlineMatrix.matrixData;
+    matrix.countMatStride = 2;
+    const size_t matrixWords = offTriplets[bucketCount] * matrix.countMatStride;
+    if (matrixWords > UINT32_MAX) {
+        exitWithError("EXITING because the Flex sparse matrix exceeds its offset range\n",
+                      std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+    }
+    matrix.countCellGeneUMI.resize(matrixWords);
+    matrix.countCellGeneUMIindex.resize(offCells[bucketCount] + 1);
+    inlineMatrix.rawMexFromCsr = true;
     inlineMatrix.matrixData.barcodes.resize(offCells[bucketCount]);
     inlineMatrix.cbTagKeys.resize(offCells[bucketCount]);
     inlineMatrix.matrixData.nUMIperCB.resize(offCells[bucketCount]);
     inlineMatrix.matrixData.nGenePerCB.resize(offCells[bucketCount]);
-    inlineMatrix.triplets.resize(offTriplets[bucketCount]);
-    inlineMatrix.gdnaMoleculeKeys.resize(offMolecules[bucketCount]);
-    inlineMatrix.gdnaMoleculeRegions.resize(offMolecules[bucketCount]);
+    inlineMatrix.gdnaCountsReady = collectGdna;
+    if (collectGdna) inlineMatrix.gdnaCells.resize(offCells[bucketCount]);
+    inlineMatrix.gdnaGeneCounts.resize(offGdnaCounts[bucketCount]);
     indCB.resize(offCbIndices[bucketCount]);
 
 #pragma omp parallel for schedule(dynamic, 1) num_threads(tailThreads)
@@ -470,18 +450,34 @@ void SoloFeature::collapseUMIall_fromBuckets()
                   inlineMatrix.matrixData.nUMIperCB.begin() + cellBase);
         std::copy(part.cellGenes.begin(), part.cellGenes.end(),
                   inlineMatrix.matrixData.nGenePerCB.begin() + cellBase);
-        size_t at = offTriplets[bucket];
-        for (MexWriter::Triplet triplet : part.triplets) {
-            triplet.cell_idx += static_cast<uint32_t>(cellBase);
-            inlineMatrix.triplets[at++] = triplet;
+        // Build the caller's storage directly in the final cell order. The
+        // raw MEX writer reads this same storage, so no final COO copy exists.
+        size_t at = offTriplets[bucket] * matrix.countMatStride;
+        size_t entry = 0;
+        for (size_t cell = 0; cell < part.barcodes.size(); ++cell) {
+            matrix.countCellGeneUMIindex[cellBase + cell] = static_cast<uint32_t>(at);
+            while (entry < part.triplets.size() && part.triplets[entry].cell_idx == cell) {
+                const auto& triplet = part.triplets[entry++];
+                matrix.countCellGeneUMI[at++] = triplet.gene_idx;
+                matrix.countCellGeneUMI[at++] = triplet.count;
+            }
         }
-        std::copy(part.moleculeKeys.begin(), part.moleculeKeys.end(),
-                  inlineMatrix.gdnaMoleculeKeys.begin() + offMolecules[bucket]);
-        std::copy(part.moleculeRegions.begin(), part.moleculeRegions.end(),
-                  inlineMatrix.gdnaMoleculeRegions.begin() + offMolecules[bucket]);
+        if (collectGdna) {
+            for (size_t cell = 0; cell < part.gdnaCells.size(); ++cell) {
+                auto summary = part.gdnaCells[cell];
+                summary.begin += offGdnaCounts[bucket];
+                inlineMatrix.gdnaCells[cellBase + cell] = summary;
+            }
+            std::copy(part.gdnaGeneCounts.begin(), part.gdnaGeneCounts.end(),
+                      inlineMatrix.gdnaGeneCounts.begin() + offGdnaCounts[bucket]);
+        }
         std::copy(part.cbIndices.begin(), part.cbIndices.end(),
                   indCB.begin() + offCbIndices[bucket]);
+        // Metrics were collected above; release each source as soon as its
+        // disjoint output range is complete, before writer/caller allocation.
+        part = BucketResult{};
     }
+    matrix.countCellGeneUMIindex.back() = static_cast<uint32_t>(matrixWords);
     P.inOut->logMain << "Solo timing: bucket fan-in "
                      << std::chrono::duration<double>(
                             std::chrono::steady_clock::now() - fanInStart).count()
@@ -508,46 +504,22 @@ void SoloFeature::collapseUMIall_fromBuckets()
 
     const double tIndexWl = stepTick();
 
-    SampleMatrixData &matrix = inlineMatrix.matrixData;
     matrix.nCells = static_cast<uint32_t>(matrix.barcodes.size());
     matrix.nGenes = static_cast<uint32_t>(geneIds.size());
-    matrix.countMatStride = 3;
     matrix.features = std::move(geneIds);
-    matrix.countCellGeneUMIindex.assign(matrix.nCells + 1, 0);
-    // Exactly countMatStride entries per triplet, and the triplet count is
-    // already known: 98.9 M on the JAX set, so this vector reaches 296.7 M
-    // entries (1.19 GB). Growing into that by reallocation copied ~2.4 GB and
-    // ended with a fresh 1.2 GB region to fault in, which measured ~19 s and
-    // was the largest single block left in the Flex tail.
-    matrix.countCellGeneUMI.reserve(
-        inlineMatrix.triplets.size() * matrix.countMatStride);
-    const double tReserve = stepTick();
-    uint32_t matrixOffset = 0;
-    size_t tripletIndex = 0;
-    for (uint32_t cell = 0; cell < matrix.nCells; ++cell) {
-        matrix.countCellGeneUMIindex[cell] = matrixOffset;
-        while (tripletIndex < inlineMatrix.triplets.size()
-               && inlineMatrix.triplets[tripletIndex].cell_idx == cell) {
-            matrix.countCellGeneUMI.push_back(
-                inlineMatrix.triplets[tripletIndex].gene_idx);
-            matrix.countCellGeneUMI.push_back(
-                inlineMatrix.triplets[tripletIndex].count);
-            matrix.countCellGeneUMI.push_back(0);
-            matrixOffset += matrix.countMatStride;
-            ++tripletIndex;
-        }
-    }
-    matrix.countCellGeneUMIindex[matrix.nCells] = matrixOffset;
-    const double tTripletLoop = stepTick();
+    const double tMatrixSetup = stepTick();
 
     P.inOut->logMain << "[CB-BUCKET] backend="
                      << (pSolo.cbBucketStore->using_spill() ? "spill" : "ram")
                      << " transitioned="
                      << (pSolo.cbBucketStore->transitioned_to_spill() ? "yes" : "no")
                      << " streamed_records=" << totalInputRecords
+                     << " compact_records=" << totalCompactRecords
+                     << " count_overflow_records=" << totalCountOverflowRecords
+                     << " encoded_record_bytes=" << totalEncodedRecordBytes
                      << " aggregated_counts=" << totalInputCounts
                      << " final_molecules="
-                     << inlineMatrix.gdnaMoleculeKeys.size()
+                     << totalFinalMolecules
                      << " buckets=" << bucketCount
                      << " tail_threads=" << tailThreads
                      << " async_merges="
@@ -559,7 +531,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
     P.inOut->logMain << "Found " << matrix.nCells
                      << " unique (CB, TAG) combinations" << endl;
     P.inOut->logMain << "  Genes: " << matrix.nGenes
-                     << ", Entries: " << inlineMatrix.triplets.size() << endl;
+                     << ", Entries: " << offTriplets[bucketCount] << endl;
 
     nReadPerCB.assign(nCB, 0);
     nReadPerCBunique.assign(nCB, 0);
@@ -577,8 +549,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
 
     const double tPerCbVectors = stepTick();
     P.inOut->logMain << "Solo timing: post-fan-in setup: indexWl " << tIndexWl
-                     << " s, reserve " << tReserve
-                     << " s, tripletLoop " << tTripletLoop
+                     << " s, matrixSetup " << tMatrixSetup
                      << " s, perCbVectors " << tPerCbVectors << " s"
                      << endl << std::flush;
 
