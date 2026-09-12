@@ -102,6 +102,12 @@ class CbBucketStore {
         std::uint32_t bucketIndex,
         std::vector<std::vector<PackedCbRecord> > *segments,
         std::string *error) const;
+    // Single-consumer tail API: transfer finalized RAM runs out of the store
+    // and release each encoded run after decoding. Spill reads stay reusable.
+    bool consume_sorted_segments(
+        std::uint32_t bucketIndex,
+        std::vector<std::vector<PackedCbRecord> > *segments,
+        std::string *error);
     bool load_bucket_bytes(std::uint32_t bucketIndex,
                            std::vector<std::uint8_t> *bytes,
                            std::string *error) const;
@@ -125,6 +131,7 @@ class CbBucketStore {
     struct RamBucket {
         mutable std::mutex mutex;
         std::vector<RamSegment> segments;
+        bool consumed = false;
     };
     struct SpillSegment {
         SpillSegment(std::uint64_t offsetIn, std::uint64_t bytesIn)

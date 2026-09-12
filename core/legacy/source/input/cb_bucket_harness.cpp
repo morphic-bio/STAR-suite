@@ -305,6 +305,32 @@ void test_store(const Options &options)
                 || originalRecords[index].value != asyncRecords[index].value)
                 throw std::runtime_error("asynchronous CB bucket merge changed records");
         }
+        // Exercise destructive reads after reusable reads, including empty
+        // buckets and asynchronously merged runs. Every key/value must survive.
+        for (auto *store : {&ram, &spill, &asyncRam}) {
+            std::vector<std::vector<star::solo::PackedCbRecord> > consumed;
+            if (!store->consume_sorted_segments(bucket, &consumed, &error))
+                throw std::runtime_error(error);
+            std::vector<star::solo::PackedCbRecord> flattened;
+            for (const auto &run : consumed)
+                flattened.insert(flattened.end(), run.begin(), run.end());
+            std::sort(flattened.begin(), flattened.end(), order);
+            if (flattened.size() != originalRecords.size())
+                throw std::runtime_error("consuming CB bucket lost records");
+            for (std::size_t index = 0; index < flattened.size(); ++index) {
+                if (flattened[index].key != originalRecords[index].key
+                    || flattened[index].value != originalRecords[index].value)
+                    throw std::runtime_error("consuming CB bucket changed records");
+            }
+            if (store != &spill) {
+                if (store->consume_sorted_segments(bucket, &consumed, &error)
+                    || store->load_sorted_segments(bucket, &consumed, &error)
+                    || store->load_bucket_bytes(bucket, &ramBytes, &error))
+                    throw std::runtime_error("consumed RAM bucket remained readable");
+            } else if (!store->load_sorted_segments(bucket, &consumed, &error)) {
+                throw std::runtime_error("consuming spill bucket changed reusable read contract");
+            }
+        }
     }
     if (asyncRam.async_merge_count() == 0
         || asyncRam.async_merged_records() == 0)
