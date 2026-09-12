@@ -190,15 +190,15 @@ void SoloFeature::collapseUMIall_fromBuckets()
         uint32_t bucket = 0;
         while (pSolo.cbBucketStore->claim_bucket(&bucket)) {
             BucketResult &out = results[bucket];
-            std::vector<std::vector<star::solo::PackedCbRecord> > segments;
+            std::vector<std::vector<uint8_t>> segments;
             auto mark = std::chrono::steady_clock::now();
-            if (!pSolo.cbBucketStore->consume_sorted_segments(
+            if (!pSolo.cbBucketStore->consume_encoded_segments(
                     bucket, &segments, &out.error))
                 continue;
             tLoad += tick(mark);
             size_t totalRecords = 0;
             for (const auto &segment : segments)
-                totalRecords += segment.size();
+                totalRecords += segment.size() / star::solo::PackedCbRecord::kSerializedBytes;
             out.inputRecords = totalRecords;
 
             // append_segment sorted each producer-local run before publishing
@@ -208,13 +208,15 @@ void SoloFeature::collapseUMIall_fromBuckets()
             const size_t sentinel = segments.size();
             std::vector<size_t> next(sentinel, 0);
             std::vector<uint64_t> currentKey(sentinel, 0);
+            std::vector<star::solo::PackedCbRecord> currentRecord(sentinel);
             size_t leafCount = 1;
             while (leafCount < std::max<size_t>(1, sentinel))
                 leafCount <<= 1;
             std::vector<size_t> tournament(leafCount * 2, sentinel);
             for (size_t segment = 0; segment < sentinel; ++segment) {
                 if (!segments[segment].empty()) {
-                    currentKey[segment] = segments[segment][0].group_sort_key();
+                    currentRecord[segment] = star::solo::PackedCbRecord::from_encoded(segments[segment].data());
+                    currentKey[segment] = currentRecord[segment].group_sort_key();
                     tournament[leafCount + segment] = segment;
                 }
             }
@@ -324,7 +326,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
             };
             while (tournament[1] != sentinel) {
                 const size_t segment = tournament[1];
-                const auto record = segments[segment][next[segment]];
+                const auto record = currentRecord[segment];
                 if (!group.empty() && !sameGroup(group.front(), record))
                     finishGroup();
                 // Equal packed keys are adjacent in the global merge. Fold
@@ -334,14 +336,15 @@ void SoloFeature::collapseUMIall_fromBuckets()
                                                            record.value);
                 else
                     group.push_back(record);
-                ++next[segment];
+                next[segment] += star::solo::PackedCbRecord::kSerializedBytes;
                 const size_t leaf = leafCount + segment;
                 if (next[segment] == segments[segment].size()) {
                     tournament[leaf] = sentinel;
-                    std::vector<star::solo::PackedCbRecord>().swap(segments[segment]);
+                    std::vector<uint8_t>().swap(segments[segment]);
                 } else {
-                    currentKey[segment] =
-                        segments[segment][next[segment]].group_sort_key();
+                    currentRecord[segment] = star::solo::PackedCbRecord::from_encoded(
+                        segments[segment].data() + next[segment]);
+                    currentKey[segment] = currentRecord[segment].group_sort_key();
                 }
                 for (size_t node = leaf / 2; node > 0; node /= 2)
                     tournament[node] = winner(tournament[node * 2],

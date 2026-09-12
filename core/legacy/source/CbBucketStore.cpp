@@ -889,8 +889,33 @@ bool CbBucketStore::consume_sorted_segments(
     std::vector<std::vector<PackedCbRecord> > *segments,
     std::string *error)
 {
+    if (segments == nullptr)
+        return set_error(error, "null CB bucket segment consume output");
+    // Keep the existing reusable spill path, including its allocation pattern.
+    if (using_spill()) return load_sorted_segments(bucketIndex, segments, error);
+    std::vector<std::vector<std::uint8_t>> encoded;
+    if (!consume_encoded_segments(bucketIndex, &encoded, error)) return false;
+    segments->clear();
+    segments->resize(encoded.size());
+    for (std::size_t index = 0; index < encoded.size(); ++index) {
+        auto& run = (*segments)[index];
+        auto& bytes = encoded[index];
+        run.resize(bytes.size() / PackedCbRecord::kSerializedBytes);
+        for (std::size_t record = 0; record < run.size(); ++record)
+            run[record] = PackedCbRecord::from_encoded(
+                bytes.data() + record * PackedCbRecord::kSerializedBytes);
+        std::vector<std::uint8_t>().swap(bytes);
+    }
+    return true;
+}
+
+bool CbBucketStore::consume_encoded_segments(
+    std::uint32_t bucketIndex,
+    std::vector<std::vector<std::uint8_t>> *segments,
+    std::string *error)
+{
     if (segments == nullptr || bucketIndex >= config_.bucketCount)
-        return set_error(error, "invalid CB bucket segment consume request");
+        return set_error(error, "invalid CB bucket encoded consume request");
     Backend backend;
     {
         std::lock_guard<std::mutex> lock(stateMutex_);
@@ -898,40 +923,55 @@ bool CbBucketStore::consume_sorted_segments(
             return set_error(error, "CB bucket store must be finalized before consuming");
         backend = backend_;
     }
-    if (backend != Backend::Ram)
-        return load_sorted_segments(bucketIndex, segments, error);
+    segments->clear();
+    if (backend == Backend::Ram) {
+        std::vector<RamSegment> encoded;
+        {
+            std::lock_guard<std::mutex> lock(ramBuckets_[bucketIndex].mutex);
+            auto& bucket = ramBuckets_[bucketIndex];
+            if (bucket.consumed)
+                return set_error(error, "CB RAM bucket has already been consumed");
+            encoded.swap(bucket.segments);
+            bucket.consumed = true;
+        }
+        std::sort(encoded.begin(), encoded.end(),
+                  [](const RamSegment& left, const RamSegment& right) {
+                      return left.sequence < right.sequence;
+                  });
+        segments->resize(encoded.size());
+        for (std::size_t index = 0; index < encoded.size(); ++index) {
+            if (encoded[index].bytes.size() % PackedCbRecord::kSerializedBytes != 0)
+                return set_error(error, "CB bucket segment is not record-aligned");
+            (*segments)[index].swap(encoded[index].bytes);
+        }
+        return true;
+    }
 
-    std::vector<RamSegment> encoded;
+    std::vector<std::uint8_t> payload;
+    if (!load_bucket_bytes(bucketIndex, &payload, error)) return false;
+    std::vector<SpillSegment> encoded;
     {
-        std::lock_guard<std::mutex> lock(ramBuckets_[bucketIndex].mutex);
-        auto &bucket = ramBuckets_[bucketIndex];
-        if (bucket.consumed)
-            return set_error(error, "CB RAM bucket has already been consumed");
-        encoded.swap(bucket.segments);
-        bucket.consumed = true;
+        std::lock_guard<std::mutex> lock(spillClaimMutexes_[bucketIndex]);
+        encoded = spillSegments_[bucketIndex];
     }
     std::sort(encoded.begin(), encoded.end(),
-              [](const RamSegment &left, const RamSegment &right) {
-                  return left.sequence < right.sequence;
+              [](const SpillSegment& left, const SpillSegment& right) {
+                  return left.offset < right.offset;
               });
-    segments->clear();
+    std::uint64_t expectedOffset = 0;
     segments->resize(encoded.size());
     for (std::size_t index = 0; index < encoded.size(); ++index) {
-        auto &bytes = encoded[index].bytes;
-        auto &run = (*segments)[index];
-        if (bytes.size() % PackedCbRecord::kSerializedBytes != 0)
-            return set_error(error, "CB bucket segment is not record-aligned");
-        run.resize(bytes.size() / PackedCbRecord::kSerializedBytes);
-        for (std::size_t record = 0; record < run.size(); ++record) {
-            if (!PackedCbRecord::decode(
-                    bytes.data() + record * PackedCbRecord::kSerializedBytes,
-                    &run[record]))
-                return set_error(error, "cannot decode CB bucket segment record");
-        }
-        // This buffer is no longer needed by any reader. Do not keep encoded
-        // and decoded copies alive until the complete bucket finishes.
-        std::vector<std::uint8_t>().swap(bytes);
+        const auto& segment = encoded[index];
+        if (segment.offset != expectedOffset || expectedOffset > payload.size()
+            || segment.bytes > payload.size() - expectedOffset
+            || segment.bytes % PackedCbRecord::kSerializedBytes != 0)
+            return set_error(error, "CB bucket spill segment metadata is inconsistent");
+        (*segments)[index].assign(payload.begin() + segment.offset,
+                                 payload.begin() + segment.offset + segment.bytes);
+        expectedOffset += segment.bytes;
     }
+    if (expectedOffset != payload.size())
+        return set_error(error, "CB bucket spill segment metadata is incomplete");
     return true;
 }
 
