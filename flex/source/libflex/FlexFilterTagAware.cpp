@@ -81,15 +81,14 @@ int FlexFilter::runTagAware(const SampleMatrixData& matrix,
             if (sampleTags.size() > std::numeric_limits<uint32_t>::max() / 90000u)
                 throw std::runtime_error("Too many tags for caller rank limits");
             const uint32_t nTags = static_cast<uint32_t>(sampleTags.size());
-            std::vector<std::string> barcodes;
-            std::vector<uint32_t> umi, genes, counts, starts, nGenes;
+            auto& output = outputs->tagResults[group];
+            auto& barcodes = output.tagBarcodes;
+            std::vector<uint32_t> umi, starts, nGenes;
             for (uint32_t cell = 0; cell < matrix.nCells; ++cell) {
                 if (!matrix.nUMIperCB[cell] || !barcodeHasAnyFlexTag(matrix.barcodes[cell], sampleTags)) continue;
-                if (counts.size() > std::numeric_limits<uint32_t>::max())
-                    throw std::runtime_error("Sparse group matrix exceeds 32-bit index range");
                 barcodes.push_back(matrix.barcodes[cell]);
                 umi.push_back(matrix.nUMIperCB[cell]);
-                starts.push_back(static_cast<uint32_t>(counts.size()));
+                starts.push_back(matrix.countCellGeneUMIindex[cell]);
                 nGenes.push_back(matrix.nGenePerCB[cell]);
                 uint64_t summed = 0;
                 for (uint32_t j = 0; j < matrix.nGenePerCB[cell]; ++j) {
@@ -97,18 +96,14 @@ int FlexFilter::runTagAware(const SampleMatrixData& matrix,
                         + static_cast<size_t>(j) * matrix.countMatStride;
                     if (pos + 1 >= matrix.countCellGeneUMI.size() || matrix.countCellGeneUMI[pos] >= matrix.nGenes)
                         throw std::runtime_error("Invalid sparse coordinate in group matrix");
-                    genes.push_back(matrix.countCellGeneUMI[pos]);
-                    counts.push_back(matrix.countCellGeneUMI[pos + 1]);
                     summed += matrix.countCellGeneUMI[pos + 1];
                 }
                 if (config.enableInvariantChecks && summed != umi.back())
                     throw std::runtime_error("Sparse counts do not match total UMIs for " + barcodes.back());
             }
-            auto& output = outputs->tagResults[group];
             output.sampleLabel = label;
             output.tag = sampleTags.front();
             output.expectedCells = 0;
-            output.tagBarcodes = barcodes;
             output.retainBarcodes = barcodes; // ED cell indices refer to this group matrix.
             if (barcodes.empty()) {
                 return;
@@ -141,8 +136,17 @@ int FlexFilter::runTagAware(const SampleMatrixData& matrix,
             SimpleEDRunInfo info;
             const auto callStarted = std::chrono::steady_clock::now();
             timings[group].prepare = std::chrono::duration<double>(callStarted - groupStarted).count();
+            SparseCountView view;
+            view.genes = matrix.countCellGeneUMI.data();
+            view.counts = matrix.countCellGeneUMI.data() + 1;
+            view.geneWords = matrix.countCellGeneUMI.size();
+            view.countWords = matrix.countCellGeneUMI.size() - 1;
+            view.stride = matrix.countMatStride;
+            view.offsets = starts.data();
+            view.entries = nGenes.data();
+            view.cells = barcodes.size();
             try {
-                const int rc = runSimpleEDWithAmbient(barcodes, umi, genes, counts, starts, nGenes,
+                const int rc = runSimpleEDWithAmbientView(barcodes, umi, view,
                     matrix.nGenes, ed.get(), options, mt, &result, &info);
                 if (rc) throw std::runtime_error(result.error_message ? result.error_message : "Shared caller failed");
                 output.expectedCells = info.bootstrap.recoveredCells;

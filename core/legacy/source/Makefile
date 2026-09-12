@@ -530,8 +530,8 @@ test_FlexProbeHalfIndex: FlexProbeHalfIndex.o
 
 .PHONY: test_FlexGdna
 test_FlexGdna: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
-test_FlexGdna: FlexGdna.o FlexHashScreen.o
-	$(CXX) $(CXXFLAGS) -I./ -I$(FLEX_SRC_DIR) ../test/test_flex_gdna.cpp FlexGdna.o FlexHashScreen.o -o ../test/test_flex_gdna
+test_FlexGdna: FlexGdna.o FlexHashScreen.o FlexHashCacheStorage.o FlexProbePairKhash.o FlexProbeHalfIndex.o
+	$(CXX) $(CXXFLAGS) -I./ -I$(FLEX_SRC_DIR) ../test/test_flex_gdna.cpp $^ -o ../test/test_flex_gdna
 	../test/test_flex_gdna
 
 .PHONY: test_FlexDecisionSidecar
