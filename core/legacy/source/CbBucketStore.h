@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -54,6 +55,21 @@ struct PackedCbRecord {
     std::uint32_t count30() const;
     std::uint8_t flags2() const;
 
+    // The enclosing run has already been checked for 12-byte alignment.
+    // memcpy permits unaligned source addresses on every target architecture.
+    static PackedCbRecord from_encoded(const std::uint8_t *input) {
+        PackedCbRecord record;
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+        std::memcpy(&record.key, input, sizeof(record.key));
+        std::memcpy(&record.value, input + 8, sizeof(record.value));
+#else
+        for (unsigned byte = 0; byte < 8; ++byte)
+            record.key |= static_cast<std::uint64_t>(input[byte]) << (byte * 8);
+        for (unsigned byte = 0; byte < 4; ++byte)
+            record.value |= static_cast<std::uint32_t>(input[8 + byte]) << (byte * 8);
+#endif
+        return record;
+    }
     void encode(std::uint8_t output[kSerializedBytes]) const;
     static bool decode(const std::uint8_t input[kSerializedBytes],
                        PackedCbRecord *record);
@@ -107,6 +123,13 @@ class CbBucketStore {
     bool consume_sorted_segments(
         std::uint32_t bucketIndex,
         std::vector<std::vector<PackedCbRecord> > *segments,
+        std::string *error);
+    // Transfer the existing packed RAM storage without a decoded copy. Each
+    // returned run contains a whole number of sorted 12-byte records. Spill
+    // files are validated by the same checksummed reader and stay reusable.
+    bool consume_encoded_segments(
+        std::uint32_t bucketIndex,
+        std::vector<std::vector<std::uint8_t>> *segments,
         std::string *error);
     bool load_bucket_bytes(std::uint32_t bucketIndex,
                            std::vector<std::uint8_t> *bytes,
