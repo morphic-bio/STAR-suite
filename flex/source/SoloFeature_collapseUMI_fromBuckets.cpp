@@ -413,7 +413,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
     }
 
     SampleMatrixData &matrix = inlineMatrix.matrixData;
-    matrix.countMatStride = 3;
+    matrix.countMatStride = 2;
     const size_t matrixWords = offTriplets[bucketCount] * matrix.countMatStride;
     if (matrixWords > UINT32_MAX) {
         exitWithError("EXITING because the Flex sparse matrix exceeds its offset range\n",
@@ -452,7 +452,6 @@ void SoloFeature::collapseUMIall_fromBuckets()
                 const auto& triplet = part.triplets[entry++];
                 matrix.countCellGeneUMI[at++] = triplet.gene_idx;
                 matrix.countCellGeneUMI[at++] = triplet.count;
-                matrix.countCellGeneUMI[at++] = 0;
             }
         }
         std::copy(part.moleculeKeys.begin(), part.moleculeKeys.end(),
