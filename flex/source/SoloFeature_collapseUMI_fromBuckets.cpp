@@ -171,7 +171,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
     // also covers the MEX write and flexfilter, so it is not a measure of this
     // loop; three optimisation attempts were aimed at the sort on the strength
     // of profile *sample* shares before anyone measured the phases directly.
-    double tLoad = 0, tMerge = 0, tCompact = 0, tUmi = 0, tMolecules = 0, tEmit = 0;
+    double tLoad = 0, tStream = 0, tUmi = 0;
     const auto parallelStart = std::chrono::steady_clock::now();
     auto tick = [](std::chrono::steady_clock::time_point &mark) {
         const auto now = std::chrono::steady_clock::now();
@@ -181,13 +181,12 @@ void SoloFeature::collapseUMIall_fromBuckets()
     };
 
 #pragma omp parallel num_threads(tailThreads) \
-    reduction(+:tLoad, tMerge, tCompact, tUmi, tMolecules, tEmit)
+    reduction(+:tLoad, tStream, tUmi)
     {
         uint32_t bucket = 0;
         while (pSolo.cbBucketStore->claim_bucket(&bucket)) {
             BucketResult &out = results[bucket];
             std::vector<std::vector<star::solo::PackedCbRecord> > segments;
-            std::vector<star::solo::PackedCbRecord> records;
             auto mark = std::chrono::steady_clock::now();
             if (!pSolo.cbBucketStore->consume_sorted_segments(
                     bucket, &segments, &out.error))
@@ -197,7 +196,10 @@ void SoloFeature::collapseUMIall_fromBuckets()
             for (const auto &segment : segments)
                 totalRecords += segment.size();
             out.inputRecords = totalRecords;
-            records.reserve(totalRecords);
+            // Reserve address space only; append touches final molecules. This
+            // upper bound avoids reallocating the output during streaming.
+            out.moleculeKeys.reserve(totalRecords);
+            out.moleculeRegions.reserve(totalRecords);
 
             // append_segment sorted each producer-local run before publishing
             // it. Merge the runs here while other bucket threads do the same;
@@ -229,139 +231,75 @@ void SoloFeature::collapseUMIall_fromBuckets()
             for (size_t node = leafCount; node-- > 1;)
                 tournament[node] = winner(tournament[node * 2],
                                           tournament[node * 2 + 1]);
-            while (tournament[1] != sentinel) {
-                const size_t segment = tournament[1];
-                records.push_back(segments[segment][next[segment]]);
-                ++next[segment];
-                const size_t leaf = leafCount + segment;
-                if (next[segment] == segments[segment].size()) {
-                    tournament[leaf] = sentinel;
-                } else {
-                    currentKey[segment] =
-                        segments[segment][next[segment]].group_sort_key();
-                }
-                for (size_t node = leaf / 2; node > 0; node /= 2)
-                    tournament[node] = winner(tournament[node * 2],
-                                              tournament[node * 2 + 1]);
-            }
-            // The merged records now own all values. Release decoded input
-            // runs before UMI correction allocates its molecule buffer.
-            std::vector<std::vector<star::solo::PackedCbRecord> >().swap(segments);
-            tMerge += tick(mark);
-            // Reproduce the old fused hash aggregation exactly, including
-            // saturated read counts and probe-region conflict propagation.
-            size_t compact = 0;
-            for (size_t i = 0; i < records.size();) {
-                star::solo::PackedCbRecord merged = records[i++];
-                while (i < records.size() && records[i].key == merged.key)
-                    merged.value = flexGdnaMergeValue(
-                        merged.value, records[i++].value);
-                out.inputCounts += flexGdnaValueCount(merged.value);
-                records[compact++] = merged;
-            }
-            records.resize(compact);
-            tCompact += tick(mark);
-
-            std::vector<star::solo::PackedCbRecord> molecules;
-            molecules.reserve(records.size());
-            // Same reasoning per bucket: one molecule per surviving record is
-            // the upper bound, and these reach ~880 K entries each.
-            out.moleculeKeys.reserve(records.size());
-            out.moleculeRegions.reserve(records.size());
+            // Each bucket worker still runs concurrently. Keep the complete
+            // current [CB, tag, gene] group for UMI correction, then emit its
+            // final counts immediately; no full merged/molecule arrays.
+            std::vector<star::solo::PackedCbRecord> group;
             std::vector<UMICount> counts;
-            for (size_t begin = 0; begin < records.size();) {
-                size_t end = begin + 1;
-                while (end < records.size()
-                       && sameGroup(records[begin], records[end]))
-                    ++end;
-
-                const uint32_t cb = records[begin].cb_index();
-                const uint8_t tag = records[begin].tag5();
-                const uint16_t gene = records[begin].gene15();
+            uint32_t previousCb = UINT32_MAX;
+            uint64_t previousCbTag = UINT64_MAX;
+            uint32_t cell = 0;
+            auto finishGroup = [&]() {
+                if (group.empty()) return;
+                const uint32_t cb = group.front().cb_index();
+                const uint8_t tag = group.front().tag5();
+                const uint16_t gene = group.front().gene15();
                 const bool correctGroup = pSolo.umiCorrectionMode > 0
                     && cb < cbAllowed.size() && cbAllowed[cb] != 0;
-                UMICorrectionResult correction;
+                uint64_t groupReads = 0;
+                for (const auto &record : group)
+                    groupReads += flexGdnaValueCount(record.value);
+                out.inputCounts += groupReads;
                 if (correctGroup) {
                     counts.clear();
-                    counts.reserve(end - begin);
-                    uint64_t groupReads = 0;
-                    for (size_t i = begin; i < end; ++i) {
-                        const uint32_t readCount =
-                            flexGdnaValueCount(records[i].value);
-                        counts.emplace_back(records[i].umi24(), readCount);
-                        groupReads += readCount;
-                    }
+                    counts.reserve(group.size());
+                    for (const auto &record : group)
+                        counts.emplace_back(record.umi24(),
+                                            flexGdnaValueCount(record.value));
                     auto umiMark = std::chrono::steady_clock::now();
-                    correction = UMICorrector::correctClique(
+                    const auto correction = UMICorrector::correctClique(
                         counts, correctionParams);
                     tUmi += tick(umiMark);
                     out.metrics.readsGrouped += groupReads;
                     out.metrics.readsBefore += groupReads;
                     out.metrics.readsAfter += groupReads;
                     addComponentMetrics(correction, &out.metrics);
-                }
-
-                const size_t moleculeBegin = molecules.size();
-                for (size_t i = begin; i < end; ++i) {
-                    star::solo::PackedCbRecord corrected = records[i];
-                    if (correctGroup) {
-                        const auto found =
-                            correction.urToUb.find(corrected.umi24());
+                    for (auto &record : group) {
+                        const auto found = correction.urToUb.find(record.umi24());
                         if (found != correction.urToUb.end())
-                            corrected.key = packCgAggKey(
-                                cb, found->second, gene, tag);
+                            record.key = packCgAggKey(cb, found->second, gene, tag);
                     }
-                    molecules.push_back(corrected);
                 }
-                std::sort(molecules.begin() + moleculeBegin, molecules.end(),
+                std::sort(group.begin(), group.end(),
                           [](const star::solo::PackedCbRecord &left,
                              const star::solo::PackedCbRecord &right) {
                               return left.key < right.key;
                           });
-                size_t write = moleculeBegin;
-                for (size_t i = moleculeBegin; i < molecules.size();) {
-                    star::solo::PackedCbRecord merged = molecules[i++];
-                    while (i < molecules.size()
-                           && molecules[i].key == merged.key)
-                        merged.value = flexGdnaMergeValue(
-                            merged.value, molecules[i++].value);
-                    molecules[write++] = merged;
+                size_t write = 0;
+                for (size_t i = 0; i < group.size();) {
+                    auto merged = group[i++];
+                    while (i < group.size() && group[i].key == merged.key)
+                        merged.value = flexGdnaMergeValue(merged.value,
+                                                          group[i++].value);
+                    group[write++] = merged;
                 }
-                molecules.resize(write);
-                begin = end;
-            }
-            tMolecules += tick(mark);
-
-            uint32_t previousCb = UINT32_MAX;
-            uint64_t previousCbTag = UINT64_MAX;
-            uint32_t cell = 0;
-            for (size_t begin = 0; begin < molecules.size();) {
-                size_t end = begin + 1;
-                while (end < molecules.size()
-                       && sameGroup(molecules[begin], molecules[end]))
-                    ++end;
-                const uint32_t cb = molecules[begin].cb_index();
-                const uint8_t tag = molecules[begin].tag5();
-                const uint16_t gene = molecules[begin].gene15();
-
+                group.resize(write);
                 if (cb != previousCb) {
                     out.cbIndices.push_back(cb);
                     previousCb = cb;
                 }
-                for (size_t i = begin; i < end; ++i) {
-                    out.moleculeKeys.push_back(molecules[i].key);
+                for (const auto &record : group) {
+                    out.moleculeKeys.push_back(record.key);
                     out.moleculeRegions.push_back(static_cast<uint8_t>(
-                        flexGdnaValueRegion(molecules[i].value)));
+                        flexGdnaValueRegion(record.value)));
                 }
-
                 if (tag != 0 && cb < pSolo.cbWLstr.size()
                     && tag < gCanonicalTags.size()
                     && !gCanonicalTags[tag].empty()) {
                     const uint64_t cbTag =
                         (static_cast<uint64_t>(cb) << 8) | tag;
                     if (cbTag != previousCbTag) {
-                        out.barcodes.push_back(
-                            pSolo.cbWLstr[cb] + gCanonicalTags[tag]);
+                        out.barcodes.push_back(pSolo.cbWLstr[cb] + gCanonicalTags[tag]);
                         out.cbTagKeys.push_back(cbTag);
                         out.cellUmis.push_back(0);
                         out.cellGenes.push_back(0);
@@ -369,8 +307,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
                         previousCbTag = cbTag;
                     }
                     if (gene > 0 && gene <= geneIds.size()) {
-                        const uint32_t moleculeCount =
-                            static_cast<uint32_t>(end - begin);
+                        const uint32_t moleculeCount = static_cast<uint32_t>(group.size());
                         out.triplets.push_back(
                             {cell, static_cast<uint32_t>(gene - 1), moleculeCount});
                         out.cellUmis.back() += moleculeCount;
@@ -379,20 +316,43 @@ void SoloFeature::collapseUMIall_fromBuckets()
                     }
                     ++out.tripletGroups;
                 }
-                begin = end;
+                group.clear();
+            };
+            while (tournament[1] != sentinel) {
+                const size_t segment = tournament[1];
+                const auto record = segments[segment][next[segment]];
+                if (!group.empty() && !sameGroup(group.front(), record))
+                    finishGroup();
+                // Equal packed keys are adjacent in the global merge. Fold
+                // them with exactly the same saturated-count/region operator.
+                if (!group.empty() && group.back().key == record.key)
+                    group.back().value = flexGdnaMergeValue(group.back().value,
+                                                           record.value);
+                else
+                    group.push_back(record);
+                ++next[segment];
+                const size_t leaf = leafCount + segment;
+                if (next[segment] == segments[segment].size()) {
+                    tournament[leaf] = sentinel;
+                    std::vector<star::solo::PackedCbRecord>().swap(segments[segment]);
+                } else {
+                    currentKey[segment] =
+                        segments[segment][next[segment]].group_sort_key();
+                }
+                for (size_t node = leaf / 2; node > 0; node /= 2)
+                    tournament[node] = winner(tournament[node * 2],
+                                              tournament[node * 2 + 1]);
             }
-            tEmit += tick(mark);
+            finishGroup();
+            tStream += tick(mark);
         }
     }
     P.inOut->logMain << "Solo timing: bucket loop wall "
                      << std::chrono::duration<double>(
                             std::chrono::steady_clock::now() - parallelStart).count()
                      << " s; thread-seconds load " << tLoad
-                     << ", kway_merge " << tMerge
-                     << ", compact " << tCompact
-                     << ", umi_correct " << tUmi
-                     << ", molecules " << tMolecules
-                     << ", emit " << tEmit << endl << std::flush;
+                     << ", stream_merge_correct_emit " << tStream
+                     << ", umi_correct_subset " << tUmi << endl << std::flush;
 
     InlineMatrixBundle inlineMatrix;
     indCB.clear();
