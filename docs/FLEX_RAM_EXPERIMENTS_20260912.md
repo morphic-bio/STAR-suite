@@ -6,6 +6,25 @@ Cloud host: `i-037683d7964956c63`, m6id.12xlarge, 48 threads, RAM-only buckets.
 This branch contains experimental storage changes; full-scale acceptance is
 recorded per candidate rather than implied by a successful build.
 
+## Accepted result
+
+R11 (`7938428`) passes full 320K in both native input formats, with the
+ordinary allocator and no spill. CBQ: **463.982 s,
+80.836 GB (75.285 GiB)** peak RSS.
+BGZF: **723.715 s, 79.889 GB
+(74.403 GiB)**. Both are below the strict 120 decimal GB
+target. Each matches all 95 selected scientific files and read-classification
+totals; all 333,439 final cells are identical. This is an experimental
+v1.9.3-based build, not a newly published release.
+
+The new record encoding measured 6,876,635,217 compact records, **zero count
+overflows**, and 55,013,081,736 payload bytes in each format. The six-bit field
+stores 0–62 directly; 63 refers to the exact original 30-bit count in a
+contiguous exception vector. Ordinary records do not search that vector.
+
+Full evidence: `/mnt/pikachu/star_suite_paper/HANDOFF_FLEX_RAM_320K_20260912.md`.
+The stage notes below retain the development history.
+
 ## R1 — consume finalized buckets
 
 The production tail consumes a RAM bucket once, transferring its encoded
@@ -31,6 +50,112 @@ Validation before the cloud runs:
   regression. Real L004 and full-320K tag-aware comparisons are the acceptance
   tests, using the production argv rather than changing caller semantics.
 
-Cloud comparison is pending: one unchanged and one R1 L004 execution, followed
-by one unchanged and one R1 full-CBQ execution, with semantic digests and whole
-process timing/RSS. No performance claim is made before those finish.
+Cloud results: L004 control 170.705475 s / 74.996693 GiB; R1 170.956358 s /
+55.038666 GiB. Full CBQ control 514.052770 s / 176.137932 GiB; R1 508.289225 s /
+129.182873 GiB. Each scope matched all 95 selected scientific output digests and
+read classifications exactly; full calls remain 333,439. These are single runs.
+
+## Cumulative candidates
+
+- R2 (`e90df9a`): stream the tournament merge through one complete barcode/tag/gene
+  group per parallel bucket worker. Keep the established UMI correction and
+  region/count merge rules; eliminate full merged and molecule-record arrays.
+- R3 (`1c57992`): form the caller matrix directly at fan-in, release bucket output
+  vectors promptly, and write raw MEX from that matrix. No final COO copy. The
+  writer tests cover empty cells, cells crossing output blocks, two strides,
+  malformed offsets and serial/parallel byte parity; ASan/UBSan passed.
+- R4 (`d5462f3`): store gene/count pairs instead of gene/count/zero. This remains
+  a separate binary from R3 so its effect can be isolated.
+- R5 (`892d2e0`): use the existing SparseCountView in the shared caller, removing
+  per-sample gene/count copies and the subsequent interleaved copy. Preserve the
+  original vector API as a wrapper. The grouped fixture passed on both strides,
+  with serial/parallel exact probabilities and decisions; the standalone caller
+  matched the in-process candidate ledgers exactly.
+- R6 (`ddecba1`): retain per-cell unknown/conflicting/unassigned totals and sparse
+  classified gene counts instead of every corrected molecule key/region. The
+  diagnostic runs after occupancy on the same final cells. No diagnostic data is
+  allocated when the diagnostic/caller is disabled. Tests compare sufficient
+  statistics against an independent molecule-by-molecule reference, including
+  missing metadata and wide totals, and retain existing gDNA/cache tests.
+  The old test target lacked current cache dependencies; corrected linking
+  passed, and commit `8205066` fixes that test target.
+- R7 (`b7928ba`): borrow stable barcode strings in khash and remove one redundant
+  caller barcode copy. ASan/UBSan index checks cover content lookup, duplicate
+  updates, concurrent reads and ownership; the grouped caller fixture passes.
+- R8 (`edbf038`): consume the existing 12-byte encoded runs directly without materializing
+  16-byte decoded records. Cache one decoded head per merge run and release
+  packed runs on exhaustion. The existing decoded API and checksummed spill
+  reads remain available. Packed storage/ownership tests pass under ASan/UBSan
+  for RAM, asynchronous RAM and spill, including the encoded-consume path.
+
+All source and binaries are frozen independently under the experiment artifact
+root before cloud submission. R2 retains its queued L004/full checks. The user
+subsequently authorized smaller prototypes: R3 onward first use the deterministic
+100-million-pair L004 prefix, retaining 48-thread native CBQ and the same caller
+settings. Final cumulative acceptance still requires L004 and full CBQ/BGZF.
+
+Queued shell controllers were changed to background orchestration after five
+long-lived SSM commands occupied the command-worker slots. The R3/R4 wait-only
+commands were cancelled before either benchmark started; no STAR process or
+completed execution was cancelled or repeated.
+
+The read-limit prototype attempt exposed a separate existing fused-input defect:
+its own CBQ planner ignores `--readMapNumber` even when the general planner logs
+the requested limit. The wrapper rejected that full-L004 run as a prototype.
+Use the physical prefix instead: 99,996,705 pairs in 27,180 complete blocks,
+4,005,231,759 bytes, SHA256
+`fb5e16f6508c36dd31a9dbf42c5cd8f484934037783fc2bc3754a8a748d2858f`.
+This file copies compressed blocks unchanged and rebuilds the CBQ index. The
+physical control ran in 25.977230 s; R2 in 25.724329 s, with all 95 scientific
+digests/read classifications equal. Final target: under 120 decimal GB peak
+(111.76 GiB), with RAM-only full 320K and unchanged results.
+
+The final cumulative L004 result passed: 148.653057 s / 31.595810 GiB versus
+170.705475 s / 74.996693 GiB, exact across all 95 scientific digests and read
+classifications. R8 full acceptance is recorded below; R11 is the final accepted build.
+
+Remaining opportunity observed during review: the core inline adapter still
+copies the entire matrix into `FlexFilter::MemoryInputs` before dispatch. R5
+removes per-sample count copies, not this outer API copy. This is a separate
+follow-up and has not been included in the frozen eight-stage candidate.
+
+R8 full CBQ: 471.635239 s / 113.577457 GiB (121.952866 decimal GB), exact
+scientific/read parity and 333,439 calls. This meets a 120 GiB interpretation
+but narrowly misses the experiment's stricter 120 decimal GB target. R8 BGZF
+was not launched after that gate failed. R9 tests the same R8 binary with
+`MALLOC_MMAP_THRESHOLD_=131072`, with the allocator setting recorded in the
+environment manifest. The hypothesis concerns resident freed merge buffers;
+this is a runtime control, not an additional statistical or source change.
+
+## R11 — eight-byte RAM records and count overflow
+
+The user selected explicit overflow handling for unusual counts. Commit
+`7938428` stores a bucket-relative CB index with UMI/gene/tag/region and
+a six-bit count in one 64-bit word; count 63 escapes to an exact wide value
+in a sorted per-run overflow vector. The usual count-one record never looks
+up that vector. Background merges remap exception positions; legacy readers
+and spill transitions reconstruct the existing 12-byte schema. Wider CB
+buckets retain the old representation. Auto-spill logical budgeting is
+conservatively unchanged.
+
+Clean build and ASan/UBSan tests pass at bit-field/count boundaries, through
+background merges and RAM/spill/auto transitions. Both legacy consume APIs
+are also checked with the existing harness. Real-data promotion follows R10
+without concurrent cloud benchmark/archive work. Binary SHA256:
+`3ab1b443e79bf8636ccffef2d59dda3a591a30ac11ed96627d80803feaa3f24c`.
+Detailed design: `docs/FLEX_BUCKET_RECORD8_20260912.md`.
+
+## Full-scale measurements
+
+| Run | Wall seconds | Peak GB | Peak GiB |
+| --- | ---: | ---: | ---: |
+| baseline_full_cbq | 514.053 | 189.127 | 176.138 |
+| r1_full_cbq | 508.289 | 138.709 | 129.183 |
+| r2_full_cbq | 511.395 | 137.314 | 127.884 |
+| r8_full_cbq | 471.635 | 121.953 | 113.577 |
+| r10_full_cbq | 491.987 | 104.205 | 97.049 |
+| r10_full_bgzf | 792.468 | 96.519 | 89.890 |
+| r11_full_cbq | 463.982 | 80.836 | 75.285 |
+| r11_full_bgzf | 723.715 | 79.889 | 74.403 |
+
+All final scientific outputs and read-classification totals are exact.
