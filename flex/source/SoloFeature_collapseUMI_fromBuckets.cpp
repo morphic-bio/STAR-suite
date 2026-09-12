@@ -46,6 +46,9 @@ struct BucketResult {
     uint64_t finalMolecules = 0;
     BucketMetrics metrics;
     uint64_t inputRecords = 0;
+    uint64_t compactRecords = 0;
+    uint64_t countOverflowRecords = 0;
+    uint64_t encodedRecordBytes = 0;
     uint64_t inputCounts = 0;
     uint32_t maxGene = 0;
     size_t tripletGroups = 0;
@@ -190,15 +193,20 @@ void SoloFeature::collapseUMIall_fromBuckets()
         uint32_t bucket = 0;
         while (pSolo.cbBucketStore->claim_bucket(&bucket)) {
             BucketResult &out = results[bucket];
-            std::vector<std::vector<uint8_t>> segments;
+            std::vector<star::solo::EncodedCbRun> segments;
             auto mark = std::chrono::steady_clock::now();
-            if (!pSolo.cbBucketStore->consume_encoded_segments(
+            if (!pSolo.cbBucketStore->consume_compact_segments(
                     bucket, &segments, &out.error))
                 continue;
             tLoad += tick(mark);
             size_t totalRecords = 0;
-            for (const auto &segment : segments)
-                totalRecords += segment.size() / star::solo::PackedCbRecord::kSerializedBytes;
+            for (const auto &segment : segments) {
+                totalRecords += segment.record_count();
+                if (segment.compact) out.compactRecords += segment.record_count();
+                out.countOverflowRecords += segment.overflow.size();
+                out.encodedRecordBytes += segment.bytes.size()
+                    + segment.overflow.size() * sizeof(star::solo::EncodedCbRun::OverflowCount);
+            }
             out.inputRecords = totalRecords;
 
             // append_segment sorted each producer-local run before publishing
@@ -214,8 +222,8 @@ void SoloFeature::collapseUMIall_fromBuckets()
                 leafCount <<= 1;
             std::vector<size_t> tournament(leafCount * 2, sentinel);
             for (size_t segment = 0; segment < sentinel; ++segment) {
-                if (!segments[segment].empty()) {
-                    currentRecord[segment] = star::solo::PackedCbRecord::from_encoded(segments[segment].data());
+                if (segments[segment].record_count() != 0) {
+                    currentRecord[segment] = segments[segment].record_at(0);
                     currentKey[segment] = currentRecord[segment].group_sort_key();
                     tournament[leafCount + segment] = segment;
                 }
@@ -336,14 +344,13 @@ void SoloFeature::collapseUMIall_fromBuckets()
                                                            record.value);
                 else
                     group.push_back(record);
-                next[segment] += star::solo::PackedCbRecord::kSerializedBytes;
+                ++next[segment];
                 const size_t leaf = leafCount + segment;
-                if (next[segment] == segments[segment].size()) {
+                if (next[segment] == segments[segment].record_count()) {
                     tournament[leaf] = sentinel;
-                    std::vector<uint8_t>().swap(segments[segment]);
+                    segments[segment].release();
                 } else {
-                    currentRecord[segment] = star::solo::PackedCbRecord::from_encoded(
-                        segments[segment].data() + next[segment]);
+                    currentRecord[segment] = segments[segment].record_at(next[segment]);
                     currentKey[segment] = currentRecord[segment].group_sort_key();
                 }
                 for (size_t node = leaf / 2; node > 0; node /= 2)
@@ -365,6 +372,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
     indCB.clear();
     uint32_t maxGeneIdx = 0;
     uint64_t totalInputRecords = 0;
+    uint64_t totalCompactRecords = 0, totalCountOverflowRecords = 0, totalEncodedRecordBytes = 0;
     uint64_t totalInputCounts = 0;
     uint64_t totalFinalMolecules = 0;
     size_t nTripletGroups = 0;
@@ -383,6 +391,9 @@ void SoloFeature::collapseUMIall_fromBuckets()
                           EXIT_CODE_INCONSISTENT_DATA, P);
         }
         totalInputRecords += part.inputRecords;
+        totalCompactRecords += part.compactRecords;
+        totalCountOverflowRecords += part.countOverflowRecords;
+        totalEncodedRecordBytes += part.encodedRecordBytes;
         totalInputCounts += part.inputCounts;
         totalFinalMolecules += part.finalMolecules;
         nTripletGroups += part.tripletGroups;
@@ -503,6 +514,9 @@ void SoloFeature::collapseUMIall_fromBuckets()
                      << " transitioned="
                      << (pSolo.cbBucketStore->transitioned_to_spill() ? "yes" : "no")
                      << " streamed_records=" << totalInputRecords
+                     << " compact_records=" << totalCompactRecords
+                     << " count_overflow_records=" << totalCountOverflowRecords
+                     << " encoded_record_bytes=" << totalEncodedRecordBytes
                      << " aggregated_counts=" << totalInputCounts
                      << " final_molecules="
                      << totalFinalMolecules
