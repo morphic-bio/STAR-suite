@@ -189,7 +189,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
             std::vector<std::vector<star::solo::PackedCbRecord> > segments;
             std::vector<star::solo::PackedCbRecord> records;
             auto mark = std::chrono::steady_clock::now();
-            if (!pSolo.cbBucketStore->load_sorted_segments(
+            if (!pSolo.cbBucketStore->consume_sorted_segments(
                     bucket, &segments, &out.error))
                 continue;
             tLoad += tick(mark);
@@ -244,6 +244,9 @@ void SoloFeature::collapseUMIall_fromBuckets()
                     tournament[node] = winner(tournament[node * 2],
                                               tournament[node * 2 + 1]);
             }
+            // The merged records now own all values. Release decoded input
+            // runs before UMI correction allocates its molecule buffer.
+            std::vector<std::vector<star::solo::PackedCbRecord> >().swap(segments);
             tMerge += tick(mark);
             // Reproduce the old fused hash aggregation exactly, including
             // saturated read counts and probe-region conflict propagation.
