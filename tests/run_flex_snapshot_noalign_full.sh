@@ -71,7 +71,7 @@ run_mode() {
     --soloCBstart 1 --soloUMIstart 17 --soloCBlen 16 --soloUMIlen 12
     --soloBarcodeReadLength 0
     --soloCBwhitelist "${CB_WHITELIST}"
-    --flex yes
+    --flex yes --flexLegacy yes
     --soloFlexExpectedCellsPerTag 3000
     --soloSampleWhitelist "${SAMPLE_WHITELIST}"
     --soloProbeList "${PROBE_LIST}"

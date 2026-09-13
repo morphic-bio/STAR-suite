@@ -2,12 +2,14 @@
 
 This document describes STAR-Flex, the Flex-specific module in STAR Suite.
 
+> **STAR Suite 1.9.4:** `--flex yes` assigns reads to probes from a half-probe (H1X2) hash cache and aligns nothing. The cache is required; build it once per probe set with `--runMode hashCacheGenerate --hashCacheTiers H0,H1X2`. The alignment-based routes described in parts of this document (pseudo-chromosome alignment, the alignment-validated H0/H1 cache, BAM output with CB/UB tags, Y-chromosome splitting) are **legacy** and need `--flexLegacy yes`; use them only to reproduce results from an earlier release.
+
 ## Overview
 
-STAR-Flex adds a **pseudo-chromosome alignment pipeline for 10x Genomics Flex** (Fixed RNA Profiling) samples using probes for transcript detection and RTL tags for multiplexing. A hybrid reference is generated with the regular genome and synthetic chromosomes for each probe. STAR's native alignment machinery quantifies probe alignment and uses genomic hits to confirm matches and detect off-probe noise. The rest of the workflow diverges from the standard STAR Solo workflow because RTL tags are on the same mate as the probe (not the cell barcode), so STAR's barcode/UMI correction and deduplication routines cannot be used. A fast inline path handles Flex-specific processing after alignment.
+STAR-Flex adds a **probe-cache pipeline for 10x Genomics Flex** (Fixed RNA Profiling) samples using probes for transcript detection and RTL tags for multiplexing. A hybrid reference is generated with the regular genome and synthetic chromosomes for each probe. STAR's native alignment machinery quantifies probe alignment and uses genomic hits to confirm matches and detect off-probe noise. The rest of the workflow diverges from the standard STAR Solo workflow because RTL tags are on the same mate as the probe (not the cell barcode), so STAR's barcode/UMI correction and deduplication routines cannot be used. A fast inline path handles Flex-specific processing after alignment.
 
 The Flex pipeline includes:
-- **Sample tag detection** during alignment identifies multiplexed sample barcodes
+- **Sample tag detection** identifies multiplexed sample barcodes
 - **Inline hash capture** stores CB/UMI/gene tuples directly in memory
 - **Cell Barcode (CB) correction** applies 1MM pseudocount-based correction (Cell Ranger compatible)
 - **UMI correction** uses clique-based 1MM deduplication

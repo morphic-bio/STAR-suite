@@ -290,6 +290,22 @@ case "${BAM_MODE}" in
       log "  FAIL: BAM written in no-BAM mode"
       ((++FAIL))
     fi
+    # STAR Suite 1.9.4 default route: launcher-built half-probe (H1X2) cache, no alignment.
+    check "generated half-probe cache" "${RUN_ROOT}/flex_h01x2_sequence_cache.bin"
+    if grep -qF "Flex probe route: half-probe H1X2 (1.9.4 default)" "${RUN_ROOT}/Log.out" 2>/dev/null; then
+      log "  PASS: half-probe route in Log.out"
+      ((++PASS))
+    else
+      log "  FAIL: missing half-probe route in Log.out"
+      ((++FAIL))
+    fi
+    if awk 'NR > 3 { n++ } END { exit !(n > 0) }' "${RUN_ROOT}/Solo.out/Gene/raw/matrix.mtx" 2>/dev/null; then
+      log "  PASS: raw Gene matrix has entries"
+      ((++PASS))
+    else
+      log "  FAIL: raw Gene matrix missing or empty"
+      ((++FAIL))
+    fi
     ;;
 esac
 

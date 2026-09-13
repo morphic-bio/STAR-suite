@@ -75,7 +75,7 @@ mkdir -p "${OUT_DIR}/synthetic/alignment"
   --soloType CB_UMI_Simple \
   --soloCBlen 16 --soloUMIlen 12 --soloUMIstart 17 --soloCBstart 1 --soloBarcodeReadLength 0 \
   --soloCBwhitelist "${CB_WHITELIST}" \
-  --flex yes \
+  --flex yes --flexLegacy yes \
   --soloRunFlexFilter no \
   --soloFlexExpectedCellsPerTag 3000 \
   --soloSampleWhitelist "${SAMPLE_WHITELIST}" \
@@ -140,7 +140,7 @@ STAR_INLINE_TRACE_QNAME=1 \
   --soloType CB_UMI_Simple \
   --soloCBlen 16 --soloUMIlen 12 --soloUMIstart 17 --soloCBstart 1 --soloBarcodeReadLength 0 \
   --soloCBwhitelist "${CB_WHITELIST}" \
-  --flex yes \
+  --flex yes --flexLegacy yes \
   --soloFlexExpectedCellsPerTag 3000 \
   --soloSampleWhitelist "${SAMPLE_WHITELIST}" \
   --soloProbeList "${PROBE_LIST}" \

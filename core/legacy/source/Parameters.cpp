@@ -706,6 +706,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "flexPipelineNSolo", &pSolo.flexPipelineNSolo));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "flexPipelineNTriage", &pSolo.flexPipelineNTriage));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "flexNoAlign", &pSolo.flexNoAlign));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "flexLegacy", &pSolo.flexLegacyStr));
     
     // FlexFilter inline integration
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloRunFlexFilter", &pSolo.runFlexFilterStr));
@@ -1633,6 +1634,24 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         exit(0);
     };
 
+    // STAR Suite 1.9.4: the half-probe (H1X2) Flex route assigns probes without
+    // genomic alignment, so it writes no SAM/BAM. When a non-legacy --flex yes
+    // alignment run does not set --outSAMtype, default it to None here, before
+    // the SAM/BAM output state below is derived from it.
+    {
+        string flexYes = pSolo.flexModeStr, flexLeg = pSolo.flexLegacyStr;
+        transform(flexYes.begin(), flexYes.end(), flexYes.begin(), ::tolower);
+        transform(flexLeg.begin(), flexLeg.end(), flexLeg.begin(), ::tolower);
+        if (runMode == "alignReads" && flexYes == "yes" && flexLeg != "yes") {
+            for (auto *p : parArray) {
+                if (p->nameString == "outSAMtype" && p->inputLevel == 0) {
+                    outSAMtype.assign(1, "None");
+                    inOut->logMain << "--flex yes: outSAMtype=None (half-probe default; no genomic alignment)\n";
+                    break;
+                }
+            }
+        }
+    }
     outSAMbool=false;
     outBAMunsorted=false;
     outBAMcoord=false;

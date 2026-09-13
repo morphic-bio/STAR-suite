@@ -20,7 +20,7 @@ common_args=(
     --soloUMIlen 12
     --soloFeatures Gene
     --soloProbeList "${probe_list}"
-    --flex yes
+    --flex yes --flexLegacy yes
 )
 
 set +e

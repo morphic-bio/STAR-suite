@@ -87,8 +87,8 @@ regression tools, and generic fixtures.
 | Script | Language | Purpose |
 |--------|----------|---------|
 | `flex_h01_pilot.py` | Python | Flex H0/H1/H2 tooling: probe lists/FASTAs, MEX→sequence-cache post-processing, **H2** subcommands (`h2-make-synth-fastq`, `h2-build-cache-from-mex`, `h2-write-binary-cache`) for two-mismatch variants with `cache_class=3` KEEP rows. |
-| `run_flex_h02_pilot.sh` | Bash | End-to-end H2 pilot: synthetic FASTQ from H0 seeds in an FH01SEQ1 cache → STAR-Flex (BAM+GX) → MEX-derived TSV → optional `h2_keep_only.bin`. See script header for sharding env vars. |
-| `run_flex_cr_config.sh` | Bash | Runs STAR-Flex using a CellRanger-format config, with inputs rendered by `render_flex_inputs_from_cr_config.py`. |
+| `run_flex_h02_pilot.sh` | Bash | LEGACY (`--flexLegacy yes`) end-to-end H2 pilot: synthetic FASTQ from H0 seeds in an FH01SEQ1 cache → STAR-Flex (BAM+GX) → MEX-derived TSV → optional `h2_keep_only.bin`. See script header for sharding env vars. |
+| `run_flex_cr_config.sh` | Bash | Runs STAR-Flex using a CellRanger-format config, with inputs rendered by `render_flex_inputs_from_cr_config.py`. Defaults to the 1.9.4 half-probe route (no BAM); builds the H1X2 cache at `--hash-cache FILE` when that file is absent (or in the run directory when no path is given) and reuses it otherwise. `--out-samtype bam-unsorted|bam-sorted` selects the legacy alignment route. |
 
 ## Fixtures and Utilities
 

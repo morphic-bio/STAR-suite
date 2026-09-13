@@ -18,7 +18,8 @@ SAMPLE_PROBE_OFFSET="${SAMPLE_PROBE_OFFSET:-68}"
 INPUT_FORMAT="${INPUT_FORMAT:-fastq}"
 CBQ_FILE="${CBQ_FILE:-}"
 USE_READFILES_ZCAT="${USE_READFILES_ZCAT:-0}"
-OUT_SAMTYPE="${OUT_SAMTYPE:-bam-unsorted}"
+OUT_SAMTYPE="${OUT_SAMTYPE:-none}"
+HASH_CACHE="${HASH_CACHE:-}"
 CR_CONFIG="${CR_CONFIG:-}"
 OUT_BASE="${OUT_BASE:-/tmp/flex_cr_config_runs}"
 RUN_ID="${RUN_ID:-flex_cr_config_$(date +%Y%m%d_%H%M%S)}"
@@ -46,7 +47,13 @@ Options:
                               the same order as the FASTQ path: cDNA R2, then barcode R1.
   USE_READFILES_ZCAT=1       Legacy FASTQ override: add --readFilesCommand zcat.
                               Default FASTQ ingestion uses STAR internal gzip.
-  --out-samtype MODE         Output alignment mode: bam-unsorted, bam-sorted, or none (default: ${OUT_SAMTYPE})
+  --out-samtype MODE         none (default): STAR Suite 1.9.4 half-probe route, no alignment.
+                              bam-unsorted | bam-sorted: LEGACY alignment-based route; adds --flexLegacy yes.
+  --hash-cache FILE          Half-probe (H1X2) Flex cache for the default route. If FILE does not exist, the
+                              launcher builds it there first (--runMode hashCacheGenerate --hashCacheTiers
+                              H0,H1X2) so later runs reuse it. Without --hash-cache, it builds one in the run
+                              directory. Building the cache for a full human probe set takes a few minutes,
+                              about 75 GiB of memory and 7.4 GB of disk.
   --out-base DIR             Output base directory (default: ${OUT_BASE})
   --run-id ID                Run directory name (default: ${RUN_ID})
   --dry-run                  Write manifest/command/helpers only
@@ -74,6 +81,7 @@ while [[ $# -gt 0 ]]; do
     --input-format) INPUT_FORMAT="$2"; shift 2 ;;
     --cbq-file) CBQ_FILE="$2"; shift 2 ;;
     --out-samtype) OUT_SAMTYPE="$2"; shift 2 ;;
+    --hash-cache) HASH_CACHE="$2"; shift 2 ;;
     --out-base) OUT_BASE="$2"; shift 2 ;;
     --run-id) RUN_ID="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -148,12 +156,56 @@ else
   fi
 fi
 SAM_ARGS=()
+# STAR Suite 1.9.4: the half-probe route writes no alignments. BAM output needs genomic
+# alignment, which is a LEGACY Flex route, so the BAM modes opt in with --flexLegacy yes.
 if [[ "${OUT_SAMTYPE}" == "none" ]]; then
   SAM_ARGS=(--outSAMtype None --outSAMattributes None)
 elif [[ "${OUT_SAMTYPE}" == "bam-sorted" ]]; then
-  SAM_ARGS=(--outSAMtype BAM SortedByCoordinate --outBAMcompression 6 --outSAMattributes NH HI AS nM NM GX GN)
+  SAM_ARGS=(--outSAMtype BAM SortedByCoordinate --outBAMcompression 6 --outSAMattributes NH HI AS nM NM GX GN --flexLegacy yes)
+elif [[ "${OUT_SAMTYPE}" == "bam-unsorted" ]]; then
+  SAM_ARGS=(--outSAMtype BAM Unsorted --outBAMcompression 6 --outSAMattributes NH HI AS nM NM GX GN --flexLegacy yes)
 else
-  SAM_ARGS=(--outSAMtype BAM Unsorted --outBAMcompression 6 --outSAMattributes NH HI AS nM NM GX GN)
+  die "Unsupported --out-samtype: ${OUT_SAMTYPE} (use none, bam-unsorted or bam-sorted)"
+fi
+CACHE_ARGS=()
+GEN_CMD=()
+HASH_CACHE_SOURCE=none
+if [[ -n "${HASH_CACHE}" && -f "${HASH_CACHE}" ]]; then
+  CACHE_ARGS=(--soloHashScreenFile "${HASH_CACHE}")
+  HASH_CACHE_SOURCE=given
+elif [[ -n "${HASH_CACHE}" || "${OUT_SAMTYPE}" == "none" ]]; then
+  # The half-probe route requires an H1X2 cache; build one for this probe set.
+  if [[ -z "${HASH_CACHE}" ]]; then
+    HASH_CACHE="${OUT_DIR}/flex_h01x2_sequence_cache.bin"
+    echo "NOTE: no --hash-cache given; building a half-probe cache in the run directory." \
+         "Pass --hash-cache FILE to build it once and reuse it." >&2
+  fi
+  [[ -d "$(dirname -- "${HASH_CACHE}")" ]] || die "Missing directory for --hash-cache: ${HASH_CACHE}"
+  HASH_CACHE_SOURCE=generated
+  CACHE_ARGS=(--soloHashScreenFile "${HASH_CACHE}")
+  GEN_CMD=(
+    "${STAR_BIN}"
+    --runMode hashCacheGenerate
+    --runThreadN "${THREADS}"
+    --genomeDir "${GENOME_DIR}"
+    --soloType CB_UMI_Simple
+    --soloCBstart "${SOLO_CB_START}"
+    --soloCBlen "${SOLO_CB_LEN}"
+    --soloUMIstart "${SOLO_UMI_START}"
+    --soloUMIlen "${SOLO_UMI_LEN}"
+    --soloBarcodeReadLength 0
+    --soloCBwhitelist "${SOLO_CB_WHITELIST}"
+    --flex yes
+    --soloFeatures Gene
+    --soloProbeList "${FLEX_PROBE_LIST}"
+    --soloSampleWhitelist "${FLEX_SAMPLE_WHITELIST}"
+    --soloSampleProbes "${FLEX_SAMPLE_PROBES}"
+    --soloSampleProbeOffset "${SAMPLE_PROBE_OFFSET}"
+    --hashCacheOutput "${HASH_CACHE}"
+    --hashCacheTiers H0,H1X2
+    --outSAMtype None
+    --outFileNamePrefix "${OUT_DIR}/hash_cache_generate/"
+  )
 fi
 
 CMD=(
@@ -171,6 +223,7 @@ CMD=(
   --soloBarcodeReadLength 0
   --soloCBwhitelist "${SOLO_CB_WHITELIST}"
   --flex yes
+  "${CACHE_ARGS[@]}"
   --soloFlexCellCaller tag-aware
   --soloSampleWhitelist "${FLEX_SAMPLE_WHITELIST}"
   --soloProbeList "${FLEX_PROBE_LIST}"
@@ -216,6 +269,8 @@ CMD=(
   printf 'input_format=%s\n' "${INPUT_FORMAT}"
   printf 'cbq_file=%s\n' "${CBQ_FILE}"
   printf 'out_samtype=%s\n' "${OUT_SAMTYPE}"
+  printf 'hash_cache=%s\n' "${HASH_CACHE}"
+  printf 'hash_cache_source=%s\n' "${HASH_CACHE_SOURCE}"
   printf 'cr_config=%s\n' "${CR_CONFIG}"
   printf 'cr_gene_expression_reference=%s\n' "${CR_GENE_EXPRESSION_REFERENCE:-}"
   printf 'cr_gene_expression_probe_set=%s\n' "${CR_GENE_EXPRESSION_PROBE_SET:-}"
@@ -235,6 +290,11 @@ CMD=(
 {
   echo '#!/usr/bin/env bash'
   echo 'set -euo pipefail'
+  if [[ ${#GEN_CMD[@]} -gt 0 ]]; then
+    printf 'mkdir -p %q\n' "${OUT_DIR}/hash_cache_generate"
+    printf '%q ' "${GEN_CMD[@]}"
+    printf '\n'
+  fi
   printf '%q ' "${CMD[@]}"
   printf '\n'
 } > "${OUT_DIR}/RUN_COMMAND.sh"
@@ -250,4 +310,10 @@ if [[ "${DRY_RUN}" == "1" ]]; then
   exit 0
 fi
 
+if [[ ${#GEN_CMD[@]} -gt 0 ]]; then
+  echo "=== building half-probe (H1X2) cache: ${HASH_CACHE} ==="
+  mkdir -p "${OUT_DIR}/hash_cache_generate"
+  "${GEN_CMD[@]}"
+  [[ -s "${HASH_CACHE}" ]] || die "hash cache generation did not write ${HASH_CACHE}"
+fi
 "${CMD[@]}"

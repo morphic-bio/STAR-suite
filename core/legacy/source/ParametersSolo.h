@@ -366,7 +366,7 @@ public:
 
     // Internal hash cache generation (--runMode hashCacheGenerate)
     string hashCacheOutput;       // --hashCacheOutput path (FH01SEQ1 binary)
-    string hashCacheTiers = "H0,H1,H2"; // comma-separated: H0,H1,H1X2,H2
+    string hashCacheTiers = "H0,H1X2"; // default half-probe cache; H1,H2 are LEGACY
     uint32_t hashCacheParentLimit = 0; // 0 = all probes; else cap probe count (testing)
 
     // ReadId tracking for sorted BAM CB/UB tag injection (Option C)
@@ -387,7 +387,9 @@ public:
     string flexPipelineStr = "auto"; // raw CLI: yes|no|auto (default: auto)
     int flexPipelineNSolo = 2;       // number of sharded Solo consumers (default: 2)
     int flexPipelineNTriage = 2;     // number of triage threads (default: 2)
-    int flexNoAlign = 0;             // 1 = skip alignment for H0/H1 misses (prototyping mode)
+    int flexNoAlign = 0;             // 1 = no genomic alignment (half-probe route; --flex yes default)
+    string flexLegacyStr = "no";     // raw CLI: yes|no. yes permits LEGACY Flex routes (1.9.4)
+    bool flexLegacy = false;         // resolved
     
     // FlexFilter inline integration
     string runFlexFilterStr = "no";  // raw CLI: yes|no (default: no)

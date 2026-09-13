@@ -41,7 +41,7 @@ STAR_INLINE_REJECT_LOG="${test_dir}/inline_trace.tsv" "${star_bin}" \
     --soloProbeList "${probe_list}" \
     --soloInlineHashMode yes \
     --soloHashScreenFile "${cache}" \
-    --flex yes \
+    --flex yes --flexLegacy yes \
     --flexPipeline no \
     --flexNoAlign 0 \
     --soloSkipProcessing yes \

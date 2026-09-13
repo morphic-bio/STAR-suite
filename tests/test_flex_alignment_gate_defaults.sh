@@ -30,7 +30,7 @@ run_parameter_probe() {
         --genomeDir "${TEST_ROOT}/missing-genome" \
         --readFilesIn "${TEST_ROOT}/r2.fastq" "${TEST_ROOT}/r1.fastq" \
         --outFileNamePrefix "${out_dir}/" \
-        --flex yes \
+        --flex yes --flexLegacy yes \
         "$@" \
         >"${out_dir}/stdout.log" 2>"${out_dir}/stderr.log"; then
         echo "ERROR: parameter probe unexpectedly completed an alignment" >&2

@@ -10,6 +10,9 @@ caveats:
   - Paired CBQ stores both mates in one file; pass one comma-separated CBQ list to read_files_cbq.
   - "Encode mates in the same order as the FASTQ Flex recipe: cDNA R2 first, barcode/UMI R1 second."
   - Do not set --readFilesCommand with CBQ input.
+  - "STAR Suite 1.9.4: --flex yes assigns probes from a half-probe (H1X2) cache and aligns nothing. Build the cache once per probe set with --runMode hashCacheGenerate --hashCacheTiers H0,H1X2 and pass it as solo_hash_screen_file."
+  - "Alignment-based Flex (BAM output, H0/H1 caches, aligning cache misses) is legacy and needs flex_legacy yes; use it only to reproduce results from an earlier release."
+  - "out_sam_kind defaults to None because the half-probe route writes no alignments; BAM needs flex_legacy yes."
 default_output_layout: Outputs under out_file_name_prefix.
 
 scripts:
@@ -28,6 +31,8 @@ parameter_groups:
       - read_files_layout
       - read_files_cbq
       - flex_enable
+      - solo_hash_screen_file
+      - flex_legacy
       - solo_type
       - solo_cb_whitelist
       - solo_sample_whitelist
@@ -89,6 +94,24 @@ parameters:
     description: Enable Flex mode.
     category: core
 
+  - name: solo_hash_screen_file
+    cli_flag: --soloHashScreenFile
+    type: file
+    required: true
+    path_must_exist: true
+    description: Half-probe (H1X2) Flex cache. Required by --flex yes from STAR Suite 1.9.4.
+    category: core
+
+  - name: flex_legacy
+    cli_flag: --flexLegacy
+    type: enum
+    required: false
+    default: "no"
+    choices: ["yes", "no"]
+    skip_when_default: true
+    description: Set yes only to reproduce results from a release before 1.9.4 with a legacy alignment-based Flex route.
+    category: core
+
   - name: solo_type
     cli_flag: --soloType
     type: string
@@ -125,18 +148,17 @@ parameters:
     cli_flag: --outSAMtype
     type: string
     required: true
-    default: BAM
+    default: None
     operand_group: out_sam_type
-    description: outSAMtype first token.
+    description: outSAMtype first token. None for the half-probe route; BAM is legacy and needs flex_legacy yes.
     category: core
 
   - name: out_sam_sort
     cli_flag: --outSAMtype
     type: string
-    required: true
-    default: Unsorted
+    required: false
     operand_group: out_sam_type
-    description: outSAMtype second token.
+    description: outSAMtype second token (Unsorted or SortedByCoordinate), only with legacy BAM output.
     category: core
 
   - name: run_thread_n
@@ -162,6 +184,8 @@ rendering:
     - read_files_layout
     - read_files_cbq
     - flex_enable
+    - solo_hash_screen_file
+    - flex_legacy
     - solo_type
     - solo_cb_whitelist
     - solo_sample_whitelist
