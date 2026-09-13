@@ -187,3 +187,11 @@ AGENTS_local.md
 /tests/emptydrops/test_ordmag_ties
 /tests/emptydrops/test_thread_permits
 /tests/emptydrops/test_flex_tag_aware
+
+# STAR run artefacts must never be committed (root or module directories)
+/Aligned.out.sam
+/Log.progress.out
+/Log.final.out
+/SJ.out.tab
+/test_slam_qc_output.json
+**/Aligned.out.sam
