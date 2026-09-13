@@ -345,9 +345,13 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
     parseTiers(P.pSolo.hashCacheTiers, wantH0, wantH1, wantH1X2, wantH2);
     if (wantH1X2 && !wantH0) {
         exitWithError(
-            "EXITING: experimental H1X2 requires H0 in --hashCacheTiers so "
+            "EXITING: H1X2 requires H0 in --hashCacheTiers so "
             "the cache carries its authoritative parent probes.\n",
             std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+    if (wantH1 || wantH2) {
+        P.inOut->logMain << "[HASH-CACHE-GEN] NOTE: H1/H2 are LEGACY alignment-validated tiers; "
+                            "the default half-probe cache is H0,H1X2\n";
     }
 
     std::vector<std::unique_ptr<ReadAlignChunk>> chunks;

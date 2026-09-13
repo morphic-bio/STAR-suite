@@ -48,7 +48,7 @@ COMMON_PARAMS=(
     --soloType CB_UMI_Simple
     --soloCBlen 16 --soloUMIlen 12 --soloUMIstart 17 --soloCBstart 1 --soloBarcodeReadLength 0
     --soloCBwhitelist "$WHITELIST"
-    --flex yes
+    --flex yes --flexLegacy yes
     --soloFlexExpectedCellsPerTag 3000
     --soloSampleWhitelist "$SAMPLE_WHITELIST"
     --soloProbeList "$PROBE_LIST"

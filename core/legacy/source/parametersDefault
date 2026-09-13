@@ -1898,10 +1898,12 @@ soloSpatialGexIntegrated    no
 
 soloSpatialFlexIntegrated   no
     string:                 default-off in-process Visium HD Flex molecule resolution (yes|no)
-                            Couples the normal Flex H0/H1 plus alignment-fallback feature path to raw-R1
+                            Couples the Flex H0/H1 plus alignment-fallback feature path to raw-R1
                             spatial candidate families and the delayed candidate-specific UMI materializer.
                             Requires the fail-closed Flex/Visium recipe documented in
                             docs/RUNBOOK_VISIUM_HD_NATIVE_FLEX_SPATIAL_FAMILIES_20260726.md.
+                            LEGACY in 1.9.4: spatial Flex is not yet migrated to the half-probe (H1X2)
+                            default, so it runs only with --flexLegacy yes until that migration lands.
 
 soloSpatialBarcodeContract  -
     string:                 directory containing the complete row-major Visium HD barcode coordinate contract
@@ -2083,13 +2085,17 @@ soloBucketCount             256
 
 no-hash-screen              no
     string:                 yes|no (default no)
-                            yes          ... disable the Flex H0/H1 hash screen and force the legacy align-everything path
-                            no           ... allow the Flex H0/H1 hash screen when Flex mode and a cache are available (default)
+                            yes          ... LEGACY: disable the Flex probe cache and align every read.
+                                             With --flex yes this requires --flexLegacy yes.
+                            no           ... use the Flex probe cache (default)
 
 soloHashScreenFile          -
-    string:                 path to the Flex H0/H1 binary cache file (optional)
-                            If omitted, STAR will use STAR_FLEX_HASH_SCREEN_CACHE or auto-discover
-                            flex_h01_sequence_cache.bin next to the probe list.
+    string:                 path to the Flex probe cache. With --flex yes it must contain the half-probe
+                            H1X2 tier: a compact .half.khash, or an FH01SEQ1 .bin generated with
+                            --runMode hashCacheGenerate --hashCacheTiers H0,H1X2.
+                            If omitted, STAR uses STAR_FLEX_HASH_SCREEN_CACHE, then looks next to the probe
+                            list for flex_h01x2_cache.half.khash and then flex_h01x2_sequence_cache.bin.
+                            With --flexLegacy yes it looks for the legacy flex_h01_sequence_cache.bin instead.
 
 soloFlexDecisionSidecar     -
     string:                 optional path for a versioned, fixed-width Flex cache-decision diagnostic sidecar
@@ -2105,29 +2111,35 @@ hashCacheOutput             -
     string:                 output path for FH01SEQ1 v2/v3 binary (required for --runMode hashCacheGenerate).
                             v3 is emitted when complete probe-region metadata are available; otherwise v2.
 
-hashCacheTiers              H0,H1,H2
-    string:                 comma-separated subset: H0, H1, H1X2, H2 (default: H0,H1,H2)
-                            H1X2       ... experimental compatibility tier: at most one mismatch in each
+hashCacheTiers              H0,H1X2
+    string:                 comma-separated subset: H0, H1X2, H1, H2 (default: H0,H1X2)
+                            H0         ... exact 50-base probe keys; the authoritative parent probes
+                            H1X2       ... half-probe tier (default): at most one mismatch in each
                                            25-base half; duplicate full 50-base keys are marked ambiguous
+                            H1, H2     ... LEGACY alignment-validated tiers, kept only to reproduce results
+                                           from releases before 1.9.4; running with them needs --flexLegacy yes
                             When an H1X2 cache is loaded, cache misses use a probe-only seed-and-extend
                             rescue: one uniquely resolving 25-base half must be within Hamming distance
                             one, and the full fixed-position 50-base sequence must have at most ten total
                             mismatches to that same probe. Halves resolving to different probes are denied.
                             The rescue is terminal and does not run genomic alignment.
                             H1X2 requires H0 in the generated cache; H0 supplies the authoritative parent probes.
-                            H1X2 is generated only when named explicitly; it is not part of the default.
 
 hashCacheParentLimit        0
     uint32:                 if >0, cap number of parent probes processed (testing / pilot)
 
 flex                         no
     string:                 yes|no (default no)
-                            yes         ... enable full Flex pipeline with production defaults:
-                                            soloRunFlexFilter=yes, soloInlineCBCorrection=yes,
+                            yes         ... enable full Flex pipeline with production defaults. Probes are
+                                            assigned from the half-probe (H1X2) cache with no genomic alignment:
+                                            flexNoAlign=1, flexPipelineNTriage=0, flexPipelineNSolo=0,
+                                            outSAMtype None, soloRunFlexFilter=yes, soloInlineCBCorrection=yes,
                                             soloInlineHashMode=yes, soloFlexMinimalMemory=yes (unless explicitly overridden),
                                             soloMapqMode=off, soloMMrateMax=0.1,
                                             soloBarcodesObservedOnly=yes, soloUMICorrection=clique,
                                             outFilterScoreMinOverLread=0, outFilterMatchNminOverLread=0
+                                            An H1X2 cache is required (see soloHashScreenFile). Every other
+                                            route is LEGACY and needs --flexLegacy yes.
                             no          ... use individual flag settings (default, inline hash mode disabled)
                             NOTE: Flex mode requires a probe list. Provide --soloProbeList <path> OR
                             rebuild index with --flexGeneProbeSet <probe CSV>. Probe sets are not
@@ -2142,17 +2154,32 @@ flexPipeline                 auto
 flexPipelineNSolo            2
     int>=1:                 number of sharded Solo consumer threads in pipeline mode (default 2)
                             Each consumer owns its own SoloReadFeature and inlineHash; merged at end of run.
+                            --flex yes sets 0 (the fully fused half-probe pipeline) unless given explicitly.
 
 flexPipelineNTriage          2
     int>=1:                 number of triage threads in pipeline mode (default 2)
                             Each triage thread performs CB/UMI extraction, sample detection, and H0 lookup.
                             Routes KEEP/DENY to Solo consumers, MISS to alignment workers.
+                            --flex yes sets 0 (the fully fused half-probe pipeline) unless given explicitly.
 
 flexNoAlign                  0
-    int:                    0|1 (default 0)
-                            1           ... skip alignment for H0/H1 misses (quick prototyping mode).
-                                        Reads that miss the hash screen are discarded instead of aligned.
-                                        Useful for benchmarking the hash screen + Solo path in isolation.
+    int:                    0|1 (default 0; --flex yes sets 1 unless given explicitly)
+                            1           ... assign probes from the cache without genomic alignment; reads the
+                                            cache does not assign are discarded. This is the half-probe route
+                                            and the Flex default.
+                            0           ... LEGACY: align hash-screen misses against the genome. With
+                                            --flex yes this requires --flexLegacy yes and a genome index.
+
+flexLegacy                   no
+    string:                 yes|no (default no)
+                            no          ... --flex yes uses the half-probe (H1X2) route: an H1X2 cache is
+                                            required and no read is aligned. A run that would use any other
+                                            route stops with an explanation.
+                            yes         ... permit LEGACY Flex routes, kept only to reproduce results from
+                                            releases before 1.9.4: H0/H1 caches without H1X2, aligning
+                                            hash-screen misses (--flexNoAlign 0), --no-hash-screen yes,
+                                            --soloInlineHashMode no, SAM/BAM output, and spatial Flex
+                                            (--soloSpatialFlexIntegrated yes), which is not yet migrated.
 
 soloRunFlexFilter            no
     string:                 yes|no (default no)

@@ -88,7 +88,7 @@ python3 "${ROOT_DIR}/scripts/flex_compat/render_flex_inputs_from_cr_config.py" \
     --soloType CB_UMI_Simple --soloCBstart 1 --soloCBlen 16 \
     --soloUMIstart 17 --soloUMIlen 10 --soloBarcodeReadLength 0 \
     --soloCBwhitelist "${WORKDIR}/assets_base/whitelist.txt" \
-    --flex yes --soloFlexExpectedCellsPerTag 3000 --soloFeatures Gene \
+    --flex yes --flexLegacy yes --soloFlexExpectedCellsPerTag 3000 --soloFeatures Gene \
     --soloProbeList "${fused_inputs}/probe_list.txt" \
     --soloSampleWhitelist "${fused_inputs}/sample_whitelist.tsv" \
     --soloSampleProbes "${fused_inputs}/sample_probes.tsv" \

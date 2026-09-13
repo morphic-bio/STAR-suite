@@ -88,7 +88,7 @@ STAR_EMIT_READID_TAG=1 STAR_EMIT_CBUB_TABLE=1 "$STAR_BIN" \
   --soloType CB_UMI_Simple \
   --soloCBlen 16 --soloUMIlen 12 --soloUMIstart 17 --soloCBstart 1 --soloBarcodeReadLength 0 \
   --soloCBwhitelist "$FLEX_WHITELIST" \
-  --flex yes \
+  --flex yes --flexLegacy yes \
   --soloFlexExpectedCellsPerTag 3000 \
   --soloSampleWhitelist "$FLEX_SAMPLE_WHITELIST" \
   --soloProbeList "$FLEX_PROBE_LIST" \

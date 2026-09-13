@@ -18,7 +18,8 @@ SAMPLE_PROBE_OFFSET="${SAMPLE_PROBE_OFFSET:-68}"
 INPUT_FORMAT="${INPUT_FORMAT:-fastq}"
 CBQ_FILE="${CBQ_FILE:-}"
 USE_READFILES_ZCAT="${USE_READFILES_ZCAT:-0}"
-OUT_SAMTYPE="${OUT_SAMTYPE:-bam-unsorted}"
+OUT_SAMTYPE="${OUT_SAMTYPE:-none}"
+HASH_CACHE="${HASH_CACHE:-}"
 CR_CONFIG="${CR_CONFIG:-}"
 OUT_BASE="${OUT_BASE:-/tmp/flex_cr_config_runs}"
 RUN_ID="${RUN_ID:-flex_cr_config_$(date +%Y%m%d_%H%M%S)}"
@@ -46,7 +47,10 @@ Options:
                               the same order as the FASTQ path: cDNA R2, then barcode R1.
   USE_READFILES_ZCAT=1       Legacy FASTQ override: add --readFilesCommand zcat.
                               Default FASTQ ingestion uses STAR internal gzip.
-  --out-samtype MODE         Output alignment mode: bam-unsorted, bam-sorted, or none (default: ${OUT_SAMTYPE})
+  --out-samtype MODE         none (default): STAR Suite 1.9.4 half-probe route, no alignment.
+                              bam-unsorted | bam-sorted: LEGACY alignment-based route; adds --flexLegacy yes.
+  --hash-cache FILE          Half-probe (H1X2) Flex cache, required by the default route. Build it once
+                              per probe set with --runMode hashCacheGenerate --hashCacheTiers H0,H1X2.
   --out-base DIR             Output base directory (default: ${OUT_BASE})
   --run-id ID                Run directory name (default: ${RUN_ID})
   --dry-run                  Write manifest/command/helpers only
@@ -74,6 +78,7 @@ while [[ $# -gt 0 ]]; do
     --input-format) INPUT_FORMAT="$2"; shift 2 ;;
     --cbq-file) CBQ_FILE="$2"; shift 2 ;;
     --out-samtype) OUT_SAMTYPE="$2"; shift 2 ;;
+    --hash-cache) HASH_CACHE="$2"; shift 2 ;;
     --out-base) OUT_BASE="$2"; shift 2 ;;
     --run-id) RUN_ID="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -148,12 +153,24 @@ else
   fi
 fi
 SAM_ARGS=()
+# STAR Suite 1.9.4: the half-probe route writes no alignments. BAM output needs genomic
+# alignment, which is a LEGACY Flex route, so the BAM modes opt in with --flexLegacy yes.
 if [[ "${OUT_SAMTYPE}" == "none" ]]; then
   SAM_ARGS=(--outSAMtype None --outSAMattributes None)
 elif [[ "${OUT_SAMTYPE}" == "bam-sorted" ]]; then
-  SAM_ARGS=(--outSAMtype BAM SortedByCoordinate --outBAMcompression 6 --outSAMattributes NH HI AS nM NM GX GN)
+  SAM_ARGS=(--outSAMtype BAM SortedByCoordinate --outBAMcompression 6 --outSAMattributes NH HI AS nM NM GX GN --flexLegacy yes)
+elif [[ "${OUT_SAMTYPE}" == "bam-unsorted" ]]; then
+  SAM_ARGS=(--outSAMtype BAM Unsorted --outBAMcompression 6 --outSAMattributes NH HI AS nM NM GX GN --flexLegacy yes)
 else
-  SAM_ARGS=(--outSAMtype BAM Unsorted --outBAMcompression 6 --outSAMattributes NH HI AS nM NM GX GN)
+  die "Unsupported --out-samtype: ${OUT_SAMTYPE} (use none, bam-unsorted or bam-sorted)"
+fi
+CACHE_ARGS=()
+if [[ -n "${HASH_CACHE}" ]]; then
+  [[ -f "${HASH_CACHE}" ]] || die "Missing --hash-cache file: ${HASH_CACHE}"
+  CACHE_ARGS=(--soloHashScreenFile "${HASH_CACHE}")
+elif [[ "${OUT_SAMTYPE}" == "none" ]]; then
+  echo "WARNING: no --hash-cache given; STAR will look for a half-probe cache next to the probe list" \
+       "and stop with instructions if none is found." >&2
 fi
 
 CMD=(
@@ -171,6 +188,7 @@ CMD=(
   --soloBarcodeReadLength 0
   --soloCBwhitelist "${SOLO_CB_WHITELIST}"
   --flex yes
+  "${CACHE_ARGS[@]}"
   --soloFlexCellCaller tag-aware
   --soloSampleWhitelist "${FLEX_SAMPLE_WHITELIST}"
   --soloProbeList "${FLEX_PROBE_LIST}"
