@@ -19,7 +19,9 @@ TIMEOUT_SECONDS="${BGZF_FUSED_ALIGN_TIMEOUT:-900}"
 die() { echo "FAIL: $*" >&2; exit 1; }
 [[ -x "${STAR_BIN}" ]] || die "STAR binary is absent: ${STAR_BIN}"
 
-# Reuse the index, hash cache, and blocked FASTQ that test_flex_e2e.sh builds.
+# Reuse the index, legacy H0/H1 hash cache, and blocked FASTQ that test_flex_e2e.sh
+# builds. Aligning cache misses is a LEGACY Flex route in STAR Suite 1.9.4, so the
+# wrapper passes --flexLegacy yes.
 if [[ ! -f "${WORKDIR}/fused_inputs/hash_cache.bin" || ! -e "${WORKDIR}/star_index/Genome" ]]; then
     BGZF_E2E_CASE=T4 "${ROOT_DIR}/tests/bgzf/test_flex_e2e.sh"
 fi
@@ -134,8 +136,7 @@ make_wrapper() {
     local wrapper="${WORKDIR}/STAR-fused-align-${mode}"
     cat > "${wrapper}" <<EOF
 #!/usr/bin/env bash
-exec "${STAR_BIN}" --readFilesBgzfMode ${mode} \\
-    --soloHashScreenFile "${WORKDIR}/fused_inputs/hash_cache.bin" \\
+exec "${STAR_BIN}" --readFilesBgzfMode ${mode} --flexLegacy yes \\
     --flexPipeline yes --flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 0 "\$@"
 EOF
     chmod +x "${wrapper}"
@@ -161,6 +162,7 @@ run_case() {
         --solo-cb-start 1 --solo-cb-len 16 --solo-umi-start 17 --solo-umi-len 10 \
         --sample-probe-catalog "${WORKDIR}/assets_base/sample_probe_catalog.tsv" \
         --sample-probe-offset 68 --out-samtype none \
+        --hash-cache "${WORKDIR}/fused_inputs/hash_cache.bin" \
         --out-base "${WORKDIR}/runs" --run-id "${run_id}" --threads "${threads}" \
         > "${WORKDIR}/${run_id}.stdout" 2> "${WORKDIR}/${run_id}.stderr"
     local rc=$?

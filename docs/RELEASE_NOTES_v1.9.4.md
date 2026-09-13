@@ -82,10 +82,16 @@ Existing indexes do not need rebuilding; Flex runs now need a half-probe cache.
 
 ## Launchers, recipes and documentation
 
-- **`scripts/run_flex_cr_config.sh`** now defaults to `--out-samtype none`,
-  accepts `--hash-cache FILE`, adds `--flexLegacy yes` for the `bam-unsorted`
-  and `bam-sorted` modes, and rejects unrecognised `--out-samtype` values
-  instead of silently producing BAM.
+- **`scripts/run_flex_cr_config.sh`** now defaults to `--out-samtype none`
+  (the half-probe route), adds `--flexLegacy yes` for the `bam-unsorted` and
+  `bam-sorted` modes, and rejects unrecognised `--out-samtype` values instead of
+  silently producing BAM. On the default route it needs an H1X2 cache:
+  `--hash-cache FILE` reuses FILE if it exists and otherwise builds it there
+  first; with no `--hash-cache` it builds one in the run directory. The manifest
+  records `hash_cache` and `hash_cache_source` (`given` or `generated`), and
+  `RUN_COMMAND.sh` includes the generation command when one ran.
+- **The public Codespaces Flex demo** runs the half-probe route through the
+  launcher and builds its small cache automatically.
 - **The `star_flex_fixed_rna` and `star_flex_fixed_rna_cbq` recipes** require
   `solo_hash_screen_file`, accept an optional `flex_legacy`, and the CBQ recipe
   defaults `out_sam_kind` to `None`.
@@ -102,7 +108,22 @@ Existing indexes do not need rebuilding; Flex runs now need a half-probe cache.
   build tree, that every `libflex` header STAR depends on resolves under
   `flex/source/libflex`.
 - Existing Flex tests that exercise alignment, BAM output or H0/H1 caches now
-  pass `--flexLegacy yes`, so they keep testing what they tested before.
+  pass `--flexLegacy yes`, so they keep testing what they tested before. This
+  includes the fused-alignment queue test, the vbem Flex tests, the H0/H1/H2
+  pilot scripts and the `flex/run_SC230077*.sh` examples.
+- **The release and container smokes test the default route.**
+  `tests/run_flex_tiny_public_smoke.sh` and the default mode of
+  `tests/run_flex_tiny_public_binary_smoke.sh` now require a generated H1X2
+  cache, the half-probe route in `Log.out`, no BAM, and a non-empty raw Gene
+  matrix; the binary smoke's BAM modes run the legacy route.
+- **`tests/bgzf/test_flex_e2e.sh`** compares plain, BGZF, mixed and CBQ inputs
+  on the half-probe route. It no longer passes `--soloFlexExpectedCellsPerTag`,
+  which the tag-aware caller rejects and which had stopped the test before any
+  comparison ran.
+- **`tests/run_flex_cr_config_smoke.sh`** accepts `HASH_CACHE`, requires an
+  output directory for every configured sample and at least one filtered matrix
+  (only some samples call cells on the 100K downsample, as in 1.9.3), and
+  compares the config's resolved path.
 
 ## Known limitations
 
@@ -112,3 +133,10 @@ Existing indexes do not need rebuilding; Flex runs now need a half-probe cache.
 - No command writes the compact `.half.khash` form. `--runMode
   hashCacheGenerate --hashCacheTiers H0,H1X2` writes an FH01SEQ1 cache with the
   H1X2 tier, which the default route accepts.
+- **Building the cache is memory-hungry.** For the human Fixed RNA probe set
+  used with the JAX library (16 threads), generation took 2 min 18 s, peaked at
+  74.5 GiB of resident memory and wrote a 7.4 GB file; the output is
+  byte-identical when rebuilt. A 100K-read run given that file spent 75 s
+  between starting and starting to map.
+  Build the cache once per probe set, on a host with enough memory, and pass it
+  with `--soloHashScreenFile` (or `--hash-cache` in the launcher).

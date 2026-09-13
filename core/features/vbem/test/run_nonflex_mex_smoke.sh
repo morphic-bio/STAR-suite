@@ -166,7 +166,7 @@ echo "Running STAR with --flex yes (using probe list: $TEST_PROBE_LIST)..."
     --soloFeatures Gene \
     --soloStrand Unstranded \
     --clipAdapterType CellRanger4 \
-    --flex yes \
+    --flex yes --flexLegacy yes \
     --soloProbeList "$TEST_PROBE_LIST" \
     --soloFlexExpectedCellsPerTag 1000 \
     --readFilesCommand zcat \

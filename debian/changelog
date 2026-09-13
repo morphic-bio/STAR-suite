@@ -13,6 +13,9 @@ star-suite (1.9.4-1) unstable; urgency=medium
   * Remove a stale libflex copy under core/legacy/source that shadowed the
     live FlexFilter.h, leaving the tag-aware caller's thread-permit setting
     uninitialized; the test now checks scheduling and header resolution.
+  * Move the release and container Flex smokes, the Codespaces demo and the
+    BGZF Flex end-to-end test to the half-probe route; run_flex_cr_config.sh
+    builds or reuses the H1X2 cache; legacy-route callers pass --flexLegacy yes.
   * Report STAR Suite 1.9.4 from STAR --version; retain index compatibility.
 
  -- STAR-suite Maintainers <maintainers@biodepot.example>  Sun, 13 Sep 2026 00:26:33 +0000
