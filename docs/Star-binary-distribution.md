@@ -669,3 +669,21 @@ For technical users:
   from 1.9.2.
 - Hosted tarball/Debian packages retain the portable no-Chromap build; local
   production builds retain the Chromap-enabled default.
+
+## Release v1.9.4 (2026-09-13)
+
+- Release tag: `v1.9.4`; notes: `docs/RELEASE_NOTES_v1.9.4.md`.
+- Debian source version: `1.9.4-1`; Ubuntu binaries:
+  `1.9.4-1~ubuntu22.04.1` and `1.9.4-1~ubuntu24.04.1`.
+- Scope: make the half-probe (H1X2) method the Flex default and retire the other
+  Flex routes as legacy behind `--flexLegacy yes`; require an H1X2 cache for
+  `--flex yes`; cut peak memory for a full 320k Flex run from 176.1 GiB to
+  75.3 GiB with identical outputs.
+- `STAR --version` reports `1.9.4`; upstream and genome compatibility remain
+  `2.7.11b` and `2.7.4a`. Existing indexes do not need rebuilding; Flex runs need
+  a half-probe cache.
+- Flex output from the default route is identical to the explicit 1.9.3 route
+  flags. Runs that relied on alignment, BAM output or an H0/H1 cache must add
+  `--flexLegacy yes`.
+- Hosted tarball/Debian packages retain the portable no-Chromap build; local
+  production builds retain the Chromap-enabled default.

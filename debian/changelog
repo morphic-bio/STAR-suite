@@ -1,3 +1,19 @@
+star-suite (1.9.4-1) unstable; urgency=medium
+
+  * Make the half-probe (H1X2) method the Flex default: --flex yes assigns
+    reads from the H1X2 cache with no alignment, defaults flexNoAlign=1, the
+    fully fused pipeline and outSAMtype None, and requires an H1X2 cache.
+  * Retire the other Flex routes as legacy behind the new --flexLegacy yes:
+    H0/H1 caches, aligning cache misses, --no-hash-screen, SAM/BAM output and
+    spatial Flex. --hashCacheTiers now defaults to H0,H1X2.
+  * Cut peak memory for a full 320k Flex run from 176.1 to 75.3 GiB with
+    identical outputs, including eight-byte in-memory barcode records.
+  * Update run_flex_cr_config.sh and the Flex recipes for the half-probe
+    default, and add tests/test_flex_v194_default_route.sh.
+  * Report STAR Suite 1.9.4 from STAR --version; retain index compatibility.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sun, 13 Sep 2026 00:26:33 +0000
+
 star-suite (1.9.3-1) unstable; urgency=medium
 
   * Restore feature-position learning when a feature offset is given explicitly,

@@ -2,9 +2,9 @@
 
 STAR Suite updates the original STAR aligner by integrating four modules — STAR-core (with integrated TranscriptVB quantification), STAR-perturb, STAR-Flex, and STAR-SLAM — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.47–1.60x for scRNA-seq GEX-only Solo vs CellGENI-style STARsolo**, **3.7–6.2x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
-Current production release: **[STAR Suite v1.9.3](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.9.3)**. The suite release tag and
-source-packaging version are `v1.9.3` / `1.9.3-1`; `STAR --version` reports
-`1.9.3`. GitHub Releases also provides Ubuntu 22.04- and 24.04-built `.deb`
+Current production release: **[STAR Suite v1.9.4](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.9.4)**. The suite release tag and
+source-packaging version are `v1.9.4` / `1.9.4-1`; `STAR --version` reports
+`1.9.4`. GitHub Releases also provides Ubuntu 22.04- and 24.04-built `.deb`
 packages from the same source revision.
 Use `STAR --upstream-version` for the underlying upstream STAR base
 (`2.7.11b`) and `STAR --genome-compat-version` for the genome index
@@ -312,10 +312,14 @@ This section documents the key features and flags for each module. For standard 
 
 See [flex/README_flex.md](flex/README_flex.md) for the full pipeline reference.
 
-STAR-Flex uses a pseudo-chromosome alignment approach: probe sequences are embedded as pseudo-chromosomes in a hybrid reference genome, and STAR's native alignment machinery handles gene assignment. Core features (trimming, spill-to-disk sorting, Y-chromosome splitting, TranscriptVB) all work with Flex.
+From STAR Suite 1.9.4, STAR-Flex assigns each read to its probe from a half-probe (H1X2) hash cache and aligns nothing. Exact probe matches, and reads with at most one mismatch in each 25-base half of the probe, are resolved from the cache; halves that point to different probes are rejected as ambiguous. `--flex yes` selects this route by default and requires the cache, which is built once per probe set with `--runMode hashCacheGenerate --hashCacheTiers H0,H1X2` (see `hashCacheTiers` in the parameter reference).
+
+The earlier alignment-based routes are **legacy**: probes embedded as pseudo-chromosomes in a hybrid reference and resolved by STAR's aligner, the alignment-validated H0/H1 cache, and BAM output with CB/UB tags or Y-chromosome splitting. They remain available with `--flexLegacy yes`, only to reproduce results from earlier releases.
 
 Key flags:
-- `--flex yes`: Enable Flex pipeline.
+- `--flex yes`: Enable Flex pipeline (half-probe route by default).
+- `--soloHashScreenFile`: Half-probe (H1X2) cache; required with `--flex yes`.
+- `--flexLegacy yes`: Permit a legacy alignment-based Flex route (reproducing earlier releases only).
 - `--soloFlexExpectedCellsPerTag`: Expected cells per sample tag.
 - `--soloSampleWhitelist`: TSV mapping sample tags to labels.
 - `--soloProbeList`: Probe gene list (auto-detected from index if omitted).
@@ -479,6 +483,7 @@ core/legacy/source/STAR \
   --genomeDir /path/to/flex_index \
   --readFilesIn reads_R2.fq.gz reads_R1.fq.gz \
   --flex yes \
+  --soloHashScreenFile /path/to/flex_h01x2_cache.half.khash \
   --soloType CB_UMI_Simple \
   --soloCBwhitelist /path/to/737K-fixed-rna-profiling.txt \
   --soloSampleWhitelist sample_whitelist.tsv \
