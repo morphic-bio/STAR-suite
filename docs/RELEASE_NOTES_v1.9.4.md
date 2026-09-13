@@ -67,6 +67,19 @@ Existing indexes do not need rebuilding; Flex runs now need a half-probe cache.
   relative to its bucket (256 buckets leave 2,880 barcodes per bucket, which fit
   in 12 bits), and counts above 62 are kept exactly in a separate list.
 
+## Fixes
+
+- **Flex cell calling read one setting from uninitialized memory.** An old copy
+  of `libflex` under `core/legacy/source/` shadowed the live `FlexFilter.h` when
+  STAR's Flex caller was compiled, while `libflex.a` was compiled against the
+  live header. The live header has a `useThreadPermits` field that the old copy
+  lacks, so the library read that setting from an uninitialized byte. The
+  observed effect was the tag-aware caller's thread scheduling: one test run
+  used fixed scheduling (2 workers per sample group instead of sharing 32), and
+  its matrices and cell calls were identical to the permit-scheduled runs. The
+  defect is also present in 1.9.3; every archived 1.9.3 benchmark Flex run
+  logged the intended permit scheduling. The stale copy is removed.
+
 ## Launchers, recipes and documentation
 
 - **`scripts/run_flex_cr_config.sh`** now defaults to `--out-samtype none`,
@@ -84,7 +97,10 @@ Existing indexes do not need rebuilding; Flex runs now need a half-probe cache.
 - New `tests/test_flex_v194_default_route.sh` checks the default route against
   the explicit flags (and, when `STAR_REF_BIN` is set, a reference binary), each
   legacy route's stop message, and that `--flexLegacy yes` and cache generation
-  are not blocked.
+  are not blocked. It also requires permit scheduling with the full thread
+  budget in every sample group on both the default and legacy routes, and, in a
+  build tree, that every `libflex` header STAR depends on resolves under
+  `flex/source/libflex`.
 - Existing Flex tests that exercise alignment, BAM output or H0/H1 caches now
   pass `--flexLegacy yes`, so they keep testing what they tested before.
 

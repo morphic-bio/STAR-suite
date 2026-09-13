@@ -10,6 +10,9 @@ star-suite (1.9.4-1) unstable; urgency=medium
     identical outputs, including eight-byte in-memory barcode records.
   * Update run_flex_cr_config.sh and the Flex recipes for the half-probe
     default, and add tests/test_flex_v194_default_route.sh.
+  * Remove a stale libflex copy under core/legacy/source that shadowed the
+    live FlexFilter.h, leaving the tag-aware caller's thread-permit setting
+    uninitialized; the test now checks scheduling and header resolution.
   * Report STAR Suite 1.9.4 from STAR --version; retain index compatibility.
 
  -- STAR-suite Maintainers <maintainers@biodepot.example>  Sun, 13 Sep 2026 00:26:33 +0000

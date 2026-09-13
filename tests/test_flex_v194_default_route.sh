@@ -18,6 +18,27 @@ V="${TEST_WORKDIR:-/tmp/star_suite_flex_v194_default_route_$$}"
 [[ -f "$IFMT/model_h01x2_cache.half.khash" ]] || { echo "ERROR: half-probe cache missing under FLEX_HALF_CACHE_DIR=$IFMT" >&2; exit 2; }
 [[ -d "$FQ" ]] || { echo "ERROR: fixture missing: FLEX_FIXTURE_DIR=$FQ" >&2; exit 2; }
 mkdir -p "$V"
+pass=0; fail=0
+ok(){ echo "  PASS  $*"; pass=$((pass+1)); }
+bad(){ echo "  FAIL  $*"; fail=$((fail+1)); }
+
+echo "== build checks =="
+# STAR's Flex caller and libflex.a must share one FlexFilter.h. A copy next to a core source file
+# shadows the live header for quoted includes, and the two sides then disagree on the Config layout.
+SRC_DIR="$(cd "$(dirname "$S194")" && pwd)"
+LIBFLEX_DIR="$(realpath -m "$SRC_DIR/../../../flex/source/libflex")"
+[[ ! -e "$SRC_DIR/libflex" ]] && ok "no libflex copy under $SRC_DIR" || bad "stale libflex copy shadows the live headers: $SRC_DIR/libflex"
+if [[ -f "$SRC_DIR/Depend.list" ]]; then
+  stray=$(cd "$SRC_DIR" && tr ' \\' '\n\n' < Depend.list | grep -E '(^|/)libflex/[^/]+\.h$' | sort -u |
+          while read -r h; do r=$(realpath -m "$h"); [[ "$r" == "$LIBFLEX_DIR"/* ]] || echo "$h"; done)
+  ff=$(cd "$SRC_DIR" && awk '/^SoloFeature_flexfilter\.o:/{f=1} f{print} f&&!/\\$/{exit}' Depend.list | tr ' \\' '\n\n' |
+       grep -E '(^|/)libflex/FlexFilter\.h$' | while read -r h; do realpath -m "$h"; done | sort -u)
+  [[ -z "$stray" ]] && ok "every libflex header in Depend.list resolves under $LIBFLEX_DIR" || bad "libflex headers resolved elsewhere: $(echo $stray)"
+  [[ "$ff" == "$LIBFLEX_DIR/FlexFilter.h" ]] && ok "SoloFeature_flexfilter.o depends on $LIBFLEX_DIR/FlexFilter.h" || bad "SoloFeature_flexfilter.o FlexFilter.h resolves to: ${ff:-nothing}"
+else
+  echo "  SKIP  no Depend.list next to $S194 (not a build tree)"
+fi
+
 P=SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5
 EMPTY=$V/empty_genome_index; rm -rf $EMPTY; mkdir -p $EMPTY
 R2=(); R1=(); for L in L001 L002 L003 L004 L005 L006 L007 L008; do
@@ -44,9 +65,6 @@ base=(--runThreadN 32 --genomeDir "$EMPTY" --soloType CB_UMI_Simple --soloCBstar
   --readFilesIn "$(IFS=,; echo "${R2[*]}")" "$(IFS=,; echo "${R1[*]}")")
 CACHE=(--soloHashScreenFile "$IFMT/model_h01x2_cache.half.khash")
 EXPLICIT=(--outSAMtype None --flexPipeline yes --flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1)
-pass=0; fail=0
-ok(){ echo "  PASS  $*"; pass=$((pass+1)); }
-bad(){ echo "  FAIL  $*"; fail=$((fail+1)); }
 run(){ # name binary args...
   local n=$1 b=$2; shift 2; local o=$V/$n; rm -rf $o; mkdir -p $o
   "$b" "${base[@]}" "$@" --soloFlexOutputPrefix "$o/per_sample" --soloFlexDebugOutputDir "$o/caller_diagnostics" \
@@ -68,6 +86,20 @@ for n in ${POS#A }; do
   if diff <(digest A) <(digest $n) >/dev/null; then ok "$n byte-identical to A ($nfiles files)"
   else bad "$n differs from A: $(diff <(digest A) <(digest $n) | grep -c '^[<>]') lines"; fi
 done
+# Output equality alone would pass if every run fell back to fixed scheduling, so require the
+# intended cell-caller schedule and thread budget (runThreadN 32, 16 sample groups) on each 1.9.4 run.
+sched(){ # name -> "ok" or a reason
+  local p t
+  p=$(logs $1 | grep -F '[Flex tag-aware parallel]' | sort -u)
+  t=$(logs $1 | grep -F '[Flex tag-aware timing]' | grep -o 'worker_limit=[0-9]* mc_threads=[0-9]*' | sort | uniq -c | sed 's/^ *//')
+  if [[ "$(grep -c . <<<"$p")" != 1 || "$p" != *"total_threads=32 scheduling=permits"* ]]; then echo "parallel line: ${p:-missing}"
+  elif [[ "$t" != "16 worker_limit=32 mc_threads=32" ]]; then echo "timing lines: ${t:-missing}"
+  else echo ok; fi
+}
+for n in A B L2; do
+  r=$(sched $n); [[ "$r" == ok ]] && ok "$n cell caller used permits with 32 workers and mc_threads 32 in all 16 groups" || bad "$n cell caller scheduling: $r"
+done
+[[ -n "$S193" ]] && echo "  INFO  C (reference binary) cell caller scheduling: $(sched C)"
 logs B | grep -q 'flexProbeRoute=half-probe H1X2 (default)' && ok "B logs half-probe default route" || bad "B missing route log"
 logs B | grep -q 'flexNoAlign=1 (half-probe default)' && ok "B flexNoAlign defaulted to 1" || bad "B flexNoAlign not defaulted"
 logs B | grep -q 'flexPipelineNTriage=0 (half-probe default)' && ok "B NTriage defaulted to 0" || bad "B NTriage not defaulted"
