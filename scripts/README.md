@@ -38,6 +38,7 @@ regression tools, and generic fixtures.
 
 | Script | Language | Purpose |
 |--------|----------|---------|
+| `paper/resource_usage.py` | Python | Importable benchmark sampler for concurrent process RSS, swap, scratch disk allocation, and device I/O. Writes per-sample JSONL and a peak summary; see [usage and metric definitions](paper/RESOURCE_USAGE.md). |
 | `report_additional_parity_metrics.py` | Python | Computes parity metrics for STAR vs Cell Ranger: gene-level Pearson correlation, cell-level correlation, and CRISPR feature-call set-match rates. This is the primary numeric parity tool referenced in the paper benchmarks. |
 | `compare_barcode_sets.py` | Python | Compares two barcode sets (e.g., STAR vs CR filtered barcodes) and reports overlap, Jaccard, and symmetric-difference statistics. Useful for quick cell-list parity checks. |
 | `run_gex_feature_parity_checks.sh` | Bash | End-to-end GEX feature parity: runs STAR and Cell Ranger, then compares gene counts and correlations. |
