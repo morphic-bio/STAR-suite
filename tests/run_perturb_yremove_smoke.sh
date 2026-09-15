@@ -76,6 +76,7 @@ echo "Threads: ${THREADS}"
 echo "GEX cDNA lanes: ${#GEX_R2_FILES[@]}"
 echo "Guide cDNA lanes: ${#GUIDE_R2_FILES[@]}"
 
+# Strand: the UCSF iPSC2 GEX fixture is a 10x 3' v3 gene-expression library (read 2 sense), so count Forward.
 "${STAR_BIN}" \
   --runThreadN "${THREADS}" \
   --genomeDir "${GENOME_DIR}" \
@@ -98,7 +99,7 @@ echo "Guide cDNA lanes: ${#GUIDE_R2_FILES[@]}"
   --soloMultiMappers Unique \
   --soloCellFilter EmptyDrops_CR \
   --soloCbUbRequireTogether no \
-  --soloStrand Unstranded \
+  --soloStrand Forward \
   --soloFeatures GeneFull \
   --soloCrGexFeature genefull \
   --pfMultiConfig "${PF_MULTI_CONFIG}" \

@@ -13,6 +13,8 @@ GENOME_DIR="${CR_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 
 STAR_BIN="${STAR_BIN:-/mnt/pikachu/STAR-suite/core/legacy/source/STAR}"
 OUTPREFIX="${CR_MULTI_GEX_OUTPREFIX:-${ROOT}/star_gex_smoke/}"
+# A375 is a 10x 5' R2-only library (SC5P-R2), so read 2 is antisense: count Reverse, not Unstranded (1.9.4 methodology).
+SOLO_STRAND="${CR_MULTI_SOLO_STRAND:-Reverse}"
 
 if [[ ! -x "${DOWN_SCRIPT}" ]]; then
   echo "Missing downsample script: ${DOWN_SCRIPT}" >&2
@@ -58,7 +60,7 @@ R2_FILES=$(ls "${GEX_DIR}/downsampled/"*R2*.fastq.gz | paste -sd, -)
   --soloCellFilter None \
   --clipAdapterType CellRanger4 \
   --soloFeatures Gene \
-  --soloStrand Unstranded \
+  --soloStrand "${SOLO_STRAND}" \
   --alignEndsType Local \
   --chimSegmentMin 1000000 \
   --outSAMtype BAM Unsorted

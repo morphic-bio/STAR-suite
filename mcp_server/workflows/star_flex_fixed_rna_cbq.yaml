@@ -16,7 +16,7 @@ caveats:
   - "No genome index is loaded when the command is count-only: outSAMtype None, outSJtype None, chimSegmentMin 0, soloFeatures Gene and no other genome-backed output (the defaults here). Log.out then reports 'Flex count-only no-genome: active'; otherwise it reports 'not active' with the reason and STAR loads genome_dir."
   - "Give solo_probe_list, the probe gene list the cache was built with. Without it STAR looks for probe_gene_list.txt in genome_dir (the index is not loaded for that)."
   - "Sample tags need both solo_sample_whitelist (one label<TAB>TAG8 line per tag) and solo_sample_probes. Pass the same label<TAB>TAG8 file as solo_flex_allowed_tags: the tag-aware caller calls tags that share a label together, so give tags pooled into one sample the same label."
-  - "Keep solo_cell_filter_bootstrap_threads fixed to reproduce a call set exactly; EmptyDrops draws are split across bootstrap streams (the benchmark used 32). Legacy expected-cell options such as --soloFlexExpectedCellsPerTag are rejected by the tag-aware caller."
+  - "solo_cell_filter_bootstrap_threads defaults to the run's thread count; EmptyDrops draws are split across bootstrap streams, so keep threads (or this value) fixed to reproduce a call set exactly (the manuscript runs used 32). Legacy expected-cell options such as --soloFlexExpectedCellsPerTag are rejected by the tag-aware caller."
   - "The benchmark CBQ route used --readFilesCbqRangeMode range (indexed CBQ). The benchmark command also passed --flexPipeline yes --flexNoAlign 1; --flex yes selects the same route by default."
   - "Alignment-based Flex (BAM output, H0/H1 caches, aligning cache misses) is legacy and needs flex_legacy yes; use it only to reproduce results from an earlier release."
   - "out_sam_kind defaults to None because the half-probe route writes no alignments; BAM needs flex_legacy yes."
@@ -383,8 +383,9 @@ parameters:
     cli_flag: --soloCellFilterBootstrapThreads
     type: int
     required: false
-    default: 32
-    description: EmptyDrops bootstrap streams; the call set depends on this value (32 in the benchmark; 0 = run_thread_n).
+    default: 0
+    skip_when_default: true
+    description: EmptyDrops bootstrap streams; 0 (default) uses run_thread_n. The call set depends on this value, so keep it fixed when comparing runs (the manuscript runs used 32 threads).
     category: core
 
   - name: solo_flex_ed_fdr_threshold

@@ -120,7 +120,8 @@ if [[ "${MODE}" == "historical-vanilla" ]]; then
     --soloMultiMappers Rescue
     --soloCbUbRequireTogether no
     --soloCellFilter EmptyDrops_CR
-    --soloStrand Unstranded
+    # 10x 3' gene-expression library: read 2 is sense to the transcript.
+    --soloStrand Forward
     --soloFeatures GeneFull
   )
 else

@@ -146,6 +146,7 @@ cat "${MULTI_CONFIG}"
 echo ""
 
 # Run STAR with pfMultiConfig
+# Strand: A375 is a 10x 5' R2-only library (SC5P-R2), so read 2 is antisense and counting is Reverse.
 echo "Running STAR with CR-compat mode..."
 [[ -n "${STAR_EXTRA_ARGS:-}" ]] && echo "Extra args: $STAR_EXTRA_ARGS"
 # shellcheck disable=SC2086
@@ -169,7 +170,7 @@ echo "Running STAR with CR-compat mode..."
   --soloMultiMappers Unique \
   --soloCellFilter EmptyDrops_CR \
   --soloCbUbRequireTogether no \
-  --soloStrand Unstranded \
+  --soloStrand Reverse \
   --soloFeatures GeneFull \
   --soloCrGexFeature genefull \
   --pfMultiConfig "${MULTI_CONFIG}" \

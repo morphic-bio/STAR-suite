@@ -240,10 +240,9 @@ parameters:
   - name: solo_strand
     cli_flag: --soloStrand
     type: enum
-    required: false
-    default: Forward
+    required: true
     choices: [Forward, Reverse, Unstranded]
-    description: "Gene-expression library strand. Forward for 10x 3'; Reverse for 10x 5' sequenced from read 2 only (Cell Ranger chemistry SC5P-R2*, e.g. A375)."
+    description: "Gene-expression library strand (required; no default so it is always chosen for the library). Forward for 10x 3'; Reverse for 10x 5' sequenced from read 2 only (Cell Ranger chemistry SC5P-R2*, e.g. A375)."
     category: core
   - name: solo_features
     cli_flag: --soloFeatures

@@ -40,6 +40,11 @@ while feature_end < len(command) and not command[feature_end].startswith('--'):
 command[feature_begin:feature_end] = args.features
 if args.cb_match:
     command[command.index('--soloCBmatchWLtype') + 1] = args.cb_match
+# A375 is a 10x 5' R2-only library (SC5P-R2): read 2 is antisense, so count Reverse whatever the reference run used.
+if '--soloStrand' in command:
+    command[command.index('--soloStrand') + 1] = 'Reverse'
+else:
+    command.extend(['--soloStrand', 'Reverse'])
 command.extend(['--readMapNumber', '100000'])
 env = {k: v for k, v in os.environ.items() if not k.startswith(('STAR_', 'PF_', 'OMP_'))}
 env.update(reference['environment'])

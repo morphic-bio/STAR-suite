@@ -1,0 +1,62 @@
+{
+  "schema": "starsuite.provenance_record/v1",
+  "record_id": "paper-2026-bulk-pe-v1.9.4",
+  "recorded_utc": "2026-09-15T12:00:00Z",
+  "kind": "correction",
+  "status": "complete",
+  "supersedes": [
+    "paper-2026-bulk-pe-integrated-output"
+  ],
+  "software": [
+    {
+      "repository": "https://github.com/morphic-bio/STAR-suite",
+      "revision": "1c9ddb9a5a2a3e62748e8e4ef28e553582affeed",
+      "version": "1.9.4"
+    }
+  ],
+  "environment": {
+    "hardware_class": "Intel Core i9-13900KF workstation (24 cores)",
+    "memory_gb": 126,
+    "logical_cpu_count": 32,
+    "requested_threads": 32,
+    "storage": "local NVMe for every input, output and scratch file",
+    "star_suite_binary_source_revision": "a095319a7b5442d6b67bc54a6e83619ad10c7877"
+  },
+  "method": "STAR Suite 1.9.4 integrated trimming, alignment and TranscriptVB quantification (with and without in-process Y-chromosome removal) on the PPARG revertant WT replicate 3 paired-end library (35,089,336 read pairs) was compared with an external stepwise pipeline on the same input: Trim Galore 0.6.10 with FastQC, upstream STAR 2.7.11b with TranscriptomeSAM output, an awk/samtools/gzip Y split when Y removal is on, and Salmon 1.10.3 in alignment mode with automatic library-type detection (-l A, which detects the stranded ISR layout) and GC-bias correction. Runs were made one at a time on a quiet machine with the page cache dropped first; elapsed time is whole-process wall-clock time from /usr/bin/time. Quantification parity compares estimated read counts (NumReads) against Salmon on the no-Y-removal benchmark, at gene and transcript level, by Spearman and Pearson correlation over all features.",
+  "evidence": [
+    {
+      "comparison": "integrated-versus-external",
+      "y_removal": false,
+      "integrated_elapsed_seconds": 481.73,
+      "external_elapsed_seconds": 769.04,
+      "speedup": 1.6
+    },
+    {
+      "comparison": "integrated-versus-external",
+      "y_removal": true,
+      "integrated_elapsed_seconds": 579.73,
+      "external_elapsed_seconds": 2446.61,
+      "speedup": 4.22
+    },
+    {
+      "comparison": "TranscriptVB-versus-Salmon",
+      "y_removal": false,
+      "gene_count_spearman": 0.9992,
+      "gene_count_pearson": 1.0,
+      "transcript_count_spearman": 0.985,
+      "transcript_count_pearson": 0.99998
+    }
+  ],
+  "limitations": [
+    "Each timing is one completed run rather than a replicated distribution.",
+    "The superseded record used an earlier 1.7.0 candidate and a different external wrapper; its 1.81-fold figure is not comparable with this comparison.",
+    "An earlier recording of this external control ran Salmon with -l IU, which is unstranded and assigns antisense reads to opposite-strand genes on this stranded library; the values here come from the re-recorded control with -l A.",
+    "Wall-clock values depend on hardware, storage, cache state and tool versions."
+  ],
+  "artifacts": [
+    {
+      "logical_uri": "git://STAR-suite/docs/PAPER_BENCHMARK_METHODOLOGY.md",
+      "sha256": "e631f83184653c0ae1c905e40c38641bd283d390f2efe58beca7ddec04c027c6"
+    }
+  ]
+}

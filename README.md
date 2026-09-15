@@ -387,7 +387,8 @@ Key flags:
 - `--dynamicThreadConstMapPermits 32`: Start with full map-side permit budget.
 - `--crAssignConsumerThreads 32`: Provision PF worker pool to full host budget.
 - `--crAssignSearchThreads 1`: Per-consumer search-thread mode.
-- `--crMinUmi`: Minimum UMI threshold for CRISPR feature calling (default `10`; lower to `2-3` for lineage barcodes).
+- `--crMinUmi`: Minimum UMI threshold for CRISPR feature calling (default `3`; `--defaultCrCompat yes` sets `10`; the A375 benchmark used `10` and the MSK LARRY library `2`).
+- `--soloStrand`: Must match the gene-expression library: `Forward` for 10x 3', `Reverse` for 10x 5' libraries sequenced from read 2 only (Cell Ranger chemistry `SC5P-R2*`, e.g. A375).
 - `--soloCrGexFeature`: Control merged GEX source (`auto`, `gene`, `genefull`).
 - `--soloCrMode CR`: Enable CR-compatible single-cell behavior.
 - `--crChemistry`: Barcode chemistry (`auto`, `NXT`, `TRU`). Default `auto` enables per-library auto-detection. Mixed NXT/TRU experiments are handled automatically; per-library overrides via the `star_chemistry` column in `--pfMultiConfig`.
@@ -561,18 +562,45 @@ For paired-end, pass **two comma-separated mate lists**:
 
 **STAR-perturb (integrated CR-compat mode):**
 
+The gene-expression FASTQs go in `--readFilesIn` (cDNA read first); the feature
+libraries are listed in `--pfMultiConfig`. The option set below is the one used
+for the manuscript's Perturb-seq benchmarks
+([docs/PAPER_BENCHMARK_METHODOLOGY.md](docs/PAPER_BENCHMARK_METHODOLOGY.md)
+Section 1.6); explicit options take precedence over the `--defaultCrCompat`
+bundle, which on its own would select `Rescue` multimappers and
+`Gene GeneFull` and sets no strand.
+
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
   --runThreadN 32 \
   --genomeDir /path/to/index \
+  --readFilesIn gex_R2.fastq.gz gex_R1.fastq.gz \
+  --readFilesBgzfMode auto \
   --pfMultiConfig /path/to/multi_config.csv \
+  --soloType CB_UMI_Simple \
+  --soloCBstart 1 --soloCBlen 16 --soloUMIstart 17 --soloUMIlen 12 \
+  --soloBarcodeReadLength 0 \
+  --soloCBwhitelist /path/to/gex_whitelist.txt \
+  --soloStrand Forward \
+  --clipAdapterType CellRanger4 --clip3pPolyG yes \
+  --alignEndsType Local --chimSegmentMin 1000000 \
+  --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
+  --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR \
+  --soloMultiMappers Unique --soloCrMultimapRescue yes \
+  --soloCellFilter EmptyDrops_CR --soloCbUbRequireTogether no \
+  --soloFeatures GeneFull --soloCrGexFeature genefull \
+  --crMinUmi 10 \
   --dynamicThreadInterface 1 \
   --dynamicThreadConstMapPermits 32 \
   --crAssignSearchThreads 1 \
-  --defaultCrCompat yes \
+  --outSAMtype None \
   --outFileNamePrefix /path/to/outs/
 ```
+
+Use `--soloStrand Reverse` (and omit `--clip3pPolyG` if the data are not
+two-colour NovaSeq/NextSeq) for 10x 5' libraries sequenced from read 2 only,
+such as the A375 benchmark.
 
 **OCM scRNA-seq (native composite barcode mode):**
 

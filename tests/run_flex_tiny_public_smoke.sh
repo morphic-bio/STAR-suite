@@ -113,7 +113,7 @@ grep -F "sample_probe_catalog=${PROBE_CATALOG}" "${RUN_ROOT}/RUN_MANIFEST.txt" >
 grep -F "hash_cache_source=generated" "${RUN_ROOT}/RUN_MANIFEST.txt" >/dev/null || die "manifest missing generated hash cache"
 grep -F "Enabled Flex pipeline with production defaults" "${RUN_ROOT}/Log.out" >/dev/null || die "log missing Flex enablement"
 grep -F "Flex probe route: half-probe H1X2 (1.9.4 default)" "${RUN_ROOT}/Log.out" >/dev/null || die "log missing half-probe route"
-grep -F "SampleDetector initialized successfully" "${RUN_ROOT}/Log.out" >/dev/null || die "log missing sample detector init"
+grep -F "Flex count-only no-genome: active" "${RUN_ROOT}/Log.out" >/dev/null || die "log missing count-only no-genome route (genome index was loaded)"
 
 echo "PASS: public tiny Flex smoke"
 echo "Workdir: ${WORKDIR}"
