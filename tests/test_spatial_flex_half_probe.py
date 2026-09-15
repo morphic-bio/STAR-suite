@@ -90,17 +90,18 @@ def main():
     results = []
     def run(name, kind='gzip', threads=4, options=(), env_changes=None, mates=None, expected_failure=None):
         effective = list(base)
+        appended = []
         # STAR rejects duplicate CLI definitions, so replace scalar defaults.
         for i in range(0, len(options), 2):
             key, value = str(options[i]), str(options[i + 1])
             if key in effective:
                 effective[effective.index(key) + 1] = value
             else:
-                effective.extend([key, value])
+                appended.extend([key, value])
         out = args.out / name
         def command_for(directory):
             return effective + ['--runThreadN', str(threads), '--outFileNamePrefix', str(directory) + '/',
-                                '--readFilesIn', *[','.join(m) for m in (mates or paths[kind])]]
+                                '--readFilesIn', *[','.join(m) for m in (mates or paths[kind])], *appended]
         argv = command_for(out)
         previous = None
         if out.exists() and args.resume:
