@@ -23,6 +23,8 @@ OUTPREFIX="${CR_MULTI_OUTPREFIX:-${ROOT}/star_multi_smoke_cpp/}"
 SOLO_MULTIMAPPERS="${CR_MULTI_SOLO_MULTIMAPPERS:-Unique}"
 SOLO_CELL_FILTER="${CR_MULTI_SOLO_CELL_FILTER:-EmptyDrops_CR}"
 CR_MULTI_GEX_FEATURE="${CR_MULTI_GEX_FEATURE:-auto}"
+# A375 is a 10x 5' R2-only library (SC5P-R2), so read 2 is antisense: count Reverse, not Unstranded (1.9.4 methodology).
+SOLO_STRAND="${CR_MULTI_SOLO_STRAND:-Reverse}"
 
 if [[ ! -x "${DOWN_SCRIPT}" ]]; then
   echo "Missing downsample script: ${DOWN_SCRIPT}" >&2
@@ -231,7 +233,7 @@ EOF
     --soloUMIdedup 1MM_CR \
     --soloUMIfiltering MultiGeneUMI_CR \
     --soloMultiMappers "${SOLO_MULTIMAPPERS}" \
-    --soloStrand Unstranded \
+    --soloStrand "${SOLO_STRAND}" \
     --soloFeatures GeneFull \
     --soloCellFilter "${SOLO_CELL_FILTER}" \
     --soloCrGexFeature "${CR_MULTI_GEX_FEATURE}" \

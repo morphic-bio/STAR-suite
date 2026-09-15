@@ -1,7 +1,9 @@
 # Public recipe: STAR-perturb integrated CR-compat (README Sample Commands + AGENTS.md threading hints).
+# Defaults follow the options shared by the STAR Suite 1.9.4 Perturb-seq benchmarks (A375 and MSK 30-KO;
+# docs/PAPER_BENCHMARK_METHODOLOGY.md Section 1.6).
 id: star_perturb_cr_compat
 title: STAR-perturb (CR-compat alignReads)
-summary: Single STAR alignReads with --pfMultiConfig and recommended CR-compat threading flags.
+summary: Single STAR alignReads with GEX FASTQs, --pfMultiConfig, the Cell Ranger-compatible option set and recommended CR-compat threading flags.
 kind: star_cli
 entry_script: core/legacy/source/STAR
 supported_modes: [local]
@@ -9,6 +11,11 @@ caveats:
   - Build the binary first (make -C core/legacy/source STAR).
   - Prefer --crAssignConsumerThreads -1 (auto) on real runs; this recipe defaults to -1.
   - Multi-library layout is defined by pfMultiConfig CSV (see feature_barcodes / perturb docs).
+  - "Gene-expression FASTQs are still given with --readFilesIn: cDNA read (R2) first, barcode/UMI read (R1) second."
+  - "Set solo_strand to match the gene-expression library: Forward for 10x 3' libraries (e.g. the MSK 30-KO benchmark); Reverse for 10x 5' libraries sequenced from read 2 only (Cell Ranger chemistry SC5P-R2*, e.g. the A375 benchmark). Unstranded counting on a 5' library drops reads where opposite-strand genes overlap and counts antisense reads (A375 gene Spearman 0.952 against 0.988 with Reverse)."
+  - "--defaultCrCompat yes alone sets soloMultiMappers Rescue, soloFeatures Gene GeneFull and crMinUmi 10, and does not set clipping, barcode geometry, strand or chimSegmentMin. This recipe therefore passes the benchmark values explicitly; explicit options take precedence over the bundle."
+  - "Benchmark per-dataset values: A375 cr_chemistry TRU, cr_min_umi 10; MSK 30-KO cr_chemistry auto, cr_min_umi 2. The benchmark runs also set --soloInlineHashMode yes; this recipe does not render it."
+  - "Gene-level agreement with Cell Ranger is reported as spearman_all_genes and pearson_all_genes from scripts/report_additional_parity_metrics.py (all genes, zero-count genes included), not as a correlation over filtered genes."
 default_output_layout: Outputs under out_file_name_prefix.
 
 scripts:
@@ -24,12 +31,45 @@ parameter_groups:
       - run_mode
       - run_thread_n
       - genome_dir
+      - read_files_cdna
+      - read_files_cb_umi
+      - read_files_bgzf_mode
       - pf_multi_config
+      - solo_cb_whitelist
+      - solo_cb_start
+      - solo_cb_len
+      - solo_umi_start
+      - solo_umi_len
+      - solo_barcode_read_length
+      - clip_adapter_type
+      - clip_3p_polyg
+      - align_ends_type
+      - chim_segment_min
+      - solo_cb_match_wl_type
+      - solo_umi_filtering
+      - solo_umi_dedup
+      - solo_multi_mappers
+      - solo_cell_filter
+      - solo_cb_ub_require_together
+      - solo_strand
+      - solo_features
+      - solo_cr_gex_feature
+      - solo_cr_multimap_rescue
+      - cr_chemistry
+      - cr_min_umi
+      - cr_assign_max_hamming
+      - cr_assign_feature_offset
+      - cr_assign_min_counts
+      - cr_assign_max_barcode_mismatches
+      - cr_assign_feature_n
+      - cr_assign_barcode_n
       - dynamic_thread_interface
       - dynamic_thread_const_map_permits
       - cr_assign_consumer_threads
       - cr_assign_search_threads
+      - cr_assign_skip_qc_outputs
       - default_cr_compat
+      - out_sam_type
       - out_file_name_prefix
 
 parameters:
@@ -54,12 +94,235 @@ parameters:
     path_must_exist: true
     description: STAR genome index directory.
     category: core
+  - name: read_files_cdna
+    cli_flag: --readFilesIn
+    type: string
+    required: true
+    operand_group: readfiles_solo
+    description: Gene-expression cDNA read FASTQs (R2; comma-separated lanes), first argument to --readFilesIn.
+    category: core
+  - name: read_files_cb_umi
+    cli_flag: --readFilesIn
+    type: string
+    required: true
+    operand_group: readfiles_solo
+    description: Gene-expression barcode + UMI read FASTQs (R1; same lane order), second argument to --readFilesIn.
+    category: core
+  - name: read_files_bgzf_mode
+    cli_flag: --readFilesBgzfMode
+    type: enum
+    required: false
+    default: auto
+    choices: [auto, "off", range]
+    description: Gzipped FASTQ reader for gene expression. auto (the STAR default and the benchmark setting) uses the parallel BGZF reader where it applies and zlib otherwise.
+    category: core
   - name: pf_multi_config
     cli_flag: --pfMultiConfig
     type: file
     required: true
     path_must_exist: true
     description: process_features multi-sample CSV (libraries, FASTQs, chemistry, etc.).
+    category: core
+  - name: solo_cb_whitelist
+    cli_flag: --soloCBwhitelist
+    type: file
+    required: true
+    path_must_exist: true
+    description: Cell barcode whitelist for the gene-expression chemistry (also used for feature assignment unless --crWhitelist is given).
+    category: core
+  - name: solo_cb_start
+    cli_flag: --soloCBstart
+    type: int
+    required: false
+    default: 1
+    description: Cell barcode start base on the barcode read.
+    category: core
+  - name: solo_cb_len
+    cli_flag: --soloCBlen
+    type: int
+    required: false
+    default: 16
+    description: Cell barcode length.
+    category: core
+  - name: solo_umi_start
+    cli_flag: --soloUMIstart
+    type: int
+    required: false
+    default: 17
+    description: UMI start base on the barcode read.
+    category: core
+  - name: solo_umi_len
+    cli_flag: --soloUMIlen
+    type: int
+    required: false
+    default: 12
+    description: UMI length (12 for 10x 3' v3 and 5').
+    category: core
+  - name: solo_barcode_read_length
+    cli_flag: --soloBarcodeReadLength
+    type: int
+    required: false
+    default: 0
+    description: 0 = do not require the barcode read to be exactly as long as CB+UMI.
+    category: core
+  - name: clip_adapter_type
+    cli_flag: --clipAdapterType
+    type: string
+    required: false
+    default: CellRanger4
+    description: Adapter/polyA clipping profile (CellRanger4 matches recent Cell Ranger).
+    category: core
+  - name: clip_3p_polyg
+    cli_flag: --clip3pPolyG
+    type: enum
+    required: false
+    default: "yes"
+    choices: ["yes", "no", auto]
+    description: Trim 3' poly-G tails. yes (MSK benchmark); auto, the STAR default left in place for A375, also trims when clip_adapter_type is CellRanger4.
+    category: core
+  - name: align_ends_type
+    cli_flag: --alignEndsType
+    type: string
+    required: false
+    default: Local
+    description: Read-end alignment type (Local, soft-clipping allowed).
+    category: core
+  - name: chim_segment_min
+    cli_flag: --chimSegmentMin
+    type: int
+    required: false
+    default: 1000000
+    description: Part of the Cell Ranger-compatible option set. Any value above 0 keeps every transcript found in an alignment window; 1000000 produces no chimeric alignments.
+    category: core
+  - name: solo_cb_match_wl_type
+    cli_flag: --soloCBmatchWLtype
+    type: string
+    required: false
+    default: 1MM_multi_Nbase_pseudocounts
+    description: Cell barcode whitelist matching (Cell Ranger-style 1-mismatch correction with pseudocounts).
+    category: core
+  - name: solo_umi_filtering
+    cli_flag: --soloUMIfiltering
+    type: string
+    required: false
+    default: MultiGeneUMI_CR
+    description: UMI filtering (Cell Ranger-style removal of UMIs shared across genes).
+    category: core
+  - name: solo_umi_dedup
+    cli_flag: --soloUMIdedup
+    type: string
+    required: false
+    default: 1MM_CR
+    description: UMI deduplication (Cell Ranger-style 1-mismatch collapsing).
+    category: core
+  - name: solo_multi_mappers
+    cli_flag: --soloMultiMappers
+    type: string
+    required: false
+    default: Unique
+    description: Multi-gene read counting. Unique, together with solo_cr_multimap_rescue yes, is the benchmark policy (the defaultCrCompat bundle alone would set Rescue).
+    category: core
+  - name: solo_cell_filter
+    cli_flag: --soloCellFilter
+    type: string
+    required: false
+    default: EmptyDrops_CR
+    description: Cell calling mode.
+    category: core
+  - name: solo_cb_ub_require_together
+    cli_flag: --soloCbUbRequireTogether
+    type: enum
+    required: false
+    default: "no"
+    choices: ["yes", "no"]
+    description: Whether a UB tag requires a CB tag during tag injection (no, as in the benchmark).
+    category: core
+  - name: solo_strand
+    cli_flag: --soloStrand
+    type: enum
+    required: false
+    default: Forward
+    choices: [Forward, Reverse, Unstranded]
+    description: "Gene-expression library strand. Forward for 10x 3'; Reverse for 10x 5' sequenced from read 2 only (Cell Ranger chemistry SC5P-R2*, e.g. A375)."
+    category: core
+  - name: solo_features
+    cli_flag: --soloFeatures
+    type: string
+    required: false
+    default: GeneFull
+    description: Gene model for counting (GeneFull, as in the benchmark; the defaultCrCompat bundle alone would set Gene GeneFull).
+    category: core
+  - name: solo_cr_gex_feature
+    cli_flag: --soloCrGexFeature
+    type: string
+    required: false
+    default: genefull
+    description: Gene model merged into the Cell Ranger-compatible MEX (genefull, matching solo_features GeneFull).
+    category: core
+  - name: solo_cr_multimap_rescue
+    cli_flag: --soloCrMultimapRescue
+    type: enum
+    required: false
+    default: "yes"
+    choices: ["yes", "no"]
+    description: Cell Ranger-compatible rescue of reads that map to several genomic loci.
+    category: core
+  - name: cr_chemistry
+    cli_flag: --crChemistry
+    type: enum
+    required: false
+    default: auto
+    choices: [auto, TRU, NXT]
+    description: Barcode chemistry for pf-multi (auto detects per library; the A375 benchmark set TRU).
+    category: core
+  - name: cr_min_umi
+    cli_flag: --crMinUmi
+    type: int
+    required: false
+    default: 10
+    description: Minimum UMI threshold for CRISPR feature calling (A375 benchmark 10, MSK 30-KO benchmark 2).
+    category: core
+  - name: cr_assign_max_hamming
+    cli_flag: --crAssignMaxHamming
+    type: int
+    required: false
+    default: 1
+    description: Feature-assignment maximum Hamming distance (benchmark value).
+    category: core
+  - name: cr_assign_feature_offset
+    cli_flag: --crAssignFeatureOffset
+    type: int
+    required: false
+    default: 0
+    description: Feature-assignment feature offset (benchmark value).
+    category: core
+  - name: cr_assign_min_counts
+    cli_flag: --crAssignMinCounts
+    type: int
+    required: false
+    default: 0
+    description: Feature-assignment minimum counts (benchmark value).
+    category: core
+  - name: cr_assign_max_barcode_mismatches
+    cli_flag: --crAssignMaxBarcodeMismatches
+    type: int
+    required: false
+    default: 5
+    description: Feature-assignment maximum barcode mismatches (benchmark value).
+    category: core
+  - name: cr_assign_feature_n
+    cli_flag: --crAssignFeatureN
+    type: int
+    required: false
+    default: 0
+    description: Feature-assignment maximum N bases in the feature sequence (benchmark value).
+    category: core
+  - name: cr_assign_barcode_n
+    cli_flag: --crAssignBarcodeN
+    type: int
+    required: false
+    default: 1
+    description: Feature-assignment maximum N bases in the cell barcode (benchmark value).
     category: core
   - name: dynamic_thread_interface
     cli_flag: --dynamicThreadInterface
@@ -73,7 +336,7 @@ parameters:
     type: int
     required: true
     default: 32
-    description: Cap for const-map threads (often match run_thread_n).
+    description: Concurrent mapping permits; set equal to run_thread_n, as the benchmark runs did.
     category: core
   - name: cr_assign_consumer_threads
     cli_flag: --crAssignConsumerThreads
@@ -89,12 +352,26 @@ parameters:
     default: 1
     description: Search threads per consumer (keep at 1 to avoid oversubscription).
     category: core
+  - name: cr_assign_skip_qc_outputs
+    cli_flag: --crAssignSkipQcOutputs
+    type: int
+    required: false
+    default: 1
+    description: Skip feature-assignment histogram and heatmap outputs (1, as in the benchmark).
+    category: core
   - name: default_cr_compat
     cli_flag: --defaultCrCompat
     type: string
     required: true
     default: "yes"
-    description: Enable CR-compatible defaults for GEX + features.
+    description: Enable CR-compatible defaults for GEX + features (explicit options in this recipe take precedence).
+    category: core
+  - name: out_sam_type
+    cli_flag: --outSAMtype
+    type: string
+    required: false
+    default: None
+    description: No BAM, as in the benchmark; set to BAM SortedByCoordinate if you need BAM.
     category: core
   - name: out_file_name_prefix
     cli_flag: --outFileNamePrefix
@@ -106,8 +383,11 @@ parameters:
 
 constraints:
   - kind: positive
-    params: [run_thread_n, dynamic_thread_interface, dynamic_thread_const_map_permits, cr_assign_search_threads]
+    params: [run_thread_n, dynamic_thread_interface, dynamic_thread_const_map_permits, cr_assign_search_threads, solo_cb_start, solo_cb_len, solo_umi_start, solo_umi_len]
     message: Must be positive (use cr_assign_consumer_threads -1 for auto).
+  - kind: non_negative
+    params: [solo_barcode_read_length, chim_segment_min, cr_min_umi, cr_assign_max_hamming, cr_assign_feature_offset, cr_assign_min_counts, cr_assign_max_barcode_mismatches, cr_assign_feature_n, cr_assign_barcode_n, cr_assign_skip_qc_outputs]
+    message: Must be zero or positive.
 
 rendering:
   omit_absent_optionals: true
@@ -115,10 +395,43 @@ rendering:
     - run_mode
     - run_thread_n
     - genome_dir
+    - read_files_cdna
+    - read_files_cb_umi
+    - read_files_bgzf_mode
     - pf_multi_config
+    - solo_cb_whitelist
+    - solo_cb_start
+    - solo_cb_len
+    - solo_umi_start
+    - solo_umi_len
+    - solo_barcode_read_length
+    - clip_adapter_type
+    - clip_3p_polyg
+    - align_ends_type
+    - chim_segment_min
+    - solo_cb_match_wl_type
+    - solo_umi_filtering
+    - solo_umi_dedup
+    - solo_multi_mappers
+    - solo_cell_filter
+    - solo_cb_ub_require_together
+    - solo_strand
+    - solo_features
+    - solo_cr_gex_feature
+    - solo_cr_multimap_rescue
+    - cr_chemistry
+    - cr_min_umi
+    - cr_assign_max_hamming
+    - cr_assign_feature_offset
+    - cr_assign_min_counts
+    - cr_assign_max_barcode_mismatches
+    - cr_assign_feature_n
+    - cr_assign_barcode_n
     - dynamic_thread_interface
     - dynamic_thread_const_map_permits
     - cr_assign_consumer_threads
     - cr_assign_search_threads
+    - cr_assign_skip_qc_outputs
     - default_cr_compat
+    - out_sam_type
     - out_file_name_prefix
