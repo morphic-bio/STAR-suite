@@ -165,11 +165,10 @@ actionable; link to deeper docs rather than copying them.
   reproduce results from releases before 1.9.4 and need `--flexLegacy yes`.
   In the earlier JAX benchmark H2 recovered measurable additional reads but gave
   no material final count benefit and a much larger cache.
-- Do not generalize the scRNA-seq H2 result to spatial assays. Spatial Flex
-  (`--soloSpatialFlexIntegrated yes`) is not yet migrated to the half-probe
-  route and still needs `--flexLegacy yes`. Spatial recipes may evaluate H2, but
-  must validate count-level benefit, specificity, memory, and runtime on
-  representative spatial data before making it a default.
+- Spatial Flex now uses the fused half-probe route and the spatial molecule
+  engine without genomic alignment. It requires paired raw FASTQ and rejects
+  `--flexLegacy yes`; do not route spatial families through Chromium CBQ or
+  ordinary CB correction. See [spatial half-probe processing](docs/SPATIAL_FLEX_HALF_PROBE.md).
 - On the legacy route, the fused triage queried H0+H1 at offset 0 and the full
   classifier could consume H2 records; generating an H2 cache alone did not make
   the fused path use H2.
