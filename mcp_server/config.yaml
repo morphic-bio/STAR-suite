@@ -163,7 +163,7 @@ workflows:
 
   - id: star_scrna_solo_droplet
     title: STARsolo droplet scRNA-seq
-    summary: One STAR alignReads command for droplet scRNA-seq (--soloType Droplet + whitelist) with the Cell Ranger-compatible option set and a library strand choice.
+    summary: One STAR alignReads command for droplet scRNA-seq (--soloType Droplet + whitelist) with the Cell Ranger-compatible option set and a required library strand choice.
     entry_script: core/legacy/source/STAR
     kind: star_cli
     schema_file: mcp_server/workflows/star_scrna_solo_droplet.yaml
@@ -187,7 +187,7 @@ workflows:
 
   - id: star_perturb_cr_compat
     title: STAR-perturb (CR-compat alignReads)
-    summary: One STAR alignReads command with GEX FASTQs, --pfMultiConfig, the Cell Ranger-compatible option set, a library strand choice and CR-compat threading defaults.
+    summary: One STAR alignReads command with GEX FASTQs, --pfMultiConfig, the Cell Ranger-compatible option set, a required library strand choice and CR-compat threading defaults.
     entry_script: core/legacy/source/STAR
     kind: star_cli
     schema_file: mcp_server/workflows/star_perturb_cr_compat.yaml
