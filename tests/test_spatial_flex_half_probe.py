@@ -32,12 +32,13 @@ def main():
     p.add_argument('--r2', required=True, help='Comma-separated original R2 lanes')
     p.add_argument('--pairs-per-lane', type=int, default=512)
     p.add_argument('--bgzip', default='bgzip')
+    p.add_argument('--resume', action='store_true', help='Reuse verified successful cases; give failed attempts fresh directories')
     args = p.parse_args()
-    args.out.mkdir(parents=True, exist_ok=False)
+    args.out.mkdir(parents=True, exist_ok=args.resume)
     inputs = args.out / 'inputs'
-    inputs.mkdir()
+    inputs.mkdir(exist_ok=args.resume)
     empty = args.out / 'empty_genome'
-    empty.mkdir()
+    empty.mkdir(exist_ok=args.resume)
     paths = {'plain': [[], []], 'gzip': [[], []], 'bgzf': [[], []]}
     count = 0
     source_counts = []
@@ -88,32 +89,59 @@ def main():
             '--soloSpatialOverflowPolicy', 'Fail', '--readFilesBgzfMode', 'auto']
     results = []
     def run(name, kind='gzip', threads=4, options=(), env_changes=None, mates=None, expected_failure=None):
+        effective = list(base)
+        # STAR rejects duplicate CLI definitions, so replace scalar defaults.
+        for i in range(0, len(options), 2):
+            key, value = str(options[i]), str(options[i + 1])
+            if key in effective:
+                effective[effective.index(key) + 1] = value
+            else:
+                effective.extend([key, value])
         out = args.out / name
-        out.mkdir()
-        argv = base + ['--runThreadN', str(threads), '--outFileNamePrefix', str(out) + '/',
-                       '--readFilesIn', *[','.join(m) for m in (mates or paths[kind])], *map(str, options)]
+        def command_for(directory):
+            return effective + ['--runThreadN', str(threads), '--outFileNamePrefix', str(directory) + '/',
+                                '--readFilesIn', *[','.join(m) for m in (mates or paths[kind])]]
+        argv = command_for(out)
+        previous = None
+        if out.exists() and args.resume:
+            attempt = out / 'attempt.json'
+            previous = json.loads(attempt.read_text()) if attempt.exists() else None
+            if not (previous and previous.get('exit_code') == 0 and
+                    previous['argv'] == argv and previous['binary_sha256'] == digest(args.star)):
+                previous = None
+                retry = 2
+                while out.exists():
+                    out = args.out / f'{name}_retry{retry}'
+                    retry += 1
+                argv = command_for(out)
+        out.mkdir(exist_ok=previous is not None)
         env = os.environ.copy()
         for key in ('STAR_DISABLE_FLEX_NO_GENOME', 'STAR_FLEX_HASH_H0_ONLY', 'STAR_FLEX_HASH_SCREEN_CACHE'):
             env.pop(key, None)
         env.update(env_changes or {})
-        record = {'case': name, 'argv': argv, 'binary_sha256': digest(args.star),
-                  'env_overrides': env_changes or {}, 'status': 'running'}
+        record = previous or {'case': name, 'argv': argv, 'binary_sha256': digest(args.star),
+                              'env_overrides': env_changes or {}, 'status': 'running'}
         manifest = out / 'attempt.json'
-        manifest.write_text(json.dumps(record, indent=2) + '\n')
-        start = time.monotonic()
-        with (out / 'console.log').open('w') as log:
-            proc = subprocess.run(argv, stdout=log, stderr=subprocess.STDOUT, env=env, timeout=300)
-        record.update(exit_code=proc.returncode, wall_seconds=time.monotonic() - start,
-                      status='finished')
-        manifest.write_text(json.dumps(record, indent=2) + '\n')
+        if previous is None:
+            manifest.write_text(json.dumps(record, indent=2) + '\n')
+            start = time.monotonic()
+            with (out / 'console.log').open('w') as log:
+                proc = subprocess.run(argv, stdout=log, stderr=subprocess.STDOUT, env=env, timeout=300)
+            record.update(exit_code=proc.returncode, wall_seconds=time.monotonic() - start,
+                          status='finished')
+            manifest.write_text(json.dumps(record, indent=2) + '\n')
+        else:
+            assert record['env_overrides'] == (env_changes or {})
+            print('REUSE completed case', name, flush=True)
+        exit_code = record['exit_code']
         logs = '\n'.join(f.read_text(errors='replace') for f in (out / 'console.log', out / 'Log.out') if f.exists())
         assert '..... loading genome' not in logs, name + ' loaded the reference'
         if expected_failure:
-            assert proc.returncode != 0 and expected_failure in logs, (name, proc.returncode, logs[-2000:])
+            assert exit_code != 0 and expected_failure in logs, (name, exit_code, logs[-2000:])
             assert not (out / 'SpatialFlex.out/run_summary.tsv').exists()
             record['passed'] = True
         else:
-            assert proc.returncode == 0, (name, logs[-3000:])
+            assert exit_code == 0, (name, logs[-3000:])
             assert 'Flex count-only no-genome: active' in logs
             summary = dict(line.split('\t', 1) for line in (out / 'SpatialFlex.out/run_summary.tsv').read_text().splitlines() if '\t' in line)
             assert summary['feature_route'] == 'half_probe_no_alignment'
