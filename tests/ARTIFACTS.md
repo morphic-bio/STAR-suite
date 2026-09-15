@@ -34,6 +34,12 @@ update this file with its output location.
 
 ## Known untracked artifacts (current)
 
+- `/storage/visium-hd-half-probe-20260915/gex_finalization_audit/` contains
+  clean source extracts and standalone resolver diagnostic binaries for the
+  ovarian finalization audit. Compact commands, source hashes and outputs are
+  retained under `visium-hd-processing-provenance/runs/visium_hd_publication/20260915_ovarian_gex_finalization_audit/`.
+  No full-slide STAR run is executed by these diagnostics.
+
 - `/home/lhhung/pf_larry_regression_20260911/` (feature-search policy regression diagnostics, clean build logs, full A375 revert validation in `a375_revert_star/`, semantic feature-MEX and bytewise GEX comparisons; see `docs/HANDOFF_PF_SEARCH_REVERT_A375_VALIDATION_20260911.md`)
 - `.codespaces-demo/` (Codespaces demo cache, downloaded public fixtures, tiny indices, and walkthrough runs)
 - `plans/artifacts/parms_tests_YYYYMMDD/` (logs + report)
