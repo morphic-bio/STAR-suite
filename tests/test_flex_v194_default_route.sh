@@ -120,7 +120,7 @@ neg N3_bam          "--outSAMtype BAM (SAM/BAM output needs genomic alignment)" 
 neg N4_noalign0     "--flexNoAlign 0 (aligning hash-screen misses) is a LEGACY" "${CACHE[@]}" --flexNoAlign 0
 neg N5_nohash       "--no-hash-screen yes is a LEGACY" "${CACHE[@]}" --no-hash-screen yes
 run N6_spatial $S194 "${CACHE[@]}" --soloSpatialFlexIntegrated yes
-if logs N6_spatial | grep -qF -- "spatial Flex is not yet migrated"; then ok "N6_spatial stopped: spatial legacy check"
+if logs N6_spatial | grep -qF -- "requires --soloType CB_UMI_Complex"; then ok "N6_spatial stopped: Chromium barcode geometry is not a spatial recipe"
 elif logs N6_spatial | grep -qF -- "lacks an exact immutable source revision"; then
   echo "  DEFERRED  N6_spatial: stopped earlier by the spatial source-revision guard (uncommitted build); re-check on the release build"
 else bad "N6_spatial unexpected: $(logs N6_spatial | grep -m1 EXITING | cut -c1-120)"; fi

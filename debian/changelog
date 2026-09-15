@@ -1,3 +1,17 @@
+star-suite (1.9.5-1) unstable; urgency=medium
+
+  * Migrate Visium HD Flex to the fused half-probe path without a genome
+    index or alignment fallback; retain candidate-specific spatial molecule
+    resolution and all four matrix policies at 2, 8 and 16 micrometers.
+  * Preserve raw spatial barcode/UMI evidence and deterministic lane/read
+    identities across ordinary gzip, native BGZF and bounded spill modes.
+  * Reject malformed spatial FASTQ pairs and retired spatial legacy routes.
+  * Add spatial transaction, probe ambiguity, input-format and spill tests.
+    Keep existing public benchmark and evidence records labelled by their
+    original source releases.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Tue, 15 Sep 2026 09:30:00 +0000
+
 star-suite (1.9.4-1) unstable; urgency=medium
 
   * Make the half-probe (H1X2) method the Flex default: --flex yes assigns

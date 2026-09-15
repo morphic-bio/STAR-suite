@@ -555,9 +555,8 @@ struct Pipeline::Impl {
         std::uint64_t flexHashH0Reads = 0;
         std::uint64_t flexHashH1Reads = 0;
         std::uint64_t flexHashDenyReads = 0;
-        std::uint64_t flexAlignmentMissReads = 0;
-        std::uint64_t flexAlignmentResolvedReads = 0;
-        std::uint64_t flexAlignmentUnresolvedReads = 0;
+        std::uint64_t flexUnassignedReads = 0;
+        std::uint64_t flexHashH1X2Reads = 0;
     };
 
     PipelineConfig config;
@@ -2377,11 +2376,13 @@ bool Pipeline::completeCurrentThread(FeatureEvidenceClass source,
         return false;
     }
     if ((source == FeatureEvidenceClass::FlexH0
-         || source == FeatureEvidenceClass::FlexH1) && !assigned) {
+         || source == FeatureEvidenceClass::FlexH1
+         || source == FeatureEvidenceClass::FlexH1X2) && !assigned) {
         error = "integrated spatial Flex cache hit was completed without a feature";
         return false;
     }
-    if (source == FeatureEvidenceClass::FlexHashDeny && assigned) {
+    if ((source == FeatureEvidenceClass::FlexHashDeny
+         || source == FeatureEvidenceClass::FlexUnassigned) && assigned) {
         error = "integrated spatial Flex hash deny was completed with a feature";
         return false;
     }
@@ -2413,13 +2414,10 @@ bool Pipeline::completeCurrentThread(FeatureEvidenceClass source,
         ++thread.flexHashH1Reads;
     } else if (source == FeatureEvidenceClass::FlexHashDeny) {
         ++thread.flexHashDenyReads;
-    } else if (source == FeatureEvidenceClass::FlexAlignment) {
-        ++thread.flexAlignmentMissReads;
-        if (assigned) {
-            ++thread.flexAlignmentResolvedReads;
-        } else {
-            ++thread.flexAlignmentUnresolvedReads;
-        }
+    } else if (source == FeatureEvidenceClass::FlexH1X2) {
+        ++thread.flexHashH1X2Reads;
+    } else if (source == FeatureEvidenceClass::FlexUnassigned) {
+        ++thread.flexUnassignedReads;
     }
 
     bool completed = true;
@@ -2593,11 +2591,8 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
             impl_->summary.flexHashH0Reads += thread.flexHashH0Reads;
             impl_->summary.flexHashH1Reads += thread.flexHashH1Reads;
             impl_->summary.flexHashDenyReads += thread.flexHashDenyReads;
-            impl_->summary.flexAlignmentMissReads += thread.flexAlignmentMissReads;
-            impl_->summary.flexAlignmentResolvedReads +=
-                thread.flexAlignmentResolvedReads;
-            impl_->summary.flexAlignmentUnresolvedReads +=
-                thread.flexAlignmentUnresolvedReads;
+            impl_->summary.flexHashH1X2Reads += thread.flexHashH1X2Reads;
+            impl_->summary.flexUnassignedReads += thread.flexUnassignedReads;
         }
         if (impl_->config.requirePairedCompletion
             && impl_->summary.featureAssignedReads
@@ -2605,6 +2600,13 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
                 != impl_->summary.readsDecoded) {
             throw std::runtime_error(
                 "integrated spatial feature decisions do not cover every decoded R1");
+        }
+        if (impl_->config.flexFeatureMode &&
+            (impl_->summary.flexHashH0Reads + impl_->summary.flexHashH1Reads
+             + impl_->summary.flexHashH1X2Reads != impl_->summary.featureAssignedReads
+             || impl_->summary.flexHashDenyReads + impl_->summary.flexUnassignedReads
+                != impl_->summary.featureUnassignedReads)) {
+            throw std::runtime_error("spatial half-probe keep/deny/miss accounting differs from completions");
         }
         impl_->summary.joinedReads = impl_->totalJoinedReads.load(std::memory_order_relaxed);
         impl_->summary.candidateRows = impl_->totalCandidateRows.load(std::memory_order_relaxed);
@@ -2902,12 +2904,12 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
                 << "feature_hash_h1\t" << impl_->summary.flexHashH1Reads << '\n'
                 << "feature_hash_deny\t"
                 << impl_->summary.flexHashDenyReads << '\n'
-                << "feature_hash_miss\t"
-                << impl_->summary.flexAlignmentMissReads << '\n'
-                << "feature_alignment_resolved\t"
-                << impl_->summary.flexAlignmentResolvedReads << '\n'
-                << "feature_alignment_unresolved\t"
-                << impl_->summary.flexAlignmentUnresolvedReads << '\n';
+                << "feature_hash_h1x2\t" << impl_->summary.flexHashH1X2Reads << '\n'
+                << "feature_hash_miss\t" << impl_->summary.flexUnassignedReads << '\n'
+                << "feature_route\thalf_probe_no_alignment\n"
+                << "source_ordinal_encoding\tlane_record_interleave\n"
+                << "feature_alignment_resolved\t0\n"
+                << "feature_alignment_unresolved\t0\n";
         }
         {
             AtomicOutput output(impl_->config.outputDirectory + "/run_summary.tsv");
