@@ -1,6 +1,6 @@
 {
   "schema": "starsuite.release_snapshots/v1",
-  "release": "1.9.4",
+  "release": "1.9.5",
   "recipes": {
     "repository": "https://github.com/morphic-bio/STAR-suite-recipes",
     "revision": "1b12325117da1f979f5e0233ae04e168f7dafb13",

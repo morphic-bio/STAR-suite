@@ -1,4 +1,5 @@
 #include "FlexPipeline.h"
+#include "SpatialGex.h"
 #include "FlexHashScreen.h"
 #include "FlexDecisionSidecar.h"
 #include "SoloReadBarcode.h"
@@ -555,11 +556,95 @@ static FlexLaneStream flexOpenLaneMate(const Parameters &P, const std::string &p
     return stream;
 }
 
-static void flexCloseLaneMate(FlexLaneStream &stream) {
-    if (stream.gz != nullptr) gzclose(stream.gz);
-    if (stream.pipe != nullptr) pclose(stream.pipe);
+static bool flexCloseLaneMate(FlexLaneStream &stream) {
+    bool success = true;
+    if (stream.gz != nullptr && gzclose(stream.gz) != Z_OK) success = false;
+    if (stream.pipe != nullptr && pclose(stream.pipe) != 0) success = false;
     stream.gz = nullptr;
     stream.pipe = nullptr;
+    return success;
+}
+
+// Strict FASTQ validation for spatial transactions. A truncated mate or a
+// decompressor error must not look like a successfully completed shorter slide.
+static bool readSpatialFastq(FlexPipelineState *st, gzFile gz,
+                             char *header, int headerCapacity,
+                             char *sequence, char *quality, uint32_t &length) {
+    uint32_t headerLength = 0;
+    if (!gzReadLine(gz, header, headerCapacity, &headerLength)) {
+        int status = Z_OK;
+        gzerror(gz, &status);
+        if (!gzeof(gz) || (status != Z_OK && status != Z_STREAM_END))
+            st->failInput("spatial FASTQ input/decompression error");
+        return false;
+    }
+    char plus[kFlexPipeSeqMax + 256];
+    uint32_t plusLength = 0, qualityLength = 0;
+    if (headerLength == 0 || header[0] != '@' ||
+        headerLength >= static_cast<uint32_t>(headerCapacity - 1) ||
+        !gzReadLine(gz, sequence, kFlexPipeSeqMax, &length) ||
+        length == 0 || length >= kFlexPipeSeqMax - 1 ||
+        !gzReadLine(gz, plus, sizeof(plus), &plusLength) ||
+        plusLength == 0 || plus[0] != '+' || plusLength >= sizeof(plus) - 1 ||
+        !gzReadLine(gz, quality, kFlexPipeSeqMax, &qualityLength) ||
+        qualityLength != length) {
+        st->failInput("malformed or truncated spatial FASTQ record");
+        return false;
+    }
+    return true;
+}
+
+static size_t spatialMateNameLength(const char *name) {
+    size_t length = fastqReadNameLength(name, std::strlen(name));
+    if (length >= 2 && name[length - 2] == '/' &&
+        (name[length - 1] == '1' || name[length - 1] == '2')) length -= 2;
+    return length;
+}
+
+// One worker owns raw-R1 decode through terminal feature completion. The
+// ordinal is an injective lane/record interleave, independent of scheduling and
+// compression; the spatial engine rejects its existing compact uint32 bound.
+static bool completeSpatialFlexRead(
+    FlexPipelineState *st, Parameters &P, const char *r1, size_t length,
+    const char *quality, int lane, uint64_t laneOrdinal,
+    const FlexHashScreenDecision &decision)
+{
+    const uint64_t lanes = static_cast<uint64_t>(st->nLanes);
+    if (lanes == 0 || laneOrdinal >
+        (std::numeric_limits<uint32_t>::max() - static_cast<uint64_t>(lane)) / lanes) {
+        st->failInput("spatial lane/record identity exceeds compact uint32 range");
+        return false;
+    }
+    const uint64_t ordinal = laneOrdinal * lanes + static_cast<uint64_t>(lane);
+    const bool keep = decision.action == FlexHashScreenDecision::Keep;
+    auto source = spatial_gex::FeatureEvidenceClass::FlexUnassigned;
+    if (keep) {
+        if (decision.geneIdx15 == 0) {
+            st->failInput("spatial half-probe keep has no feature ID");
+            return false;
+        }
+        if (decision.cacheClass == FlexHashCacheH0)
+            source = spatial_gex::FeatureEvidenceClass::FlexH0;
+        else if (decision.cacheClass == FlexHashCacheH1)
+            source = spatial_gex::FeatureEvidenceClass::FlexH1;
+        else if (decision.cacheClass == FlexHashCacheH1X2)
+            source = spatial_gex::FeatureEvidenceClass::FlexH1X2;
+        else {
+            st->failInput("spatial half-probe keep has an unsupported cache class");
+            return false;
+        }
+    } else if (decision.action == FlexHashScreenDecision::Deny) {
+        source = spatial_gex::FeatureEvidenceClass::FlexHashDeny;
+    }
+    std::string error;
+    if (P.spatialGexPipeline == nullptr ||
+        !P.spatialGexPipeline->decodeCurrentThread(r1, length, quality, length, ordinal, error) ||
+        !P.spatialGexPipeline->completeCurrentThread(
+            source, keep, keep ? decision.geneIdx15 - 1 : 0, ordinal, error)) {
+        st->failInput("spatial half-probe completion failed: " + error);
+        return false;
+    }
+    return true;
 }
 
 // Per-read work for one batch of FASTQ records. This is the body the lane loop
@@ -569,7 +654,7 @@ static void processFastqBatch(
     FlexPipelineState *st, Parameters &P, FlexFastqBatch &batch,
     SoloReadFeature *readFeat, Stats *stats,
     SampleDetector *sampleDet, bool sampleDetReady,
-    SoloReadBarcode &localBar, bool noAlign, ReadAlign *RA)
+    SoloReadBarcode *localBar, bool noAlign, ReadAlign *RA)
 {
     auto &cache = FlexHashScreenCache::instance();
     FlexLocalCounters tally(st->counters, batch.laneId);
@@ -618,26 +703,43 @@ static void processFastqBatch(
             decision.action == FlexHashScreenDecision::Pass && !noAlign,
             decision.action == FlexHashScreenDecision::Pass && noAlign);
 
+        if (P.soloSpatialFlexIntegratedEnabled) {
+            if (!completeSpatialFlexRead(st, P, seq1, readLen1, qual1,
+                                         batch.laneId, batch.laneFirst + i, decision)) return;
+            if (decision.action == FlexHashScreenDecision::Keep) {
+                ++stats->hashScreenKeep;
+                ++tally.keep;
+            } else if (decision.action == FlexHashScreenDecision::Deny) {
+                ++stats->hashScreenDeny;
+                ++tally.deny;
+            } else {
+                ++stats->hashScreenPass;
+                ++tally.miss;
+            }
+            tally.countRead();
+            continue;
+        }
+
         if (decision.action == FlexHashScreenDecision::Keep ||
             decision.action == FlexHashScreenDecision::Deny) {
 
             char *readSeqPtrs[2]  = { dummySeq, seq1 };
             char *readQualPtrs[2] = { dummyQual, qual1 };
             uint64 readLens[2]    = { 0, readLen1 };
-            localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
+            localBar->getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
                                   static_cast<uint32_t>(batch.laneId), name);
 
-            localBar.detectedSampleToken = detectedSampleToken;
+            localBar->detectedSampleToken = detectedSampleToken;
 
             if (decision.action == FlexHashScreenDecision::Keep) {
-                record_flex_hash_screen_keep(readFeat, localBar, iReadAll,
+                record_flex_hash_screen_keep(readFeat, *localBar, iReadAll,
                                              decision.geneIdx15, decision.cacheClass,
                                              decision.probeRegion);
                 stats->hashScreenKeep++;
-                if (localBar.cbMatch < 0) stats->hashScreenKeepNoBarcode++;
+                if (localBar->cbMatch < 0) stats->hashScreenKeepNoBarcode++;
                 ++tally.keep;
             } else {
-                record_flex_hash_screen_deny(readFeat, localBar, iReadAll,
+                record_flex_hash_screen_deny(readFeat, *localBar, iReadAll,
                                              sampleOK
                                                  ? flexHashScreenDenyReason(decision.negativeCode)
                                                  : "UNMATCHED_TAG");
@@ -691,7 +793,7 @@ static uint64_t processOneLane(
     gzFile gzR2, gzFile gzR1,
     SoloReadFeature *readFeat, Stats *stats,
     SampleDetector *sampleDet, bool sampleDetReady,
-    SoloReadBarcode &localBar, bool noAlign = false,
+    SoloReadBarcode *localBar, bool noAlign = false,
     ReadAlign *RA = nullptr)
 {
     char lineBuf[kFlexPipeSeqMax + 256];
@@ -699,6 +801,8 @@ static uint64_t processOneLane(
     char qual0[kFlexPipeSeqMax];
     char name[kFlexPipeNameMax];
     uint64_t nReads = 0;
+    const bool spatial = P.soloSpatialFlexIntegratedEnabled;
+    std::atomic<bool> stopMate{false};
 
     BoundedQueue<FlexFastqMateChunk*> mateReady(kFlexFastqMateChunks);
     BoundedQueue<FlexFastqMateChunk*> mateFree(kFlexFastqMateChunks);
@@ -710,6 +814,7 @@ static uint64_t processOneLane(
 
     std::thread mateReader([&]() {
         char mateLine[kFlexPipeSeqMax + 256];
+        char mateHeader[kFlexPipeSeqMax + 256];
         char mateSeq[kFlexPipeSeqMax];
         char mateQual[kFlexPipeSeqMax];
         FlexFastqMateChunk *chunk = nullptr;
@@ -720,13 +825,20 @@ static uint64_t processOneLane(
         chunk->reset();
         for (;;) {
             uint32_t length = 0;
-            bool ok = gzConsumeLine(gzR1, mateLine, sizeof(mateLine)) &&
+            if (spatial && stopMate.load(std::memory_order_relaxed)) break;
+            bool ok = spatial ? readSpatialFastq(st, gzR1, mateHeader, sizeof(mateHeader),
+                                                 mateSeq, mateQual, length)
+                              : gzConsumeLine(gzR1, mateLine, sizeof(mateLine)) &&
                       gzReadLine(gzR1, mateSeq, kFlexPipeSeqMax, &length) &&
                       gzConsumeLine(gzR1, mateLine, sizeof(mateLine)) &&
                       gzReadQualityLine(gzR1, mateQual, kFlexPipeSeqMax, length);
             if (ok) {
                 FlexFastqMateRecordRef rec;
                 rec.len = length;
+                if (spatial) {
+                    rec.nameLen = spatialMateNameLength(mateHeader + 1);
+                    rec.offName = chunk->append(mateHeader + 1, rec.nameLen);
+                }
                 rec.offSeq = chunk->append(mateSeq, length);
                 rec.offQual = chunk->append(mateQual, length);
                 chunk->recs.push_back(rec);
@@ -736,7 +848,10 @@ static uint64_t processOneLane(
                 chunk->eof = !ok;
                 FlexFastqMateChunk *ready = chunk;
                 chunk = nullptr;
-                mateReady.push(std::move(ready));
+                if (!mateReady.push(std::move(ready))) {
+                    delete ready;
+                    break;
+                }
                 if (!ok) break;
                 if (!mateFree.try_pop(chunk) || chunk == nullptr) {
                     chunk = new FlexFastqMateChunk();
@@ -763,10 +878,13 @@ static uint64_t processOneLane(
         if (batch->recs.empty()) return !mateExhausted;
         FlexFastqMateChunk *chunk = nullptr;
         if (!mateReady.pop(chunk) || chunk == nullptr) {
+            if (spatial) st->failInput("spatial FASTQ R1 ended before R2");
             mateExhausted = true;
             batch->recs.clear();
             return false;
         }
+        if (spatial && batch->recs.size() != chunk->recs.size())
+            st->failInput("spatial FASTQ mates have different record counts");
         const size_t paired = std::min(batch->recs.size(), chunk->recs.size());
         if (chunk->eof || chunk->recs.size() < batch->recs.size()) {
             mateExhausted = true;
@@ -774,6 +892,14 @@ static uint64_t processOneLane(
         batch->recs.resize(paired);
         batch->data1.swap(chunk->data);
         for (size_t i = 0; i < paired; ++i) {
+            if (spatial && (batch->recs[i].nameLen != chunk->recs[i].nameLen ||
+                std::memcmp(batch->at(batch->recs[i].offName),
+                            batch->data1.data() + chunk->recs[i].offName,
+                            batch->recs[i].nameLen) != 0)) {
+                st->failInput("spatial FASTQ mate names disagree at lane " +
+                              std::to_string(laneId) + " record " +
+                              std::to_string(nReads - batch->recs.size() + i));
+            }
             batch->recs[i].offSeq1 = chunk->recs[i].offSeq;
             batch->recs[i].offQual1 = chunk->recs[i].offQual;
             batch->recs[i].len1 = chunk->recs[i].len;
@@ -803,9 +929,20 @@ static uint64_t processOneLane(
     };
 
     while (true) {
-        uint32_t headerLength = 0;
-        if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf), &headerLength)) break;
+        uint32_t headerLength = 0, readLen0 = 0;
         size_t nameLen = 0;
+        if (spatial) {
+            if (!readSpatialFastq(st, gzR2, lineBuf, sizeof(lineBuf),
+                                  seq0, qual0, readLen0)) break;
+            nameLen = spatialMateNameLength(lineBuf + 1);
+            if (nameLen >= kFlexPipeNameMax) {
+                st->failInput("spatial FASTQ name exceeds supported length");
+                break;
+            }
+            std::memcpy(name, lineBuf + 1, nameLen);
+            name[nameLen] = '\0';
+        } else {
+        if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf), &headerLength)) break;
         {
             const char *src = lineBuf;
             size_t available = headerLength;
@@ -818,7 +955,6 @@ static uint64_t processOneLane(
             std::memcpy(name, src, nameLen);
             name[nameLen] = '\0';
         }
-        uint32_t readLen0 = 0;
         if (!gzReadLine(gzR2, seq0, kFlexPipeSeqMax, &readLen0)) break;
         if (!gzConsumeLine(gzR2, lineBuf, sizeof(lineBuf))) break;
         if (noAlign) {
@@ -826,6 +962,8 @@ static uint64_t processOneLane(
             if (!gzConsumeLine(gzR2, lineBuf, kFlexPipeSeqMax)) break;
         } else if (!gzReadQualityLine(gzR2, qual0, kFlexPipeSeqMax, readLen0)) {
             break;
+        }
+
         }
 
         FlexFastqRecordRef rec;
@@ -843,6 +981,17 @@ static uint64_t processOneLane(
     handOff();
     if (!st->fastqFreeQ.try_push(batch)) delete batch;
 
+    // Once R2 ends, the only remaining valid R1 chunk is an empty EOF.
+    // Observe it before cancelling the producer, so a longer R1 is fatal.
+    if (spatial && !st->inputFailed.load(std::memory_order_relaxed) && !mateExhausted) {
+        FlexFastqMateChunk *tail = nullptr;
+        if (mateReady.pop(tail) && tail != nullptr) {
+            if (!tail->recs.empty())
+                st->failInput("spatial FASTQ R1 has records after R2 ended");
+            delete tail;
+        }
+    }
+    stopMate.store(true, std::memory_order_relaxed);
     // Drain anything the barcode reader still holds so it can finish.
     mateReady.close();
     FlexFastqMateChunk *drained = nullptr;
@@ -859,7 +1008,7 @@ static uint64_t processOneBgzfRange(
     const FlexBgzfRangeTask &task,
     SoloReadFeature *readFeat, Stats *stats,
     SampleDetector *sampleDet, bool sampleDetReady,
-    SoloReadBarcode &localBar, bool noAlign, ReadAlign *RA)
+    SoloReadBarcode *localBar, bool noAlign, ReadAlign *RA)
 {
     const FlexBgzfLane &lanePlan = st->bgzfLanes[static_cast<size_t>(task.laneId)];
     std::string inputError;
@@ -952,6 +1101,23 @@ static uint64_t processOneBgzfRange(
             decision.action == FlexHashScreenDecision::Pass && !noAlign,
             decision.action == FlexHashScreenDecision::Pass && noAlign);
 
+        if (P.soloSpatialFlexIntegratedEnabled) {
+            if (!completeSpatialFlexRead(st, P, seq1, readLen1, qual1,
+                                         task.laneId, record.read_ordinal, decision)) return nReads;
+            if (decision.action == FlexHashScreenDecision::Keep) {
+                ++stats->hashScreenKeep;
+                ++tally.keep;
+            } else if (decision.action == FlexHashScreenDecision::Deny) {
+                ++stats->hashScreenDeny;
+                ++tally.deny;
+            } else {
+                ++stats->hashScreenPass;
+                ++tally.miss;
+            }
+            tally.countRead();
+            continue;
+        }
+
         if (decision.action == FlexHashScreenDecision::Keep ||
             decision.action == FlexHashScreenDecision::Deny) {
             char *readSeqPtrs[2] = {
@@ -961,22 +1127,22 @@ static uint64_t processOneBgzfRange(
                 dummyQual, const_cast<char *>(qual1)
             };
             uint64 readLens[2] = {0, readLen1};
-            localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
+            localBar->getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
                                  static_cast<uint32_t>(task.laneId), name, nameLength);
 
-            localBar.detectedSampleToken = detectedSampleToken;
+            localBar->detectedSampleToken = detectedSampleToken;
 
             if (decision.action == FlexHashScreenDecision::Keep) {
-                record_flex_hash_screen_keep(readFeat, localBar, iReadAll,
+                record_flex_hash_screen_keep(readFeat, *localBar, iReadAll,
                                              decision.geneIdx15, decision.cacheClass,
                                              decision.probeRegion);
                 stats->hashScreenKeep++;
-                if (localBar.cbMatch < 0) {
+                if (localBar->cbMatch < 0) {
                     stats->hashScreenKeepNoBarcode++;
                 }
                 ++tally.keep;
             } else {
-                record_flex_hash_screen_deny(readFeat, localBar, iReadAll,
+                record_flex_hash_screen_deny(readFeat, *localBar, iReadAll,
                                              sampleOK
                                                  ? flexHashScreenDenyReason(decision.negativeCode)
                                                  : "UNMATCHED_TAG");
@@ -1031,7 +1197,7 @@ static uint64_t processCbqModuleRecords(
     star::input::CbqInputModule &module,
     SoloReadFeature *readFeat, Stats *stats,
     SampleDetector *sampleDet, bool sampleDetReady,
-    SoloReadBarcode &localBar, bool noAlign,
+    SoloReadBarcode *localBar, bool noAlign,
     bool deterministicReadIds,
     uint64_t globalFirst,
     uint64_t laneFirst,
@@ -1157,7 +1323,7 @@ static uint64_t processCbqModuleRecords(
                             record.segments[1], P.pSolo.umiS - 1U, P.pSolo.umiL,
                             &umiPacked, &umiNMask) &&
                         cbNMask == 0 && umiNMask == 0) {
-                        barcodeHandled = localBar.getCBandUMIPackedFast(
+                        barcodeHandled = localBar->getCBandUMIPackedFast(
                             cbPacked, umiPacked, qual1, readLen1);
                     }
                 }
@@ -1178,23 +1344,23 @@ static uint64_t processCbqModuleRecords(
                     char *readQualPtrs[2] = { dummyQual, const_cast<char *>(qual1) };
                     uint64 readLens[2]    = { 0, readLen1 };
 
-                    localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens,
+                    localBar->getCBandUMI(readSeqPtrs, readQualPtrs, readLens,
                                           readNameExtra,
                                           static_cast<uint32_t>(laneId), name,
                                           nameLength);
                 }
 
-                localBar.detectedSampleToken = detectedSampleToken;
+                localBar->detectedSampleToken = detectedSampleToken;
 
                 if (decision.action == FlexHashScreenDecision::Keep) {
-                    record_flex_hash_screen_keep(readFeat, localBar, iReadAll,
+                    record_flex_hash_screen_keep(readFeat, *localBar, iReadAll,
                                                  decision.geneIdx15, decision.cacheClass,
                                                  decision.probeRegion);
                     stats->hashScreenKeep++;
-                    if (localBar.cbMatch < 0) stats->hashScreenKeepNoBarcode++;
+                    if (localBar->cbMatch < 0) stats->hashScreenKeepNoBarcode++;
                     ++tally.keep;
                 } else {
-                    record_flex_hash_screen_deny(readFeat, localBar, iReadAll,
+                    record_flex_hash_screen_deny(readFeat, *localBar, iReadAll,
                                                  sampleOK
                                                      ? flexHashScreenDenyReason(decision.negativeCode)
                                                      : "UNMATCHED_TAG");
@@ -1271,7 +1437,7 @@ static uint64_t processOneCbqLane(
     const std::string &cbqPath,
     SoloReadFeature *readFeat, Stats *stats,
     SampleDetector *sampleDet, bool sampleDetReady,
-    SoloReadBarcode &localBar, bool noAlign = false,
+    SoloReadBarcode *localBar, bool noAlign = false,
     ReadAlign *RA = nullptr)
 {
     const star::input::InputSourcePlan plan = makeSingleCbqLanePlan(cbqPath);
@@ -1295,7 +1461,7 @@ static uint64_t processOneCbqRange(
     const std::string &cbqPath,
     SoloReadFeature *readFeat, Stats *stats,
     SampleDetector *sampleDet, bool sampleDetReady,
-    SoloReadBarcode &localBar, bool noAlign, ReadAlign *RA)
+    SoloReadBarcode *localBar, bool noAlign, ReadAlign *RA)
 {
     const star::input::InputSourcePlan plan = makeSingleCbqLanePlan(cbqPath);
     star::input::CbqInputModule module;
@@ -1633,10 +1799,10 @@ void *flexLaneReaderFullThread(void *arg) {
     // Preallocate once per thread — reused across all lane claims. Fully-fused
     // callers retain this object after join so exact-CB priors are not lost.
     std::unique_ptr<SoloReadBarcode> fallbackBar;
-    if (ctx->readBar == nullptr) {
+    if (ctx->readBar == nullptr && !P.soloSpatialFlexIntegratedEnabled) {
         fallbackBar.reset(new SoloReadBarcode(P));
     }
-    SoloReadBarcode &localBar = ctx->readBar != nullptr ? *ctx->readBar : *fallbackBar;
+    SoloReadBarcode *localBar = ctx->readBar != nullptr ? ctx->readBar : fallbackBar.get();
     SampleDetector *sampleDet = nullptr;
     bool sampleDetReady = false;
 
@@ -1711,13 +1877,17 @@ void *flexLaneReaderFullThread(void *arg) {
                 if (mate0.gz == nullptr || mate1.gz == nullptr) {
                     flexCloseLaneMate(mate0);
                     flexCloseLaneMate(mate1);
+                    if (P.soloSpatialFlexIntegratedEnabled)
+                        st->failInput("could not open paired spatial FASTQ lane");
                     continue;
                 }
 
                 processOneLane(st, P, lane, mate0.gz, mate1.gz, readFeat, stats,
                                sampleDet, sampleDetReady, localBar, noAlign, RA);
-                flexCloseLaneMate(mate0);
-                flexCloseLaneMate(mate1);
+                const bool closed0 = flexCloseLaneMate(mate0);
+                const bool closed1 = flexCloseLaneMate(mate1);
+                if (P.soloSpatialFlexIntegratedEnabled && (!closed0 || !closed1))
+                    st->failInput("spatial FASTQ decompressor failed");
             }
         }
 

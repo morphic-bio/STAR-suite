@@ -842,9 +842,6 @@ void ParametersSolo::initialize(Parameters *pPin)
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         };
         if (enforceHalfProbe) {
-            if (pP->soloSpatialFlexIntegratedEnabled) {
-                legacyRouteError("--soloSpatialFlexIntegrated yes (spatial Flex is not yet migrated to the half-probe route)");
-            }
             if (hashScreenDisabled) {
                 legacyRouteError("--no-hash-screen yes");
             }
@@ -1592,7 +1589,7 @@ void ParametersSolo::initialize(Parameters *pPin)
         const bool snapshotRequested =
             std::getenv("STAR_SOLO_FLEX_HASH_SNAPSHOT_IN") != nullptr
             || std::getenv("STAR_SOLO_FLEX_HASH_SNAPSHOT_OUT") != nullptr;
-        bucketStoreEnabled = bucketMode != BucketOff
+        bucketStoreEnabled = !pP->soloSpatialFlexIntegratedEnabled && bucketMode != BucketOff
             && pP->runMode == "alignReads"
             && flexMode && inlineHashMode && cbWLyes && !snapshotRequested
             && featureYes[SoloFeatureTypes::Gene];
@@ -1671,7 +1668,8 @@ void ParametersSolo::initialize(Parameters *pPin)
         // STARsolo uses matchCBtoWL() and does not consume this structure.
         // Building it unconditionally for the 10x 3M whitelist costs several
         // GB and serial startup time without affecting the legacy matrix.
-        const bool needCbCorrector = inlineCBCorrection || inlineHashMode;
+        const bool needCbCorrector = !pP->soloSpatialFlexIntegratedEnabled
+            && (inlineCBCorrection || inlineHashMode);
         if (needCbCorrector && cbWLyes && !cbWLstr.empty()) {
             // CBQ's packed sequence already has the first base in the low
             // bits. Build this run's lookup tables in that order so the fused

@@ -588,6 +588,12 @@ test_SpatialGexDownstreamSpool: SpatialGexDownstreamSpool.o
 	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_gex_downstream_spool.cpp SpatialGexDownstreamSpool.o -o ../test/test_spatial_gex_downstream_spool
 	../test/test_spatial_gex_downstream_spool
 
+# Runtime fixture paths are explicit; building this target launches no dataset.
+.PHONY: build_test_SpatialFlexTransactions
+build_test_SpatialFlexTransactions: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+build_test_SpatialFlexTransactions: SpatialGex.o SpatialR1Decoder.o SpatialGexPipeline.o SpatialGexSpill.o SpatialGexDownstreamSpool.o MultiGeneUmiCr.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_flex_transactions.cpp $^ -o ../test/test_spatial_flex_transactions
+
 .PHONY: test_MultiGeneUmiCr
 test_MultiGeneUmiCr: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_MultiGeneUmiCr: MultiGeneUmiCr.o

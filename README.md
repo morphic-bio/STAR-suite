@@ -2,9 +2,10 @@
 
 STAR Suite updates the original STAR aligner by integrating four modules — STAR-core (with integrated TranscriptVB quantification), STAR-perturb, STAR-Flex, and STAR-SLAM — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (STAR Suite 1.9.4: **1.6–4.2x for bulk RNA-seq** against an external stepwise pipeline; against Cell Ranger 9.0.1, **3.9x for scRNA-seq**, **4.8–5.8x for Perturb-seq**, and **17–23x for Flex** from the delivered FASTQ, up to **42x** from CBQ input) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
-Current production release: **[STAR Suite v1.9.4](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.9.4)**. The suite release tag and
-source-packaging version are `v1.9.4` / `1.9.4-1`; `STAR --version` reports
-`1.9.4`. GitHub Releases also provides Ubuntu 22.04- and 24.04-built `.deb`
+Current production release: **[STAR Suite v1.9.5](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.9.5)**. The suite release tag and
+source-packaging version are `v1.9.5` / `1.9.5-1`; `STAR --version` reports
+`1.9.5`. The benchmark results below retain their measured 1.9.4 identity.
+GitHub Releases also provides Ubuntu 22.04- and 24.04-built `.deb`
 packages from the same source revision.
 Use `STAR --upstream-version` for the underlying upstream STAR base
 (`2.7.11b`) and `STAR --genome-compat-version` for the genome index
@@ -56,12 +57,13 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
   spooling supports complete slides on smaller-memory hosts. The feature is
   opt-in; ordinary bulk, STARsolo, CR-compatible scRNA, and Flex runs keep
   their existing paths and defaults.
-- **Native Visium HD Flex** (`--soloSpatialFlexIntegrated yes`): Resolves H0/H1
-  probe hits and alignment fallback directly into retained spatial candidate
-  families (not yet migrated to the 1.9.4 half-probe route, so it currently needs
-  `--flexLegacy yes`), then emits the same four policies and three spatial scales through
-  the bounded spill/materialization engine. It does not require a BAM, GX/UR
-  bridge, or external resolver/materializer.
+- **Native Visium HD Flex** (`--soloSpatialFlexIntegrated yes`): From 1.9.5,
+  resolves probes with the shared half-probe classifier and retains every
+  spatial candidate coordinate through molecule resolution. The fused FASTQ
+  path loads no genome and emits all four policies at 2, 8, and 16 micrometers
+  through the existing memory or bounded spill engine. Ordinary gzip and
+  native BGZF are supported. The retired spatial alignment route is rejected;
+  see [spatial half-probe processing](docs/SPATIAL_FLEX_HALF_PROBE.md).
 - **Flex gDNA QC** (`--soloFlexGdna auto|yes|no`): Computes the 10x-style gDNA
   diagnostic from final filtered barcode/gene/UMI families and writes
   per-sample JSON plus an audit TSV. The diagnostic is matrix-inert and inert
