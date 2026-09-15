@@ -2,8 +2,9 @@
 
 `--soloFlexDecisionSidecar FILE` enables a diagnostic, fixed-width binary
 sidecar for the fused Flex inline-hash classifier and the ordinary
-BAM-producing Flex path. It is disabled by default (`-`). It does not change
-classification or counting policy.
+BAM-producing Flex path (legacy from STAR Suite 1.9.4; needs `--flexLegacy yes`).
+It is disabled by default (`-`). It does not change classification or counting
+policy.
 
 The file uses schema `FLXDEC2`, version 2: a 512-byte little-endian header and
 one 48-byte record at `512 + 48 * global_ordinal`. The final file is published
@@ -20,7 +21,8 @@ Each record contains:
 - whether the conservative exactly-one-N retry ran and resolved, including
   the underlying matching tier before its runtime H1 normalization;
 - sample-tag checked/matched/rejected state and token;
-- residual-alignment handoff and its resolved/rejected probe/genomic result.
+- residual-alignment handoff and its resolved/rejected probe/genomic result
+  (legacy alignment route only; the default half-probe route aligns nothing).
 - H1X2 probe seed outcome (absent, ambiguous, split-probe, or score failure);
 - legacy residual half-anchor/alignment fields retained for sidecars written by
   the earlier experimental alignment-gated implementation.

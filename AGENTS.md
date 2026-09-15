@@ -26,7 +26,7 @@ actionable; link to deeper docs rather than copying them.
 
 - `core/legacy/` - upstream STAR layout (single source of truth).
 - `core/features/` - shared feature overlays (vbem, yremove, bamsort, etc.).
-- `core/features/process_features/` - vendored `process_features` toolchain.
+- `core/features/process_features/` - first-party `process_features` toolchain (feature-barcode assignment and calling; not vendored).
 - `core/features/feature_barcodes/` - standalone tools (`assignBarcodes`, etc.).
 - `core/features/libscrna/` - shared EmptyDrops/OrdMag/Occupancy implementations.
 - `flex/` - STAR-Flex code and tools.
@@ -158,17 +158,21 @@ actionable; link to deeper docs rather than copying them.
 
 ### Flex Hash-Cache Assay Context
 
-- Routine scRNA-seq Flex recipes should explicitly generate/use H0+H1
-  (`--hashCacheTiers H0,H1`). H2 recovered measurable additional reads in the
-  JAX benchmark, but did not provide a material final count benefit in that
-  scRNA-seq context and produced a much larger cache.
-- Do not generalize the scRNA-seq H2 result to spatial assays. Spatial recipes
-  may evaluate H2, but must validate count-level benefit, specificity, memory,
-  and runtime on representative spatial data before making it a default.
-- The fused production triage currently queries H0+H1 at offset 0; the full
-  classifier can consume H2 records. Generating an H2 cache alone does not make
-  the fused path use H2. An H2-enabled recipe must select an H2-aware runtime
-  path or add and validate H2 support in fused triage.
+- From 1.9.4, `--flex yes` requires a cache with the half-probe tier and aligns
+  no reads. Routine Flex recipes generate it with the default
+  `--hashCacheTiers H0,H1X2`.
+- H1 and H2 are the legacy alignment-validated tiers. They are kept only to
+  reproduce results from releases before 1.9.4 and need `--flexLegacy yes`.
+  In the earlier JAX benchmark H2 recovered measurable additional reads but gave
+  no material final count benefit and a much larger cache.
+- Do not generalize the scRNA-seq H2 result to spatial assays. Spatial Flex
+  (`--soloSpatialFlexIntegrated yes`) is not yet migrated to the half-probe
+  route and still needs `--flexLegacy yes`. Spatial recipes may evaluate H2, but
+  must validate count-level benefit, specificity, memory, and runtime on
+  representative spatial data before making it a default.
+- On the legacy route, the fused triage queried H0+H1 at offset 0 and the full
+  classifier could consume H2 records; generating an H2 cache alone did not make
+  the fused path use H2.
 
 ## CR-compat GEX Parity Notes
 

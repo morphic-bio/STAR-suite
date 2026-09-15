@@ -12,6 +12,12 @@ CBQ use the same artifact. No new STAR option or genome-index dependency is
 introduced. The associated gene-ID list remains mandatory and unchanged.
 Keep generated caches immutable while STAR processes have them mapped.
 
+From STAR Suite 1.9.4, `--flex yes` requires a cache that contains the H1X2
+half-probe tier (generated with `--hashCacheTiers H0,H1X2`, the default) and
+assigns reads from it without genomic alignment. A cache with only H0/H1 tiers
+is accepted only with `--flexLegacy yes`. The compact form below maps the
+stored half tables instead of building them at startup.
+
 The loader uses the vendored klib khash with full two-word probe keys and
 8-byte values. H0 is queried first. Within each tier, the first record in
 sorted `(seqHi, seqLo, sampleIdx)` order supplies the sample-independent
@@ -98,4 +104,6 @@ includes the retained H0 sample mappings. Conversion of the already packed
 source, full verification and writing took 45.80 seconds on the cloud host;
 this is generation work, paid once. See
 [the L004 production validation](benchmarks/FLEX_HALF_KHASH_L004_20260910.md)
-for end-to-end measurements.
+for end-to-end measurements made before release 1.9.4; current Flex speed,
+memory and concordance are in the top-level
+[README Benchmarks](../README.md#benchmarks).

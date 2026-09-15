@@ -27,6 +27,8 @@ THREADS="${A375_THREADS:-4}"
 A375_WRITE_BAM="${A375_WRITE_BAM:-1}"
 SOLO_MULTIMAPPERS="${A375_SOLO_MULTIMAPPERS:-EM}"
 A375_REQUIRE_CBUB_TOGETHER="${A375_REQUIRE_CBUB_TOGETHER:-yes}"
+# A375 is a 10x 5' R2-only library (SC5P-R2), so read 2 is antisense: count Reverse, not Unstranded (1.9.4 methodology).
+SOLO_STRAND="${A375_SOLO_STRAND:-Reverse}"
 
 if [[ "${OUTPREFIX}" != */ ]]; then
   OUTPREFIX="${OUTPREFIX}/"
@@ -98,7 +100,7 @@ echo "Running A375 CR-like STARsolo (EM + EmptyDrops_CR)..."
   --soloMultiMappers "${SOLO_MULTIMAPPERS}" \
   --soloCbUbRequireTogether "${A375_REQUIRE_CBUB_TOGETHER}" \
   --soloCellFilter EmptyDrops_CR \
-  --soloStrand Unstranded \
+  --soloStrand "${SOLO_STRAND}" \
   --soloFeatures GeneFull
 
 echo "Outputs:"

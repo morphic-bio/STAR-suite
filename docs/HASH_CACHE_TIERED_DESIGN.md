@@ -1,12 +1,22 @@
 # Hash Cache Tiered Design
 
+> **STAR Suite 1.9.4:** the default cache is `--hashCacheTiers H0,H1X2`, and
+> `--flex yes` assigns reads from it without any genomic alignment (see
+> [H1X2](#h1x2--half-probe-tier-default-from-194) below). The alignment-validated
+> H1 and H2 tiers, and sending cache misses to STAR alignment, are **legacy**:
+> they run only with `--flexLegacy yes`, to reproduce results from earlier
+> releases. The H1/H2 sections, recipe policy and validation numbers below
+> describe that legacy design. Current Flex speed and concordance are in the
+> top-level [README Benchmarks](../README.md#benchmarks).
+
 ## Overview
 
 The Flex hash screen cache accelerates single-cell Flex alignment by
 pre-computing which probe-like sequences resolve to a known gene. This avoids
 full STAR alignment for the majority of reads. The cache is organized into
 three tiers (H0, H1, H2) corresponding to Hamming distance from the reference
-probe sequences.
+probe sequences, plus the half-probe tier H1X2, which from 1.9.4 replaces
+alignment altogether.
 
 ## Tier Definitions
 
@@ -60,9 +70,31 @@ probe sequences.
   neighboring probes.
 - **Sample index**: `sampleIdx=0` (global).
 
+### H1X2 — Half-probe tier (default from 1.9.4)
+
+- **Contents**: every non-exact 50-mer with at most one substitution in each
+  25-base half of a probe: 150 single substitutions plus 75 × 75 paired
+  substitutions per probe.
+- **Generation**: no alignment. Records are generated from the H0 parent
+  probes (H1X2 requires H0 in `--hashCacheTiers`). A full 50-base key that can
+  be generated from more than one probe is stored as DENY, even when the probes
+  share a gene.
+- **Runtime**: after an H0 miss, each 25-base half is looked up in the
+  single-mismatch half tables. A half that identifies one probe is extended
+  against that whole probe with fast Hamming scoring, and the read is kept when
+  the full 50 bases have at most ten mismatches. Halves that resolve to
+  different probes are denied. The decision is terminal: nothing is sent to
+  genomic alignment.
+- **Sample index**: `sampleIdx=0` (global).
+- **Storage**: see [the khash cache notes](FLEX_KHASH_CACHE.md) for the compact
+  `.half.khash` form.
+
 ## Recipe Policy and Assay Context
 
-The production policy is fixed rather than selected by a command-line option.
+This section describes the legacy (pre-1.9.4) H0/H1 route. The 1.9.4 default
+is `--hashCacheTiers H0,H1X2` with no alignment.
+
+The legacy production policy is fixed rather than selected by a command-line option.
 An unambiguous exact H0 match is final, generated H1 KEEP and certified H1 DENY
 records retain their verified verdicts, and only an unencodable probe window or
 an absent H0/H1 key passes to live STAR alignment. This makes the probe set,
@@ -70,7 +102,7 @@ rather than whole-read competition from post-probe assay sequence, the
 authority for exact matches while keeping the cache and live resolver in
 agreement for single substitutions.
 
-For routine scRNA-seq Flex processing, recipes should explicitly request
+For routine scRNA-seq Flex processing on the legacy route, recipes requested
 `--hashCacheTiers H0,H1`. In the JAX scRNA-seq benchmark, H2 recovered
 measurable read-level signal (about 604 additional KEEP reads per 100K reads),
 but did not produce a material final count-level benefit. The full H0+H1+H2
@@ -92,9 +124,10 @@ triage.
 
 ## Runtime Lookup
 
-Sample-tag eligibility is resolved first with the configured loose matcher and
-nearby-offset behavior. A tag outside that accepted universe is denied before
-the probe cache is consulted. Eligible reads then follow this routing:
+Sample-tag eligibility is resolved first with the fixed-offset exact and
+single-mismatch tag tables (see [the sample-tag policy](FLEX_SAMPLE_TAG_POLICY.md)).
+A tag outside that accepted universe is denied before the probe cache is
+consulted. On the legacy H0/H1 route, eligible reads then follow this routing:
 
 ```
 1.  Encode the 50-base offset-0 probe window
@@ -109,9 +142,13 @@ the probe cache is consulted. Eligible reads then follow this routing:
        → no record                   → PASS
 ```
 
+With an H1X2 cache, step 3 is the half-probe lookup described under H1X2, and
+a read it does not assign is discarded.
+
 `--flexNoAlign` affects only `PASS`: `0` sends it to the normal Flex alignment
-and resolver, while `1` discards it. It never changes H0/H1 decisions or sample
-tag rejection. H2 is not consulted by the fused production path.
+and resolver (legacy; needs `--flexLegacy yes`), while `1` discards it
+(`--flex yes` sets `1` unless given explicitly). It never changes H0/H1 decisions
+or sample tag rejection. H2 is not consulted by the fused production path.
 
 ## Cache File Format
 
@@ -120,9 +157,10 @@ followed by `N` records of 24 bytes each:
 
 ```
 Offset  Size   Field
- 0       8     magic (0x464C455848415348 = "FLEXHASH")
- 8       4     version
-12       4     reserved
+ 0       8     magic ("FH01SEQ1")
+ 8       2     version (2 = sample-aware, 3 = with probe-region metadata)
+10       2     k-mer length (50)
+12       4     record size (24)
 16       8     N (record count)
 24..     24×N  records
 ```
@@ -134,7 +172,7 @@ Offset  Size   Field
  0       8     seqLo          — low 64 bits of 2-bit encoded 50bp probe
  8       8     seqHi          — high 64 bits
 16       4     resolvedGeneIdx15
-20       1     cacheClass     — 0=H0_KEEP, 1=H1_KEEP, 2=DENY, 3=H2_KEEP
+20       1     cacheClass     — 0=H0_KEEP, 1=H1_KEEP, 2=DENY, 3=H2_KEEP, 4=H1X2_KEEP
 21       1     negativeCode   — 0=none, 1=FlexHashNegProbeAmbig
 22       2     sampleIdx      — sample index (>0 for H0, 0 for H1/H2)
 ```
@@ -146,11 +184,12 @@ Offset  Size   Field
 | H0   | 16 (samples)  | 855,344        | KEEP only | Instant (no alignment) |
 | H1   | 150           | 8,018,850      | KEEP + DENY | ~40s / 24 threads |
 | H2   | 11,025        | ~589M          | KEEP only | ~50 min / 24 threads (est.) |
+| H1X2 | 5,775 (150 + 75 × 75) | - | KEEP + DENY (multi-probe keys) | No alignment; 2 min 18 s / 16 threads for the human probe set in the 1.9.4 release notes |
 
 H2 generation time is reduced by the pre-check optimization (skip variants
 already in H0/H1 cache).
 
-## Validation Results (2024 Reference, 53,459 Probes)
+## Validation Results (2024 Reference, 53,459 Probes; legacy H0/H1 cache, pre-1.9.4)
 
 **H1 tier breakdown:**
 - KEEP: 7,124,819 (88.9%)

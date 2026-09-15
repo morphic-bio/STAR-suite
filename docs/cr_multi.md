@@ -23,4 +23,7 @@ The script expects the `gex-mex` directory to contain `matrix.mtx(.gz)`,
 ## Notes
 
 - This is a smoke-path implementation for feature MEX integration.
-- GEX processing via STAR is still separate; provide GEX MEX from STAR outputs when ready.
+- This script does not run GEX; provide GEX MEX from STAR outputs. For
+  production runs, STAR processes Cell Ranger-style multi configs directly
+  (`STAR --pfMultiConfig ...`), doing gene expression and feature assignment in
+  one run; see [feature_barcodes.md](feature_barcodes.md).

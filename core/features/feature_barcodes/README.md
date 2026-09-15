@@ -1,3 +1,13 @@
+> **Note:** `core/features/feature_barcodes` is an older copy kept only as a
+> compatibility path; `make feature-barcodes-tools` builds the canonical
+> implementation in `core/features/process_features`, which is what STAR uses.
+> That implementation matches feature barcodes with tiered exact, 1-mismatch and
+> 2-mismatch hash tables and uses the exhaustive (fast-Hamming) search described
+> below only as a fallback; ambiguous table entries are left unassigned. Some
+> defaults also differ (for example `--max_barcode_mismatches` is 3 there). See
+> [`core/features/process_features/README.md`](../process_features/README.md)
+> and [`docs/feature_barcodes.md`](../../../docs/feature_barcodes.md).
+
 ## Introduction
 
 `assignBarcodes` is a fast, parallelized utility designed for targeted sequencing analysis in single-cell experiments. It efficiently assigns feature barcodes from FASTQ files to a known set of sequence barcodes, serving as a powerful, open-source alternative to proprietary tools.

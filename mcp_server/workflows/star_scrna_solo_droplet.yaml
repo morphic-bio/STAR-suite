@@ -1,7 +1,9 @@
 # Public recipe: STARsolo droplet scRNA-seq (10x-style; see core/legacy/RELEASEnotes.md STARsolo).
+# Defaults follow the Cell Ranger-compatible option set of the STAR Suite 1.9.4 PBMC 10K benchmark
+# (docs/PAPER_BENCHMARK_METHODOLOGY.md Section 1.6).
 id: star_scrna_solo_droplet
 title: STARsolo droplet scRNA-seq
-summary: Single STAR alignReads with --soloType Droplet, whitelist, and paired FASTQs (cDNA then CB/UMI).
+summary: Single STAR alignReads with --soloType Droplet, whitelist, paired FASTQs (cDNA then CB/UMI) and the Cell Ranger-compatible 10x option set.
 kind: star_cli
 entry_script: core/legacy/source/STAR
 supported_modes: [local]
@@ -9,6 +11,10 @@ caveats:
   - Build the binary first (make -C core/legacy/source STAR).
   - Order is --readFilesIn cDNA_read barcode_read (first mate = cDNA, second = cell barcode + UMI).
   - Index must match your STAR version (regenerate if upgrading from older STAR).
+  - "Set solo_strand to match the library: Forward for 10x 3' libraries; Reverse for 10x 5' libraries sequenced from read 2 only (Cell Ranger chemistry SC5P-R2*), whose read 2 is antisense to the transcript. Unstranded counting on a 5' library drops reads where opposite-strand genes overlap and counts antisense reads."
+  - "Defaults are the Cell Ranger-compatible option set used for the STAR Suite 1.9.4 scRNA-seq benchmark (10x 3' v3: 16-base barcode, 12-base UMI). Change solo_umi_len and the whitelist for other chemistries (e.g. 10 for 3' v2)."
+  - "The benchmark run also set --soloInlineHashMode yes with STAR_SOLO_NONFLEX_HASH_BRIDGE=1 in the environment (faster counting; needs --outSAMtype None). This recipe does not render them."
+  - "Gene-level agreement with Cell Ranger is reported as spearman_all_genes and pearson_all_genes from scripts/report_additional_parity_metrics.py (all genes, zero-count genes included), not as a correlation over filtered genes."
 default_output_layout: Solo outputs under out_file_name_prefix (e.g. Solo.out/).
 
 scripts:
@@ -25,11 +31,30 @@ parameter_groups:
       - genome_dir
       - read_files_cdna
       - read_files_cb_umi
+      - read_files_bgzf_mode
       - solo_type
       - solo_cb_whitelist
+      - solo_cb_start
+      - solo_cb_len
+      - solo_umi_start
+      - solo_umi_len
+      - solo_barcode_read_length
       - clip_adapter_type
+      - clip_3p_polyg
+      - align_ends_type
+      - chim_segment_min
+      - solo_cb_match_wl_type
+      - solo_umi_filtering
+      - solo_umi_dedup
+      - solo_multi_mappers
       - solo_cell_filter
+      - solo_cb_ub_require_together
+      - solo_strand
       - solo_features
+      - solo_cr_gex_feature
+      - solo_cr_multimap_rescue
+      - dynamic_thread_interface
+      - dynamic_thread_const_map_permits
       - out_sam_type_none
       - out_file_name_prefix
       - run_thread_n
@@ -63,19 +88,62 @@ parameters:
     operand_group: readfiles_solo
     description: Cell barcode + UMI read FASTQ (second argument to --readFilesIn).
     category: core
+  - name: read_files_bgzf_mode
+    cli_flag: --readFilesBgzfMode
+    type: enum
+    required: false
+    default: auto
+    choices: [auto, "off", range]
+    description: Gzipped FASTQ reader. auto (the STAR default and the benchmark setting) uses the parallel BGZF reader where it applies and zlib otherwise.
+    category: core
   - name: solo_type
     cli_flag: --soloType
     type: string
     required: true
     default: Droplet
-    description: STARsolo library type (Droplet for typical 10x 3').
+    description: STARsolo library type (Droplet, also called CB_UMI_Simple, for 10x).
     category: core
   - name: solo_cb_whitelist
     cli_flag: --soloCBwhitelist
     type: file
     required: true
     path_must_exist: true
-    description: Cell barcode whitelist compatible with your chemistry.
+    description: Cell barcode whitelist compatible with your chemistry (e.g. 3M-february-2018_TRU.txt for 3' v3).
+    category: core
+  - name: solo_cb_start
+    cli_flag: --soloCBstart
+    type: int
+    required: false
+    default: 1
+    description: Cell barcode start base on the barcode read.
+    category: core
+  - name: solo_cb_len
+    cli_flag: --soloCBlen
+    type: int
+    required: false
+    default: 16
+    description: Cell barcode length.
+    category: core
+  - name: solo_umi_start
+    cli_flag: --soloUMIstart
+    type: int
+    required: false
+    default: 17
+    description: UMI start base on the barcode read.
+    category: core
+  - name: solo_umi_len
+    cli_flag: --soloUMIlen
+    type: int
+    required: false
+    default: 12
+    description: UMI length (12 for 10x 3' v3 and 5'; the STAR default of 10 fits 3' v2).
+    category: core
+  - name: solo_barcode_read_length
+    cli_flag: --soloBarcodeReadLength
+    type: int
+    required: false
+    default: 0
+    description: 0 = do not require the barcode read to be exactly as long as CB+UMI (10x barcode reads are often longer).
     category: core
   - name: clip_adapter_type
     cli_flag: --clipAdapterType
@@ -84,6 +152,56 @@ parameters:
     default: CellRanger4
     description: Adapter/polyA clipping profile (CellRanger4 matches recent Cell Ranger).
     category: core
+  - name: clip_3p_polyg
+    cli_flag: --clip3pPolyG
+    type: enum
+    required: false
+    default: "yes"
+    choices: ["yes", "no", auto]
+    description: Trim 3' poly-G tails (two-color sequencer artifact). yes, as in the benchmark; auto also trims when clip_adapter_type is CellRanger4.
+    category: core
+  - name: align_ends_type
+    cli_flag: --alignEndsType
+    type: string
+    required: false
+    default: Local
+    description: Read-end alignment type (Local, soft-clipping allowed).
+    category: core
+  - name: chim_segment_min
+    cli_flag: --chimSegmentMin
+    type: int
+    required: false
+    default: 1000000
+    description: Part of the Cell Ranger-compatible option set. Any value above 0 keeps every transcript found in an alignment window; 1000000 produces no chimeric alignments.
+    category: core
+  - name: solo_cb_match_wl_type
+    cli_flag: --soloCBmatchWLtype
+    type: string
+    required: false
+    default: 1MM_multi_Nbase_pseudocounts
+    description: Cell barcode whitelist matching (Cell Ranger-style 1-mismatch correction with pseudocounts).
+    category: core
+  - name: solo_umi_filtering
+    cli_flag: --soloUMIfiltering
+    type: string
+    required: false
+    default: MultiGeneUMI_CR
+    description: UMI filtering (Cell Ranger-style removal of UMIs shared across genes).
+    category: core
+  - name: solo_umi_dedup
+    cli_flag: --soloUMIdedup
+    type: string
+    required: false
+    default: 1MM_CR
+    description: UMI deduplication (Cell Ranger-style 1-mismatch collapsing).
+    category: core
+  - name: solo_multi_mappers
+    cli_flag: --soloMultiMappers
+    type: string
+    required: false
+    default: Unique
+    description: Multi-gene read counting. Unique, together with solo_cr_multimap_rescue yes, is the Cell Ranger-compatible policy.
+    category: core
   - name: solo_cell_filter
     cli_flag: --soloCellFilter
     type: string
@@ -91,12 +209,58 @@ parameters:
     default: EmptyDrops_CR
     description: Cell calling mode.
     category: core
+  - name: solo_cb_ub_require_together
+    cli_flag: --soloCbUbRequireTogether
+    type: enum
+    required: false
+    default: "no"
+    choices: ["yes", "no"]
+    description: Whether a UB tag requires a CB tag during tag injection (no, as in the benchmark).
+    category: core
+  - name: solo_strand
+    cli_flag: --soloStrand
+    type: enum
+    required: false
+    default: Forward
+    choices: [Forward, Reverse, Unstranded]
+    description: "Library strand. Forward for 10x 3'; Reverse for 10x 5' sequenced from read 2 only (Cell Ranger chemistry SC5P-R2*)."
+    category: core
   - name: solo_features
     cli_flag: --soloFeatures
     type: string
     required: true
     default: GeneFull
     description: Gene model for counting (GeneFull aligns with recent Cell Ranger GEX).
+    category: core
+  - name: solo_cr_gex_feature
+    cli_flag: --soloCrGexFeature
+    type: string
+    required: false
+    default: genefull
+    description: Gene model for the Cell Ranger-compatible outputs and multimapper rescue (genefull, matching solo_features GeneFull).
+    category: core
+  - name: solo_cr_multimap_rescue
+    cli_flag: --soloCrMultimapRescue
+    type: enum
+    required: false
+    default: "yes"
+    choices: ["yes", "no"]
+    description: Cell Ranger-compatible rescue of reads that map to several genomic loci.
+    category: core
+  - name: dynamic_thread_interface
+    cli_flag: --dynamicThreadInterface
+    type: int
+    required: false
+    default: 1
+    description: Enable the permit-based thread scheduler (1, as in the benchmark).
+    category: core
+  - name: dynamic_thread_const_map_permits
+    cli_flag: --dynamicThreadConstMapPermits
+    type: int
+    required: false
+    default: 0
+    skip_when_default: true
+    description: Concurrent mapping permits. 0 (omitted) uses run_thread_n; the benchmark set it equal to the thread count.
     category: core
   - name: out_sam_type_none
     cli_flag: --outSAMtype
@@ -123,8 +287,11 @@ parameters:
 
 constraints:
   - kind: positive
-    params: [run_thread_n]
-    message: run_thread_n must be positive.
+    params: [run_thread_n, solo_cb_start, solo_cb_len, solo_umi_start, solo_umi_len]
+    message: Must be positive.
+  - kind: non_negative
+    params: [solo_barcode_read_length, chim_segment_min, dynamic_thread_interface, dynamic_thread_const_map_permits]
+    message: Must be zero or positive.
 
 rendering:
   omit_absent_optionals: true
@@ -133,11 +300,30 @@ rendering:
     - genome_dir
     - read_files_cdna
     - read_files_cb_umi
+    - read_files_bgzf_mode
     - solo_type
     - solo_cb_whitelist
+    - solo_cb_start
+    - solo_cb_len
+    - solo_umi_start
+    - solo_umi_len
+    - solo_barcode_read_length
     - clip_adapter_type
+    - clip_3p_polyg
+    - align_ends_type
+    - chim_segment_min
+    - solo_cb_match_wl_type
+    - solo_umi_filtering
+    - solo_umi_dedup
+    - solo_multi_mappers
     - solo_cell_filter
+    - solo_cb_ub_require_together
+    - solo_strand
     - solo_features
+    - solo_cr_gex_feature
+    - solo_cr_multimap_rescue
+    - dynamic_thread_interface
+    - dynamic_thread_const_map_permits
     - out_sam_type_none
     - out_file_name_prefix
     - run_thread_n

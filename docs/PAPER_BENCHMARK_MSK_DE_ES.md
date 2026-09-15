@@ -1,5 +1,14 @@
 # MSK 30polyKO Perturb-seq — paper-grade benchmark (DE + ES replicate)
 
+> **Note:** This is a pre-1.9.4 record (April 2026 runs), kept for history. It is
+> not a current or manuscript result. The manuscript reports only the MSK 30-KO
+> ES sample, re-measured with STAR Suite 1.9.4, and does not use the DE sample.
+> Its gene-level Pearson values are not the manuscript's gene-level metric
+> (Spearman and Pearson over all genes in both annotations). For the
+> current numbers see the README section [Benchmarks](../README.md#benchmarks);
+> for the protocol see
+> [PAPER_BENCHMARK_METHODOLOGY.md](PAPER_BENCHMARK_METHODOLOGY.md) Section 1.
+
 This document is the canonical, paper-ready comparison of STAR-suite vs
 Cell Ranger 9 on the MSK 30polyKO 3-library Perturb-seq dataset (GEX + PolyIII
 gRNA + LARRY lineage barcodes), reported on two independent biological

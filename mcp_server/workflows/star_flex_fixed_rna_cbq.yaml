@@ -1,7 +1,9 @@
 # Public recipe: STAR-Flex Fixed RNA Profiling with paired CBQ input.
+# Defaults follow the STAR Suite 1.9.4 Flex benchmark command (docs/PAPER_BENCHMARK_METHODOLOGY.md
+# Sections 1.3 and 1.6; flex/README_flex.md Quick Start).
 id: star_flex_fixed_rna_cbq
 title: STAR-Flex Fixed RNA CBQ
-summary: Single STAR alignReads with --readFilesType Binseq PE and --flex yes; paired CBQ stores cDNA R2 then barcode R1.
+summary: Single STAR alignReads with --readFilesType Binseq PE, --flex yes, the required half-probe cache and the count-only option set; paired CBQ stores cDNA R2 then barcode R1.
 kind: star_cli
 entry_script: core/legacy/source/STAR
 supported_modes: [local]
@@ -11,9 +13,15 @@ caveats:
   - "Encode mates in the same order as the FASTQ Flex recipe: cDNA R2 first, barcode/UMI R1 second."
   - Do not set --readFilesCommand with CBQ input.
   - "STAR Suite 1.9.4: --flex yes assigns probes from a half-probe (H1X2) cache and aligns nothing. Build the cache once per probe set with --runMode hashCacheGenerate --hashCacheTiers H0,H1X2 and pass it as solo_hash_screen_file."
+  - "No genome index is loaded when the command is count-only: outSAMtype None, outSJtype None, chimSegmentMin 0, soloFeatures Gene and no other genome-backed output (the defaults here). Log.out then reports 'Flex count-only no-genome: active'; otherwise it reports 'not active' with the reason and STAR loads genome_dir."
+  - "Give solo_probe_list, the probe gene list the cache was built with. Without it STAR looks for probe_gene_list.txt in genome_dir (the index is not loaded for that)."
+  - "Sample tags need both solo_sample_whitelist (one label<TAB>TAG8 line per tag) and solo_sample_probes. Pass the same label<TAB>TAG8 file as solo_flex_allowed_tags: the tag-aware caller calls tags that share a label together, so give tags pooled into one sample the same label."
+  - "Keep solo_cell_filter_bootstrap_threads fixed to reproduce a call set exactly; EmptyDrops draws are split across bootstrap streams (the benchmark used 32). Legacy expected-cell options such as --soloFlexExpectedCellsPerTag are rejected by the tag-aware caller."
+  - "The benchmark CBQ route used --readFilesCbqRangeMode range (indexed CBQ). The benchmark command also passed --flexPipeline yes --flexNoAlign 1; --flex yes selects the same route by default."
   - "Alignment-based Flex (BAM output, H0/H1 caches, aligning cache misses) is legacy and needs flex_legacy yes; use it only to reproduce results from an earlier release."
   - "out_sam_kind defaults to None because the half-probe route writes no alignments; BAM needs flex_legacy yes."
-default_output_layout: Outputs under out_file_name_prefix.
+  - "Flex gene-level agreement with Cell Ranger is computed per sample with scripts/paper/flex_gene_correlation.py (Spearman and Pearson over all genes, zero-count genes included) and averaged over samples."
+default_output_layout: Outputs under out_file_name_prefix (Solo.out/Gene/raw and per-sample filtered MEX under flexfilter/).
 
 scripts:
   - role: entry
@@ -30,15 +38,44 @@ parameter_groups:
       - read_files_type
       - read_files_layout
       - read_files_cbq
+      - read_files_cbq_range_mode
       - flex_enable
       - solo_hash_screen_file
       - flex_legacy
       - solo_type
+      - solo_cb_start
+      - solo_cb_len
+      - solo_umi_start
+      - solo_umi_len
+      - solo_barcode_read_length
       - solo_cb_whitelist
       - solo_sample_whitelist
+      - solo_flex_allowed_tags
+      - solo_sample_probes
+      - solo_sample_probe_offset
+      - solo_probe_list
+      - solo_features
+      - solo_cell_filter
+      - solo_multi_mappers
+      - solo_cb_match_wl_type
+      - solo_umi_filtering
+      - solo_umi_dedup
+      - solo_strand
+      - clip_adapter_type
+      - align_ends_type
+      - chim_segment_min
+      - solo_keys_compat
+      - solo_bucket_mode
+      - solo_bucket_count
+      - solo_run_flex_filter
+      - solo_flex_cell_caller
+      - solo_cell_filter_bootstrap_threads
+      - solo_flex_ed_fdr_threshold
       - out_file_name_prefix
       - out_sam_kind
       - out_sam_sort
+      - out_sj_type
+      - dynamic_thread_interface
       - run_thread_n
 
 parameters:
@@ -53,9 +90,9 @@ parameters:
   - name: genome_dir
     cli_flag: --genomeDir
     type: directory
-    required: true
+    required: false
     path_must_exist: true
-    description: STAR genome index directory.
+    description: Flex genome index directory. Not loaded by the default count-only command; needed only for legacy alignment routes (flex_legacy yes).
     category: core
 
   - name: read_files_type
@@ -84,6 +121,16 @@ parameters:
     required: true
     description: "Comma-separated paired-CBQ files in STAR Flex mate order: cDNA R2, then barcode R1."
     example: sample_L001_R2_R1.cbq,sample_L002_R2_R1.cbq
+    category: core
+
+  - name: read_files_cbq_range_mode
+    cli_flag: --readFilesCbqRangeMode
+    type: enum
+    required: false
+    default: auto
+    choices: [auto, "off", range]
+    skip_when_default: true
+    description: Indexed CBQ range readers. auto (STAR default) uses them where supported; range requires them (benchmark setting); off uses the shared reader.
     category: core
 
   - name: flex_enable
@@ -120,6 +167,46 @@ parameters:
     description: Flex uses CB_UMI_Simple with whitelist files.
     category: core
 
+  - name: solo_cb_start
+    cli_flag: --soloCBstart
+    type: int
+    required: false
+    default: 1
+    description: Cell barcode start base on the barcode read.
+    category: core
+
+  - name: solo_cb_len
+    cli_flag: --soloCBlen
+    type: int
+    required: false
+    default: 16
+    description: Cell barcode length.
+    category: core
+
+  - name: solo_umi_start
+    cli_flag: --soloUMIstart
+    type: int
+    required: false
+    default: 17
+    description: UMI start base on the barcode read.
+    category: core
+
+  - name: solo_umi_len
+    cli_flag: --soloUMIlen
+    type: int
+    required: false
+    default: 12
+    description: UMI length (12 for Flex; the STAR default is 10).
+    category: core
+
+  - name: solo_barcode_read_length
+    cli_flag: --soloBarcodeReadLength
+    type: int
+    required: false
+    default: 0
+    description: 0 = do not require the barcode read to be exactly as long as CB+UMI.
+    category: core
+
   - name: solo_cb_whitelist
     cli_flag: --soloCBwhitelist
     type: file
@@ -133,7 +220,179 @@ parameters:
     type: file
     required: false
     path_must_exist: true
-    description: Optional sample/feature barcode whitelist TSV.
+    description: Sample tag whitelist TSV, one label<TAB>TAG8 line per tag. Tag detection also needs solo_sample_probes.
+    category: core
+
+  - name: solo_flex_allowed_tags
+    cli_flag: --soloFlexAllowedTags
+    type: file
+    required: false
+    path_must_exist: true
+    description: label<TAB>TAG8 file (usually the sample whitelist) restricting cell calling to these tags; tags with the same label are called together as one sample.
+    category: core
+
+  - name: solo_sample_probes
+    cli_flag: --soloSampleProbes
+    type: file
+    required: false
+    path_must_exist: true
+    description: 10x sample probe barcode file (e.g. probe-barcodes-fixed-rna-profiling-rna.txt). Needed with solo_sample_whitelist.
+    category: core
+
+  - name: solo_sample_probe_offset
+    cli_flag: --soloSampleProbeOffset
+    type: int
+    required: false
+    default: 68
+    description: Fixed offset of the 8-base sample tag in the cDNA (probe) read.
+    category: core
+
+  - name: solo_probe_list
+    cli_flag: --soloProbeList
+    type: file
+    required: false
+    path_must_exist: true
+    description: Probe gene list; must be the list the half-probe cache was built with. If omitted, STAR uses probe_gene_list.txt from genome_dir.
+    category: core
+
+  - name: solo_features
+    cli_flag: --soloFeatures
+    type: string
+    required: false
+    default: Gene
+    description: Gene (required for the count-only no-genome route).
+    category: core
+
+  - name: solo_cell_filter
+    cli_flag: --soloCellFilter
+    type: string
+    required: false
+    default: None
+    description: None; Flex cells are called by the Flex cell caller (solo_run_flex_filter).
+    category: core
+
+  - name: solo_multi_mappers
+    cli_flag: --soloMultiMappers
+    type: string
+    required: false
+    default: Rescue
+    description: Multi-gene read counting (Rescue, as in the benchmark).
+    category: core
+
+  - name: solo_cb_match_wl_type
+    cli_flag: --soloCBmatchWLtype
+    type: string
+    required: false
+    default: 1MM_multi_Nbase_pseudocounts
+    description: Cell barcode whitelist matching (Cell Ranger-style 1-mismatch correction with pseudocounts).
+    category: core
+
+  - name: solo_umi_filtering
+    cli_flag: --soloUMIfiltering
+    type: string
+    required: false
+    default: MultiGeneUMI_CR
+    description: UMI filtering (Cell Ranger-style).
+    category: core
+
+  - name: solo_umi_dedup
+    cli_flag: --soloUMIdedup
+    type: string
+    required: false
+    default: 1MM_CR
+    description: UMI deduplication (Cell Ranger-style 1-mismatch collapsing).
+    category: core
+
+  - name: solo_strand
+    cli_flag: --soloStrand
+    type: enum
+    required: false
+    default: Unstranded
+    choices: [Unstranded, Forward, Reverse]
+    description: Flex probe reads are counted Unstranded.
+    category: core
+
+  - name: clip_adapter_type
+    cli_flag: --clipAdapterType
+    type: string
+    required: false
+    default: CellRanger4
+    description: Adapter clipping profile (benchmark value).
+    category: core
+
+  - name: align_ends_type
+    cli_flag: --alignEndsType
+    type: string
+    required: false
+    default: Local
+    description: Read-end alignment type (benchmark value; used only by legacy alignment routes).
+    category: core
+
+  - name: chim_segment_min
+    cli_flag: --chimSegmentMin
+    type: int
+    required: false
+    default: 0
+    description: 0 (no chimeric detection). Any value above 0 prevents the count-only no-genome route and makes STAR load genome_dir.
+    category: core
+
+  - name: solo_keys_compat
+    cli_flag: --soloKeysCompat
+    type: string
+    required: false
+    default: cr
+    description: Cell Ranger-compatible key aggregation and deduplication (needs solo_probe_list).
+    category: core
+
+  - name: solo_bucket_mode
+    cli_flag: --soloBucketMode
+    type: enum
+    required: false
+    default: ram
+    choices: [auto, ram, spill, "off"]
+    description: Cell-barcode buckets. ram keeps them in memory (benchmark setting); auto starts in memory and switches to spill files once --soloBucketMemGB (32 GiB) is crossed.
+    category: core
+
+  - name: solo_bucket_count
+    cli_flag: --soloBucketCount
+    type: int
+    required: false
+    default: 256
+    description: Number of cell-barcode buckets (power of two).
+    category: core
+
+  - name: solo_run_flex_filter
+    cli_flag: --soloRunFlexFilter
+    type: enum
+    required: false
+    default: "yes"
+    choices: ["yes", "no"]
+    description: Run Flex cell calling after the raw MEX is written.
+    category: core
+
+  - name: solo_flex_cell_caller
+    cli_flag: --soloFlexCellCaller
+    type: enum
+    required: false
+    default: tag-aware
+    choices: [tag-aware, legacy]
+    description: tag-aware (default) calls each sample label with OrdMag + EmptyDrops and keeps CB16+TAG8 cell identities; legacy is the earlier per-tag caller.
+    category: core
+
+  - name: solo_cell_filter_bootstrap_threads
+    cli_flag: --soloCellFilterBootstrapThreads
+    type: int
+    required: false
+    default: 32
+    description: EmptyDrops bootstrap streams; the call set depends on this value (32 in the benchmark; 0 = run_thread_n).
+    category: core
+
+  - name: solo_flex_ed_fdr_threshold
+    cli_flag: --soloFlexEdFdrThreshold
+    type: float
+    required: false
+    default: 0.01
+    description: EmptyDrops FDR threshold (0.01, the tag-aware default and benchmark value).
     category: core
 
   - name: out_file_name_prefix
@@ -161,6 +420,22 @@ parameters:
     description: outSAMtype second token (Unsorted or SortedByCoordinate), only with legacy BAM output.
     category: core
 
+  - name: out_sj_type
+    cli_flag: --outSJtype
+    type: string
+    required: false
+    default: None
+    description: None (required for the count-only no-genome route).
+    category: core
+
+  - name: dynamic_thread_interface
+    cli_flag: --dynamicThreadInterface
+    type: int
+    required: false
+    default: 1
+    description: Enable the permit-based thread scheduler (benchmark value).
+    category: core
+
   - name: run_thread_n
     cli_flag: --runThreadN
     type: int
@@ -172,8 +447,17 @@ parameters:
 
 constraints:
   - kind: positive
-    params: [run_thread_n]
-    message: run_thread_n must be positive.
+    params: [run_thread_n, solo_cb_start, solo_cb_len, solo_umi_start, solo_umi_len, solo_bucket_count]
+    message: Must be positive.
+  - kind: non_negative
+    params: [solo_barcode_read_length, solo_sample_probe_offset, chim_segment_min, solo_cell_filter_bootstrap_threads, dynamic_thread_interface]
+    message: Must be zero or positive.
+  - kind: at_least_one
+    params: [solo_probe_list, genome_dir]
+    message: Flex needs a probe list, given as solo_probe_list or found as probe_gene_list.txt in genome_dir.
+  - kind: group_required
+    params: [solo_sample_whitelist, solo_sample_probes]
+    message: Sample tag detection needs both the sample whitelist and the sample probe barcodes.
 
 rendering:
   omit_absent_optionals: true
@@ -183,13 +467,42 @@ rendering:
     - read_files_type
     - read_files_layout
     - read_files_cbq
+    - read_files_cbq_range_mode
     - flex_enable
     - solo_hash_screen_file
     - flex_legacy
     - solo_type
+    - solo_cb_start
+    - solo_cb_len
+    - solo_umi_start
+    - solo_umi_len
+    - solo_barcode_read_length
     - solo_cb_whitelist
     - solo_sample_whitelist
+    - solo_flex_allowed_tags
+    - solo_sample_probes
+    - solo_sample_probe_offset
+    - solo_probe_list
+    - solo_features
+    - solo_cell_filter
+    - solo_multi_mappers
+    - solo_cb_match_wl_type
+    - solo_umi_filtering
+    - solo_umi_dedup
+    - solo_strand
+    - clip_adapter_type
+    - align_ends_type
+    - chim_segment_min
+    - solo_keys_compat
+    - solo_bucket_mode
+    - solo_bucket_count
+    - solo_run_flex_filter
+    - solo_flex_cell_caller
+    - solo_cell_filter_bootstrap_threads
+    - solo_flex_ed_fdr_threshold
     - out_file_name_prefix
     - out_sam_kind
     - out_sam_sort
+    - out_sj_type
+    - dynamic_thread_interface
     - run_thread_n

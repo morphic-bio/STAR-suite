@@ -1,5 +1,10 @@
 # Velocyto Benchmarks
 
+> **Note:** These runs predate STAR Suite 1.9.4, use UCSF data that is not part
+> of the manuscript, and are not paper results. For the current 1.9.4
+> benchmarks see the "Benchmarks" section of the top-level `README.md` and
+> [PAPER_BENCHMARK_METHODOLOGY.md](PAPER_BENCHMARK_METHODOLOGY.md).
+
 This document preserves the detailed Velocyto bridge benchmark notes that were
 previously embedded in the top-level `README.md`.
 

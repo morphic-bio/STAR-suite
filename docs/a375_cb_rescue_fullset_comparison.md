@@ -1,5 +1,12 @@
 # A375 CB-Rescue Parity (Full Set) Comparison
 
+> **Note:** This is a record of an earlier standalone `process_features`
+> experiment and predates STAR Suite 1.9.4; its numbers are not current. The
+> A375 paper arm now runs the integrated STAR path with `--soloStrand Reverse`
+> (10x 5' R2-only library). For current results see the README section
+> [Benchmarks](../README.md#benchmarks) and
+> [PAPER_BENCHMARK_METHODOLOGY.md](PAPER_BENCHMARK_METHODOLOGY.md) Section 1.
+
 This documents the full set `process_features` run with the same settings used in the 1k L001 pair parity check, plus a CR comparison derived from the Cell Ranger molecule file.
 
 ## Inputs

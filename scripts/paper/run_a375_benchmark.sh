@@ -75,6 +75,9 @@ echo ""
 # PARITY_BAM_TAG_POLICY: GX is alignment-level and UR is raw. This recipe uses
 # final GeneFull/CR-compatible MEX outputs for parity and deliberately omits them.
 export STAR_SOLO_NONFLEX_HASH_BRIDGE=1
+# Strand: this is a 10x 5' R2-only library (Cell Ranger 9.0.1 reports chemistry SC5P-R2-v3), so read 2 is
+# antisense to the transcript and STARsolo needs --soloStrand Reverse. Unstranded counting drops reads where
+# opposite-strand genes overlap and counts antisense reads (gene Spearman 0.952 vs 0.988 against Cell Ranger).
 START_SEC=$SECONDS
 
 "${STAR_BIN}" \
@@ -98,7 +101,7 @@ START_SEC=$SECONDS
   --soloMultiMappers Unique \
   --soloCellFilter EmptyDrops_CR \
   --soloCbUbRequireTogether no \
-  --soloStrand Unstranded \
+  --soloStrand Reverse \
   --soloFeatures GeneFull \
   --soloCrGexFeature genefull \
   --soloCrMultimapRescue yes \

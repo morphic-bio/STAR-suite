@@ -4,7 +4,7 @@
 
 id: "cr_parity_100k"
 title: "CellRanger Parity 100K"
-summary: "Run STAR-suite and CellRanger on downsampled A375 data and compare MEX outputs."
+summary: "Run STAR-suite pf-multi CR-compat and CR-like GeneFull runs on downsampled A375 data and compare their MEX outputs."
 kind: "shell_workflow"
 entry_script: "tests/run_cr_parity_100k.sh"
 supported_modes:
@@ -13,18 +13,21 @@ caveats:
   - "Parameters are passed as CR_PARITY_* environment variables, not CLI flags."
   - "Requires A375 dataset with downsampled GEX FASTQs at the specified tier."
   - "Orchestrates run_cr_multi_smoke.sh, run_a375_cr_like_gex.sh, and compare_a375_star_mex.py."
+  - "Both runs are STAR Suite runs (no Cell Ranger is executed); run_cr_multi_smoke.sh also needs the CRISPR FASTQs at the same tier."
+  - "A375 is a 10x 5' library sequenced from read 2 only (Cell Ranger chemistry SC5P-R2*), so both launchers count with --soloStrand Reverse (override with CR_MULTI_SOLO_STRAND / A375_SOLO_STRAND)."
+  - "This is a consistency smoke test. compare_a375_star_mex.py correlates filtered genes; the manuscript's gene-level metrics are spearman_all_genes and pearson_all_genes from scripts/report_additional_parity_metrics.py against Cell Ranger 9.0.1."
 default_output_layout: "/tmp/cr_parity_100k/"
 
 stages:
   - name: "cellranger"
-    title: "CellRanger Run"
-    description: "Run CellRanger multi on downsampled A375 GEX."
+    title: "STAR pf-multi CR-compat Run"
+    description: "Run STAR-suite with --pfMultiConfig (Cell Ranger-compatible outs) on downsampled A375 GEX + CRISPR."
   - name: "star"
     title: "STAR GeneFull Run"
     description: "Run STAR-suite in CR-like mode on same data."
   - name: "comparison"
     title: "MEX Comparison"
-    description: "Compare filtered MEX outputs and report concordance."
+    description: "Compare the raw MEX outputs of the two runs and report concordance."
 
 parameter_groups:
   - name: "performance"
