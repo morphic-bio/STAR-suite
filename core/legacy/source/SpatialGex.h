@@ -124,14 +124,15 @@ bool spillBudgetFits(const MemoryModel &model, std::uint64_t budgetBytes,
 std::uint64_t availableMemoryBytes();
 
 // Describes the feature decision paired with the current raw-R1 spatial
-// decode. Flex cache hits and alignment fallbacks are kept distinct for
+// decode. Flex cache hits and terminal misses are kept distinct for
 // deterministic accounting; GEX uses the final post-rescue annotation.
 enum class FeatureEvidenceClass : std::uint8_t {
     Gex = 0,
     FlexH0 = 1,
     FlexH1 = 2,
     FlexHashDeny = 3,
-    FlexAlignment = 4
+    FlexUnassigned = 4,
+    FlexH1X2 = 5
 };
 
 struct PipelineConfig {
@@ -211,9 +212,8 @@ struct PipelineSummary {
     std::uint64_t flexHashH0Reads = 0;
     std::uint64_t flexHashH1Reads = 0;
     std::uint64_t flexHashDenyReads = 0;
-    std::uint64_t flexAlignmentMissReads = 0;
-    std::uint64_t flexAlignmentResolvedReads = 0;
-    std::uint64_t flexAlignmentUnresolvedReads = 0;
+    std::uint64_t flexUnassignedReads = 0;
+    std::uint64_t flexHashH1X2Reads = 0;
 };
 
 // Run-owned, default-off spatial state. One instance is shared by all mapping

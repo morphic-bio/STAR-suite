@@ -716,7 +716,6 @@ void ReadAlign::outputAlignments() {
             }
         }
 
-        const bool spatialFlex = P.soloSpatialFlexIntegratedEnabled;
         // Extract CB/UMI/Sample metadata from Solo structures (upstream detection)
         // This avoids re-parsing BAM tags and ensures we use the original FASTQ data
         extractedCbIdxPlus1_ = 0;
@@ -724,10 +723,7 @@ void ReadAlign::outputAlignments() {
         extractedUmiValid_ = false;
         extractedCbSeq_.clear();
 
-        // Native spatial Flex owns raw-R1 barcode and UMI interpretation in
-        // spatial_gex::Pipeline. Do not invoke the ordinary single-CB parser or
-        // its early correction/collapse path.
-        if (!spatialFlex) {
+        {
         //the operations below are both for mapped and unmapped reads
         soloRead->readBar->getCBandUMI(Read0, Qual0, readLengthOriginal, readNameExtra[0], readFilesIndex, readName);
         
@@ -916,7 +912,7 @@ void ReadAlign::outputAlignments() {
         }
         
         // Flex-specific side effects stay off for standard non-Flex STARsolo.
-        if (P.pSolo.flexMode && !spatialFlex && soloRead && soloRead->readBar) {
+        if (P.pSolo.flexMode && soloRead && soloRead->readBar) {
             soloRead->readBar->detectedSampleToken = detectedSampleByte_;
             soloRead->readBar->residualAnchorGeneIdx15 =
                 residualAnchorGeneIdx15_;
@@ -940,43 +936,13 @@ void ReadAlign::outputAlignments() {
 
         // Store qname mapping for reject logging if enabled (Flex-only)
         // Forward declaration - function defined in flex/SoloReadFeature_record_flex.cpp
-        if (P.pSolo.flexMode && !spatialFlex) {
+        if (P.pSolo.flexMode) {
             if (readName) {
                 storeQnameMapping(iReadAll, readName);
             }
         }
         
-        if (spatialFlex) {
-            if (iReadAll == 0 || P.spatialGexPipeline == nullptr
-                || soloRead->readBar == nullptr) {
-                exitWithError(
-                    "EXITING because native spatial Flex lost its coupled "
-                    "alignment-fallback state\n",
-                    std::cerr, P.inOut->logMain,
-                    EXIT_CODE_INCONSISTENT_DATA, P);
-            }
-            SoloReadFeature *geneFeat =
-                soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
-            ReadSoloFeatures resolvedFeatures{};
-            resolvedFeatures.alignOut = trMult;
-            resolvedFeatures.indAnnotTr = 0;
-            const FlexGeneInlineResolveResult resolved =
-                flexResolveGeneIdx15_inlineResolver(
-                    geneFeat, *soloRead->readBar, resolvedFeatures, readAnnot,
-                    SoloFeatureTypes::Gene, iReadAll);
-            const bool assigned = resolved.geneIdx15 != 0;
-            std::string spatialError;
-            if (!P.spatialGexPipeline->completeCurrentThread(
-                    spatial_gex::FeatureEvidenceClass::FlexAlignment,
-                    assigned, assigned ? resolved.geneIdx15 - 1 : 0,
-                    iReadAll - 1, spatialError)) {
-                exitWithError(
-                    "EXITING because native spatial Flex alignment evidence "
-                    "completion failed: " + spatialError + "\n",
-                    std::cerr, P.inOut->logMain,
-                    EXIT_CODE_INCONSISTENT_DATA, P);
-            }
-        } else if (!hashCacheSynthProbe_) {
+        if (!hashCacheSynthProbe_) {
             soloRead->record((unmapType<0 ? nTr : 0), trMult, iReadAll, readAnnot); //need to supply nTr=0 for unmapped reads
         }
 

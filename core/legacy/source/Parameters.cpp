@@ -3512,8 +3512,15 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             if (soloSpatialFeatureSidecarEnabled)
                 rejectSpatialRecipe("does not permit the GeneFull diagnostic sidecar");
             if (!pSolo.flexMode) rejectSpatialRecipe("requires --flex yes");
-            if (pSolo.flexPipelineStr != "no")
-                rejectSpatialRecipe("requires --flexPipeline no");
+            if (pSolo.flexLegacy)
+                rejectSpatialRecipe("uses half-probe processing; --flexLegacy yes is no longer supported for spatial Flex");
+            if (pSolo.flexPipelineStr == "no" || pSolo.flexPipelineNTriage != 0
+                || pSolo.flexPipelineNSolo != 0 || pSolo.flexNoAlign == 0)
+                rejectSpatialRecipe("requires the fully fused half-probe route with --flexNoAlign 1");
+            if (readFilesTypeN != 1)
+                rejectSpatialRecipe("requires paired FASTQ; packed Chromium CBQ does not preserve raw spatial R1");
+            if (soloSpatialR1FastqTapEnabled || pSolo.flexDecisionSidecarEnabled)
+                rejectSpatialRecipe("does not support alignment-reader taps or decision sidecars");
             if (pSolo.typeStr != "CB_UMI_Complex")
                 rejectSpatialRecipe("requires --soloType CB_UMI_Complex");
             if (!exactly(pSolo.featureIn, "Gene"))
@@ -3521,7 +3528,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             if (pSolo.strandStr != "Unstranded")
                 rejectSpatialRecipe("requires --soloStrand Unstranded");
             if (!pSolo.inlineHashMode || !pSolo.hashScreenEnabled)
-                rejectSpatialRecipe("requires the enabled inline H0/H1 hash screen");
+                rejectSpatialRecipe("requires the enabled half-probe hash screen");
             if (!pSolo.skipProcessing)
                 rejectSpatialRecipe("requires --soloSkipProcessing yes");
             if (pSolo.runFlexFilter)

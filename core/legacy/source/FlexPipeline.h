@@ -93,14 +93,15 @@ public:
     explicit BoundedQueue(size_t capacity = 256)
         : capacity_(capacity), buf_(capacity), head_(0), tail_(0), count_(0) {}
 
-    void push(T&& item) {
+    bool push(T&& item) {
         std::unique_lock<std::mutex> lock(mu_);
         cvFull_.wait(lock, [this]{ return count_ < capacity_ || closed_; });
-        if (closed_) return;
+        if (closed_) return false;
         buf_[tail_] = std::move(item);
         tail_ = (tail_ + 1) % capacity_;
         ++count_;
         cvEmpty_.notify_one();
+        return true;
     }
 
     bool pop(T& item) {
@@ -214,6 +215,7 @@ struct FlexFastqRecordRef {
 // One mate-1 record as read by the barcode-mate reader.
 struct FlexFastqMateRecordRef {
     uint32_t offSeq = 0, offQual = 0, len = 0;
+    uint32_t offName = 0, nameLen = 0; // used only for spatial paired-input validation
 };
 
 // A run of mate-1 records. The barcode mate is read on its own thread and
