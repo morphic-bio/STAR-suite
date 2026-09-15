@@ -9,7 +9,8 @@
 #   - Never mkdir "${OUTDIR}/tmp" before STAR; only rm -rf so STAR creates --outTmpDir.
 #   - Historical: --readFilesCommand zcat for .fastq.gz on 7a7fb08-class binaries.
 #   - Modern: no zcat (native gzip).
-#   - A375 is 5' chemistry: --soloStrand Unstranded in BOTH modes (unlike 3' UCSF).
+#   - A375 is a 10x 5' R2-only library (SC5P-R2): read 2 is antisense, so --soloStrand Reverse
+#     in BOTH modes (3' UCSF/MSK use Forward). Unstranded gave gene Spearman 0.952 vs 0.988 against CR 9.0.1.
 #
 # Two command families (do not mix flags between them):
 #   --historical-vanilla  Known-good Solo surface for STAR built from ~7a7fb08
@@ -116,7 +117,8 @@ if [[ "${MODE}" == "historical-vanilla" ]]; then
     --soloMultiMappers Rescue
     --soloCbUbRequireTogether no
     --soloCellFilter EmptyDrops_CR
-    --soloStrand Unstranded
+    # 10x 5' R2-only library: read 2 is antisense to the transcript.
+    --soloStrand Reverse
     --soloFeatures GeneFull
   )
 else
@@ -143,7 +145,8 @@ else
     --soloMultiMappers Unique
     --soloCellFilter EmptyDrops_CR
     --soloCbUbRequireTogether no
-    --soloStrand Unstranded
+    # 10x 5' R2-only library: read 2 is antisense to the transcript.
+    --soloStrand Reverse
     --soloFeatures GeneFull
     --soloCrGexFeature genefull
     --soloCrMultimapRescue yes

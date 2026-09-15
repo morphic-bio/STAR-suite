@@ -94,6 +94,8 @@ def main():
     set_arg('--dynamicThreadPfControllerMode', 'off')
     set_arg('--dynamicThreadAtacController', 0)
     set_arg('--dynamicThreadBgzfHierarchy', args.hierarchy)
+    # A375 is a 10x 5' R2-only library (SC5P-R2): read 2 is antisense, so count Reverse (the recorded argv says Unstranded).
+    set_arg('--soloStrand', 'Reverse')
     if args.balance is not None:
         set_arg('--dynamicThreadBalance', args.balance)
     if args.bgzf_reader_threads is not None:

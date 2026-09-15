@@ -154,6 +154,7 @@ if [[ -n "${STAR_VELOCYTO_INTEGRATED_HASH_INMEMORY:-}" ]]; then
   echo "STAR_VELOCYTO_INTEGRATED_HASH_INMEMORY=${STAR_VELOCYTO_INTEGRATED_HASH_INMEMORY}"
 fi
 
+# Strand: UCSF perturb GEX is a 10x 3' gene-expression library: read 2 is sense to the transcript.
 # shellcheck disable=SC2086
 "${STAR_BIN}" \
   --runThreadN "${THREADS}" \
@@ -174,7 +175,7 @@ fi
   --soloMultiMappers Unique \
   --soloCellFilter EmptyDrops_CR \
   --soloCbUbRequireTogether no \
-  --soloStrand Unstranded \
+  --soloStrand Forward \
   --soloFeatures Gene GeneFull Velocyto \
   --soloCrGexFeature genefull \
   --pfMultiConfig "${PF_MULTI_CONFIG}" \

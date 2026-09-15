@@ -122,6 +122,7 @@ PY
   >"${OUTDIR}/genome.stdout.log" 2>"${OUTDIR}/genome.stderr.log"
 
 # Deliberately omit --soloSpatialFeatureSidecar. This is a normal Solo run.
+# Strand: the fixture mimics a 10x 3' library (CB16+UMI12 in read 1, read 2 copied from the sense strand of + genes), so Forward.
 "${STAR_BIN}" \
   --runThreadN 1 \
   --genomeDir "${INDEX}" \
@@ -136,7 +137,7 @@ PY
   --soloCBwhitelist "${FASTQ}/whitelist.txt" \
   --soloCBmatchWLtype Exact \
   --soloFeatures GeneFull \
-  --soloStrand Unstranded \
+  --soloStrand Forward \
   --soloUMIdedup 1MM_CR \
   --soloUMIfiltering MultiGeneUMI_CR \
   --soloMultiMappers Unique \
