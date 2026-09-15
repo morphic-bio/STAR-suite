@@ -110,6 +110,7 @@ For real Flex data, you will usually need:
 - the right barcode and UMI settings
 - the right probe set
 - a filtered reference and STAR index built from the reference and probe set you actually want to use
+- the half-probe cache built once from that index (`--runMode hashCacheGenerate --hashCacheTiers H0,H1X2`); `--flex yes` reads probes from this cache and does not align reads
 
 ## 7. A safe way to switch from demo data to real data
 

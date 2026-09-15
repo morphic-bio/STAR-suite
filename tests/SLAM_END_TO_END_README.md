@@ -63,7 +63,7 @@ bash /mnt/pikachu/STAR-Flex/tests/run_slam_end_to_end.sh --work-dir /storage/my_
 ### 5. Compare Results
 - Runs `compare_fixture.py` to compute correlations between STAR and GEDI
 - Generates Pearson and Spearman correlations for:
-  - NTR (normalized transcription rate)
+  - NTR (new-to-total RNA ratio)
   - k/nT (conversion fraction)
 - Multiple coverage thresholds (20, 50, 100 reads)
 

@@ -1,6 +1,13 @@
 # Flex helper scripts
 
-This folder holds the minimal helpers to build a flex-capable STAR reference:
+This folder holds the minimal helpers to build a flex-capable STAR reference.
+From STAR Suite 1.9.4 this hybrid reference index is used to build the
+half-probe (H1X2) cache with `STAR --runMode hashCacheGenerate --hashCacheTiers
+H0,H1X2`; a default `--flex yes` run assigns reads from that cache and does not
+align them to the reference (aligning to it is the legacy route, `--flexLegacy
+yes`). See [../README_flex.md](../README_flex.md#quick-start).
+
+- `extend_model_probe_cache.py`: Extend an existing complete probe cache with missing active and deprecated probe features, without a genome index (see `docs/FLEX_MODEL_FEATURES.md`).
 
 - `make_flex_reference.sh`: Create probe-only pseudo-chromosome FASTA/GTF from the 10x Flex probe CSV (one contig per probe). Outputs `<prefix>.fa` and `<prefix>.gtf`.
 - `make_flex_star_index.sh`: End-to-end wrapper that (1) runs `make_flex_reference.sh`, (2) concatenates the base genome FASTA/GTF with the probe FASTA/GTF, and (3) runs `STAR --runMode genomeGenerate` on the combined reference. Outputs combined FASTA/GTF and the STAR index under `star_index/`.

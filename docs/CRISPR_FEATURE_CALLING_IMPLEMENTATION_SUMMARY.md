@@ -1,5 +1,11 @@
 # CRISPR Feature Calling Implementation Summary
 
+> **Note:** This is a January 2026 implementation record and predates STAR Suite
+> 1.9.4; its A375 validation numbers are not current. For the current A375 and
+> MSK 30-KO results see the README section
+> [Benchmarks](../README.md#benchmarks); for the protocol see
+> [PAPER_BENCHMARK_METHODOLOGY.md](PAPER_BENCHMARK_METHODOLOGY.md) Section 1.
+
 **Date:** January 24, 2026  
 **Status:** Complete (pending regression testing for non-CRISPR assays)
 

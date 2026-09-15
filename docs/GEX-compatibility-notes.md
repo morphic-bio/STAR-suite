@@ -19,8 +19,21 @@ Index binaries (`Genome`, `SA`, `SAindex`) are not guaranteed byte-identical acr
 
 Use these settings when the goal is to match Cell Ranger GEX counts as closely as possible:
 
-- `--soloFeatures Gene`  
-  CR GEX counts are exons-only. `GeneFull` adds introns and typically lowers Pearson vs CR.
+- `--soloFeatures GeneFull`  
+  Cell Ranger 7.0 and later count intronic reads by default (`include-introns`
+  true, per 10x's documentation), so `GeneFull` is the matching surface. Use
+  `Gene` (exons only) only against a Cell Ranger run made with introns excluded
+  or an older Cell Ranger release.
+- `--soloStrand` matching the library  
+  `Forward` for 3' libraries; `Reverse` for 10x 5' R2-only libraries (Cell
+  Ranger chemistry `SC5P-R2*`, e.g. A375), because read 2 is antisense to the
+  transcript. `Unstranded` drops reads where opposite-strand genes overlap and
+  counts antisense reads.
+- `--soloCrMultimapRescue yes`  
+  Cell Ranger-matched multimapper rescue (default `no`).
+- `--clip3pPolyG yes` on NovaSeq/NextSeq data  
+  Poly-G tails otherwise inflate specific genes (default `auto` trims only with
+  `--clipAdapterType CellRanger4`).
 - `--soloMultiMappers Unique`  
   CR does not use EM/Uniform multimapper redistribution for the standard GEX matrix.
 - `--soloCellFilter EmptyDrops_CR`  
@@ -31,8 +44,11 @@ Use these settings when the goal is to match Cell Ranger GEX counts as closely a
   Keep CR-like UMI handling.
 - `--soloCbUbRequireTogether no`  
   Used in recent CR-like parity runs; default is `yes` now, so set explicitly if you want parity with those runs.
-- `--soloCrGexFeature gene`  
-  Ensures CR-compat merge uses the Gene MEX (errors if Gene is missing).
+- `--soloCrGexFeature genefull`  
+  Ensures CR-compat merge uses the GeneFull MEX (errors if GeneFull is missing).
+
+The full option set used for the STAR Suite 1.9.4 manuscript benchmarks is in
+[PAPER_BENCHMARK_METHODOLOGY.md](PAPER_BENCHMARK_METHODOLOGY.md) Section 1.6.
 
 Optional stricter multimapper handling:
 - `--outFilterMultimapNmax 1` (if you want to drop all multimappers at alignment time).
@@ -41,18 +57,29 @@ Optional stricter multimapper handling:
 
 ```bash
 STAR \
-  --soloFeatures Gene \
+  --soloFeatures GeneFull \
+  --soloStrand Forward \
   --soloMultiMappers Unique \
+  --soloCrMultimapRescue yes \
   --soloCellFilter EmptyDrops_CR \
   --soloUMIdedup 1MM_CR \
   --soloUMIfiltering MultiGeneUMI_CR \
   --soloCbUbRequireTogether no \
-  --soloCrGexFeature gene
+  --soloCrGexFeature genefull
 ```
 
 ## Comparison Script Settings
 
-The comparison helper `tests/compare_a375_star_mex.py` uses filtering thresholds that directly affect correlations:
+The gene-level concordance reported for STAR Suite 1.9.4 is Spearman over every
+gene in both annotations (zero-count genes included) together with Pearson on
+raw per-gene totals, over the cells both tools called: `spearman_all_genes` and
+`pearson_all_genes` from `scripts/report_additional_parity_metrics.py`. Its
+`--gene-corr-min-counts` / `--gene-corr-min-cells-pct` thresholds only affect
+the `*_filtered_genes` fields (and the `pearson`/`spearman` aliases), which are
+not the reported metric. See
+[PAPER_BENCHMARK_METHODOLOGY.md](PAPER_BENCHMARK_METHODOLOGY.md) Section 1.5.
+
+The older comparison helper `tests/compare_a375_star_mex.py` uses filtering thresholds that directly affect correlations:
 
 - Default `--min-counts 20` and `--min-cells-pct 0.01`
 - Earlier runs that reported higher Pearson (e.g., 0.95+ range) used **≥10 counts** in the filter step.
@@ -70,7 +97,7 @@ python3 tests/compare_a375_star_mex.py \
 ## Common Sources of Pearson Drops
 
 1. **Gene vs GeneFull mismatch**  
-   - CR uses exons-only (`Gene`). `GeneFull` adds introns and usually lowers Pearson.
+   - Cell Ranger 7.0 and later count introns by default, which matches `GeneFull`. Comparing `Gene` (exons only) against such a run lowers the correlations; `Gene` matches only a Cell Ranger run with introns excluded.
 2. **Multimapper mode**  
    - `Unique` aligns best with CR. `EM` or `Uniform` inflate totals and reduce Pearson.
 3. **Filtered vs raw MEX mismatch**  
@@ -81,6 +108,8 @@ python3 tests/compare_a375_star_mex.py \
    - `--min-counts` and `--min-cells-pct` change which genes are included in correlations.
 6. **Dataset/version mismatch**  
    - 2024-A CR outputs vs `/storage/A375/outputs/unpacked` runs can differ; full-depth vs downsample also changes results.
+7. **Strand mismatch**  
+   - A 5' R2-only library run with `--soloStrand Unstranded` instead of `Reverse` loses reads at overlapping opposite-strand genes and counts antisense reads (A375 gene Spearman 0.952 with `Unstranded`, 0.988 with `Reverse`, against Cell Ranger 9.0.1).
 
 ## Notes on CR-Compat Merge (`--soloCrGexFeature`)
 
