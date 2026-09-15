@@ -7,6 +7,7 @@ argv, environment changes, exit status and logs in a fresh output directory.
 """
 import argparse
 import gzip
+import fcntl
 import hashlib
 import json
 import os
@@ -35,6 +36,12 @@ def main():
     p.add_argument('--resume', action='store_true', help='Reuse verified successful cases; give failed attempts fresh directories')
     args = p.parse_args()
     args.out.mkdir(parents=True, exist_ok=args.resume)
+    # Hold one execution owner even when a failed suite is resumed.
+    ownership = (args.out / '.execution.lock').open('a')
+    try:
+        fcntl.flock(ownership.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit('Another test harness owns this output directory')
     inputs = args.out / 'inputs'
     inputs.mkdir(exist_ok=args.resume)
     empty = args.out / 'empty_genome'
@@ -107,7 +114,7 @@ def main():
         if out.exists() and args.resume:
             attempt = out / 'attempt.json'
             previous = json.loads(attempt.read_text()) if attempt.exists() else None
-            if not (previous and previous.get('exit_code') == 0 and
+            if not (previous and (previous.get('passed') or previous.get('exit_code') == 0) and
                     previous['argv'] == argv and previous['binary_sha256'] == digest(args.star)):
                 previous = None
                 retry = 2
@@ -155,6 +162,7 @@ def main():
             assert len(mex) == 36, (name, len(mex))
             assert not list(out.rglob('*.bam'))
             record.update(passed=True, summary=summary, mex=mex)
+        manifest.write_text(json.dumps(record, indent=2) + '\n')
         results.append(record)
         (args.out / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
         print('PASS', name, flush=True)
