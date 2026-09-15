@@ -1,0 +1,120 @@
+{
+  "schema": "starsuite.provenance_record/v1",
+  "record_id": "paper-2026-flex-v1.9.4",
+  "recorded_utc": "2026-09-15T12:00:00Z",
+  "kind": "benchmark",
+  "status": "complete",
+  "software": [
+    {
+      "repository": "https://github.com/morphic-bio/STAR-suite",
+      "revision": "1c9ddb9a5a2a3e62748e8e4ef28e553582affeed",
+      "version": "1.9.4"
+    }
+  ],
+  "environment": {
+    "lab_server": {
+      "hardware_class": "Intel Core i9-13900KF workstation (24 cores)",
+      "memory_gb": 126,
+      "logical_cpu_count": 32,
+      "requested_threads": 32,
+      "storage": "local NVMe for every input, output and scratch file",
+      "star_suite_binary_source_revision": "a095319a7b5442d6b67bc54a6e83619ad10c7877"
+    },
+    "cloud_instance": {
+      "instance_type": "AWS m6id.16xlarge limited to 32 virtual CPUs and 126 GiB of memory",
+      "storage": "two local NVMe devices in RAID0",
+      "requested_threads": 32,
+      "used_for": "10x 320k scFFPE only, because its Cell Ranger run needs about 3 TB of scratch"
+    }
+  },
+  "method": "STAR Suite 1.9.4 Flex (--flex yes: half-probe hash cascade, no read alignment, no genome index loaded, tag-aware cell calling of pooled sample tags) was compared with Cell Ranger 9.0.1 multi on JAX SC2300771 (4 tags, 2.011 billion read pairs; our own Cell Ranger run), GSE325982 (4 single-tag samples, 1.121 billion read pairs; the submitters' own Cell Ranger 9.0.1 outputs) and the 10x 320k scFFPE GEM-X dataset (16 tags pooled into 8 samples, 7.303 billion read pairs; our own Cell Ranger run). Inputs were the delivered FASTQ (parallel in-process BGZF reader for JAX and 320k; the single plain-gzip GSE325982 pair through --readFilesCommand rapidgzip) or CBQ converted once from the FASTQ, conversion excluded. Runs were made one at a time on a quiet machine with the page cache dropped first; elapsed time is whole-process wall-clock time from /usr/bin/time. Cell Ranger 9.0.1 ran with BAM output and secondary analysis disabled at the same thread count and was timed to completion. A Flex cell is its 16-base barcode with its sample tag; the Jaccard is pooled over samples, the per-cell Pearson is the mean over samples of per-cell Pearson correlations of log counts for genes with at least 20 counts detected in at least 1% of shared cells, and the gene-level correlations are computed per sample and averaged. Gene-level concordance is the Spearman correlation (tied ranks averaged) and the Pearson correlation of raw per-gene count totals over the cells called by both tools, over every gene in both annotations, zero-count genes included.",
+  "evidence": [
+    {
+      "dataset": "JAX SC2300771",
+      "site": "lab_server",
+      "input": "delivered BGZF FASTQ",
+      "elapsed_seconds": 199.43,
+      "reference_elapsed_seconds": 3426.06,
+      "speedup": 17.18
+    },
+    {
+      "dataset": "JAX SC2300771",
+      "site": "lab_server",
+      "input": "CBQ",
+      "elapsed_seconds": 169.63,
+      "reference_elapsed_seconds": 3426.06,
+      "speedup": 20.2
+    },
+    {
+      "dataset": "JAX SC2300771",
+      "called_cells": 20657,
+      "reference_called_cells": 20419,
+      "cell_call_jaccard": 0.988,
+      "cell_count_pearson": 0.9986,
+      "gene_count_spearman": 0.99996,
+      "gene_count_pearson": 0.999999
+    },
+    {
+      "dataset": "GSE325982",
+      "site": "lab_server",
+      "input": "plain gzip FASTQ via rapidgzip",
+      "elapsed_seconds": 267.73,
+      "reference_elapsed_seconds": 4485.0,
+      "speedup": 16.75
+    },
+    {
+      "dataset": "GSE325982",
+      "site": "lab_server",
+      "input": "CBQ",
+      "elapsed_seconds": 107.29,
+      "reference_elapsed_seconds": 4485.0,
+      "speedup": 41.8
+    },
+    {
+      "dataset": "GSE325982",
+      "called_cells": 38634,
+      "reference_called_cells": 38444,
+      "cell_call_jaccard": 0.994,
+      "cell_count_pearson": 0.9952,
+      "gene_count_spearman": 0.99991,
+      "gene_count_pearson": 0.999999
+    },
+    {
+      "dataset": "10x 320k scFFPE",
+      "site": "cloud_instance",
+      "input": "delivered BGZF FASTQ",
+      "elapsed_seconds": 1045.18,
+      "reference_elapsed_seconds": 23858.5,
+      "speedup": 22.83
+    },
+    {
+      "dataset": "10x 320k scFFPE",
+      "site": "cloud_instance",
+      "input": "CBQ",
+      "elapsed_seconds": 645.47,
+      "reference_elapsed_seconds": 23858.5,
+      "speedup": 36.96
+    },
+    {
+      "dataset": "10x 320k scFFPE",
+      "called_cells": 333411,
+      "reference_called_cells": 325410,
+      "cell_call_jaccard": 0.974,
+      "gene_count_spearman": 0.99998,
+      "gene_count_pearson": 0.999999
+    }
+  ],
+  "limitations": [
+    "Each timing is one completed run rather than a replicated distribution.",
+    "The 320k rows were measured on a cloud instance sized like the lab server, not on the lab server itself.",
+    "Flex cell calls depend on the number of EmptyDrops bootstrap streams; these runs used 32.",
+    "The JAX SC2300771 data are MorPhiC consortium data; only aggregate metrics are published here.",
+    "Cell Ranger outputs are the comparator, not a ground truth."
+  ],
+  "artifacts": [
+    {
+      "logical_uri": "git://STAR-suite/docs/PAPER_BENCHMARK_METHODOLOGY.md",
+      "sha256": "e631f83184653c0ae1c905e40c38641bd283d390f2efe58beca7ddec04c027c6"
+    }
+  ]
+}

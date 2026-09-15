@@ -1,0 +1,58 @@
+{
+  "schema": "starsuite.provenance_record/v1",
+  "record_id": "paper-2026-scrnaseq-pbmc10k-v1.9.4",
+  "recorded_utc": "2026-09-15T12:00:00Z",
+  "kind": "benchmark",
+  "status": "complete",
+  "software": [
+    {
+      "repository": "https://github.com/morphic-bio/STAR-suite",
+      "revision": "1c9ddb9a5a2a3e62748e8e4ef28e553582affeed",
+      "version": "1.9.4"
+    }
+  ],
+  "environment": {
+    "hardware_class": "Intel Core i9-13900KF workstation (24 cores)",
+    "memory_gb": 126,
+    "logical_cpu_count": 32,
+    "requested_threads": 32,
+    "storage": "local NVMe for every input, output and scratch file",
+    "star_suite_binary_source_revision": "a095319a7b5442d6b67bc54a6e83619ad10c7877"
+  },
+  "method": "STAR Suite 1.9.4 in its Cell Ranger-compatible scRNA-seq mode (poly-G clipping, Cell Ranger-matched multimapper rescue, GeneFull counting, --soloStrand Forward) was compared with a Cell Ranger 9.0.1 count run on the public 10x PBMC 10K 3' v3 library (638.9 million read pairs); upstream STAR 2.7.11b with the community-optimized CellGENI STARsolo 10x options was run on the same data as a second configuration. Runs were made one at a time on a quiet machine with the page cache dropped first; elapsed time is whole-process wall-clock time from /usr/bin/time. Cell Ranger 9.0.1 ran with BAM output and secondary analysis disabled at the same thread count and was timed to completion. Cell calls are compared by Jaccard index on the called-cell sets and per-cell totals by Pearson correlation. Gene-level concordance is the Spearman correlation (tied ranks averaged) and the Pearson correlation of raw per-gene count totals over the cells called by both tools, over every gene in both annotations, zero-count genes included.",
+  "evidence": [
+    {
+      "dataset": "10x PBMC 10K",
+      "configuration": "STAR Suite 1.9.4",
+      "elapsed_seconds": 967.85,
+      "reference_elapsed_seconds": 3780.0,
+      "speedup": 3.91,
+      "called_cells": 11863,
+      "reference_called_cells": 11806,
+      "cell_call_jaccard": 0.995,
+      "cell_count_pearson": 0.99999,
+      "gene_count_spearman": 0.99,
+      "gene_count_pearson": 0.9998
+    },
+    {
+      "dataset": "10x PBMC 10K",
+      "configuration": "upstream STAR 2.7.11b with CellGENI STARsolo options",
+      "elapsed_seconds": 1843.07,
+      "called_cells": 11794,
+      "cell_call_jaccard": 0.994,
+      "gene_count_spearman": 0.95,
+      "gene_count_pearson": 0.993
+    }
+  ],
+  "limitations": [
+    "Each timing is one completed run rather than a replicated distribution.",
+    "Cell Ranger outputs are the comparator, not a ground truth.",
+    "Wall-clock values depend on hardware, storage, cache state and tool versions."
+  ],
+  "artifacts": [
+    {
+      "logical_uri": "git://STAR-suite/docs/PAPER_BENCHMARK_METHODOLOGY.md",
+      "sha256": "e631f83184653c0ae1c905e40c38641bd283d390f2efe58beca7ddec04c027c6"
+    }
+  ]
+}

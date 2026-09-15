@@ -1,0 +1,100 @@
+{
+  "schema": "starsuite.provenance_record/v1",
+  "record_id": "release-2026-star-suite-v1.7.0",
+  "recorded_utc": "2026-08-08T19:17:43Z",
+  "kind": "release-validation",
+  "status": "complete",
+  "software": [
+    {
+      "repository": "https://github.com/morphic-bio/STAR-suite",
+      "revision": "60eab145837903b2979daaeed15ac142cc814025",
+      "version": "1.7.0"
+    },
+    {
+      "repository": "https://github.com/morphic-bio/STAR-suite-recipes",
+      "revision": "1b12325117da1f979f5e0233ae04e168f7dafb13",
+      "version": "1.7.0"
+    },
+    {
+      "repository": "https://github.com/morphic-bio/STAR-suite-provenance",
+      "revision": "cda90df649e201a4a337016d3e96b3a7d2bed031",
+      "version": "v1 release snapshot"
+    }
+  ],
+  "environment": {
+    "release_automation": "GitHub Actions",
+    "build_host": "Ubuntu 24.04 hosted runner",
+    "compatibility_targets": [
+      "Ubuntu 22.04 with glibc 2.34 baseline",
+      "Ubuntu 24.04 with glibc 2.39 baseline"
+    ],
+    "container_architectures": [
+      "linux/amd64",
+      "linux/arm64"
+    ]
+  },
+  "method": "The immutable v1.7.0 tag was cut from the tested master revision. Source-level catalog, disclosure, provenance, and MCP tests were followed by the tag-driven release workflow, which built each distribution format from the tagged source, checked its embedded source identity, exercised installed runtime and synthetic behavior, and published checksummed artifacts and a versioned multi-architecture container image.",
+  "evidence": [
+    {
+      "surface": "official-catalog-snapshots",
+      "result": "pass",
+      "official_recipe_count": 11,
+      "shipped_public_evidence_record_count": 4,
+      "checks": [
+        "recipe loader",
+        "public disclosure scan",
+        "provenance schema and publication policy",
+        "snapshot revision and digest validation"
+      ]
+    },
+    {
+      "surface": "MCP catalog and discovery implementation",
+      "result": "pass",
+      "tests_passed": 589
+    },
+    {
+      "surface": "master Tier A container gate",
+      "result": "pass",
+      "checks": [
+        "suite image build",
+        "self-contained and public-data smoke suite"
+      ]
+    },
+    {
+      "surface": "release artifacts",
+      "result": "pass",
+      "checks": [
+        "glibc234 and glibc239 compatibility tarball builds",
+        "Ubuntu 22.04 and Ubuntu 24.04 tarball runtime checks",
+        "automatic installer selection on Ubuntu 22.04 and Ubuntu 24.04",
+        "installed tarball and installer synthetic smoke suites",
+        "Debian package install and uninstall",
+        "Debian source package generation",
+        "checksums and exact source-revision metadata"
+      ]
+    },
+    {
+      "surface": "public distribution",
+      "result": "pass",
+      "published_release_assets": 17,
+      "checks": [
+        "GitHub release and checksummed assets",
+        "versioned linux/amd64 and linux/arm64 container image"
+      ]
+    }
+  ],
+  "limitations": [
+    "This validation uses synthetic and packaging gates; it does not repeat the biological paper benchmarks.",
+    "The v1.7.0 release intentionally ships the four-record provenance snapshot pinned before release; this release-validation record was published afterward and is not recursively embedded in that snapshot.",
+    "Runtime checks cover the declared Ubuntu compatibility targets and are not a guarantee for every Linux distribution or host configuration."
+  ],
+  "artifacts": [
+    {
+      "logical_uri": "release://STAR-suite/v1.7.0/SHA256SUMS",
+      "sha256": "05c58dc75edb42b6b5aea7a86ca7fe591b42c63b0972651b97a0f2c7ec115a13"
+    },
+    {
+      "logical_uri": "git://STAR-suite/share/star-suite/SNAPSHOTS.json"
+    }
+  ]
+}
