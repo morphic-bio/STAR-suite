@@ -255,7 +255,9 @@ CMD=(
   --soloFeatures Gene
   --alignEndsType Local
   --soloStrand Unstranded
-  --chimSegmentMin 1000000
+  # Chimeric detection off (0): with --outSAMtype None this lets STAR skip loading the genome index
+  # ("Flex count-only no-genome: active"); counting is unchanged because the half-probe route aligns nothing.
+  --chimSegmentMin 0
   --soloKeysCompat cr
   --soloSampleSearchNearby no
 )
