@@ -2446,6 +2446,11 @@ chromapAtacReadFormat       -
 chromapAtacBarcodeWhitelist -
     string:                 barcode whitelist file for Chromap.
 
+chromapAtacBarcodeSampleLimit 20000000
+    uint:                   exact whitelist observations used to learn ATAC barcode frequencies.
+                            Stops at the end of the current batch, so the limit may be exceeded by one batch.
+                            0 scans all barcode inputs. Does not limit the reads mapped.
+
 chromapAtacBarcodeTranslate -
     string:                 optional barcode translation table (- or empty to omit).
 

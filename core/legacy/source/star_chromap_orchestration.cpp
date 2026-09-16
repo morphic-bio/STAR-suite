@@ -592,6 +592,7 @@ bool validateAndBuildConfig(Parameters &P,
     cfg->read_format = trimCopy(P.chromapAtac.readFormat);
   }
   cfg->barcode_whitelist = trimCopy(P.chromapAtac.barcodeWhitelist);
+  cfg->barcode_sample_limit = P.chromapAtac.barcodeSampleLimit;
   if (!isUnsetToken(P.chromapAtac.barcodeTranslate)) {
     cfg->barcode_translate_table = trimCopy(P.chromapAtac.barcodeTranslate);
   }

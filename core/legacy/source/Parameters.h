@@ -829,6 +829,7 @@ class Parameters {
             string barcodeCbqCsv;
             string readFormat;
             string barcodeWhitelist;
+            uint64 barcodeSampleLimit = 20000000;
             string barcodeTranslate;
             // If 1, the barcode translate table is read in natural
             // <from_bc>\t<to_bc> order (col1 = source / hash key). Default 0

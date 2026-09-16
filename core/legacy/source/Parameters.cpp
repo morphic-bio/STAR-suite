@@ -803,6 +803,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeCbq", &chromapAtac.barcodeCbqCsv));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacReadFormat", &chromapAtac.readFormat));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeWhitelist", &chromapAtac.barcodeWhitelist));
+    parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "chromapAtacBarcodeSampleLimit", &chromapAtac.barcodeSampleLimit));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeTranslate", &chromapAtac.barcodeTranslate));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacBarcodeTranslateFromFirst", &chromapAtac.barcodeTranslateFromFirst));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacOutputFragments", &chromapAtac.outputFragments));
@@ -1059,6 +1060,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "chromapAtacBarcodeWhitelist" && p->inputLevel < 0) {
             chromapAtac.barcodeWhitelist = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacBarcodeSampleLimit" && p->inputLevel < 0) {
+            chromapAtac.barcodeSampleLimit = 20000000;
             p->inputLevel = 0;
         }
         if (p->nameString == "chromapAtacBarcodeTranslate" && p->inputLevel < 0) {

@@ -39,6 +39,7 @@ void usage() {
       << "  --macs3-frag-no-uint8-counts\n"
       << "  --macs3-frag-low-mem\n"
       << "  --barcode-translate FILE\n"
+      << "  --barcode-sample-limit N  whitelist learning budget [20000000]; 0 = all\n"
       << "  --read-format FORMAT\n"
       << "        Chromap read-format string, e.g. bc:8:23:- to extract and\n"
       << "        reverse-complement ATAC barcode-read bases 9-24.\n"
@@ -140,6 +141,8 @@ int main(int argc, char **argv) {
       config.barcode_cbqs = splitCsv(argv[++i]);
     } else if (arg == "--barcode-whitelist" && requireValue(argc, argv, i)) {
       config.barcode_whitelist = argv[++i];
+    } else if (arg == "--barcode-sample-limit" && requireValue(argc, argv, i)) {
+      config.barcode_sample_limit = parseUint64(argv[++i], arg);
     } else if (arg == "--barcode-translate" && requireValue(argc, argv, i)) {
       config.barcode_translate_table = argv[++i];
     } else if (arg == "--read-format" && requireValue(argc, argv, i)) {
