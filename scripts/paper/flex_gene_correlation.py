@@ -5,8 +5,9 @@ For each sample pair, per-gene count totals are summed over the barcodes called 
 over every gene present in both feature lists, zero-count genes included:
   - Spearman correlation (tied ranks averaged)
   - Pearson correlation on the raw (untransformed) totals
-The script prints one line per sample and the mean over samples, which is how the manuscript reports Flex
-(Supplementary Table S3). The definitions match `spearman_all_genes` / `pearson_all_genes` in
+The script prints one line per sample and the mean over samples, the manuscript's per-sample values
+(Supplementary Table S3). The pooled values the manuscript quotes, and the cell-level measures, come from
+scripts/paper/concordance_levels.py. The definitions match `spearman_all_genes` / `pearson_all_genes` in
 scripts/report_additional_parity_metrics.py.
 
 Barcodes: a trailing "-1" (Cell Ranger GEM-well suffix) is stripped. Within a per-sample directory the barcode

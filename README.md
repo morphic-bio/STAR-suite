@@ -169,20 +169,28 @@ converted once from the FASTQ; the conversion is excluded.
 | Assay | Benchmark (reference) | Concordance |
 |---|---|---|
 | Bulk RNA-seq | PPARG (Salmon) | gene Spearman 0.9992, Pearson 1.0000; transcript read-count Spearman 0.985, Pearson 0.99998 |
-| scRNA-seq | 10x PBMC 10K (Cell Ranger 9.0.1) | 11,863 cells against 11,806; barcode Jaccard 0.995; cell Pearson 0.99999; gene Spearman 0.990, Pearson 0.9998 |
-| Perturb-seq | A375 (Cell Ranger 9.0.1) | CRISPR calls 100% (1,076 shared cells); feature-UMI Pearson 0.99999; barcode Jaccard 0.992; cell Pearson 0.99995; gene Spearman 0.988, Pearson 0.980 |
-| Perturb-seq | MSK 30-KO ES (Cell Ranger 9.0.1) | CRISPR calls 99.0%; feature-UMI Pearson 0.9994; cell Pearson 0.99998; gene Spearman 0.993, Pearson 0.9994 |
-| 10x Flex | JAX SC2300771 (Cell Ranger 9.0.1) | barcode Jaccard 0.988 (pooled; 20,657 cells against 20,419); cell Pearson 0.9986; gene Spearman 0.99996, Pearson 0.999999 |
-| 10x Flex | GSE325982 (submitters' Cell Ranger 9.0.1) | barcode Jaccard 0.994 (pooled; 38,634 cells against 38,444); cell Pearson 0.9952; gene Spearman 0.99991, Pearson 0.999999 |
-| 10x Flex | 10x 320k scFFPE (Cell Ranger 9.0.1) | barcode Jaccard 0.974 (333,411 cells against 325,410); gene Spearman 0.99998, Pearson 0.999999 |
+| scRNA-seq | 10x PBMC 10K (Cell Ranger 9.0.1) | 11,863 cells against 11,806; barcode Jaccard 0.995; cell Pearson 0.99999; mean per-cell Pearson 0.992; gene Spearman 0.990, Pearson 0.9998 |
+| Perturb-seq | A375 (Cell Ranger 9.0.1) | CRISPR calls 100% (1,076 shared cells); feature-UMI Pearson 0.99999; barcode Jaccard 0.992; cell Pearson 0.99995; mean per-cell Pearson 0.992; gene Spearman 0.988, Pearson 0.980 |
+| Perturb-seq | MSK 30-KO ES (Cell Ranger 9.0.1) | CRISPR calls 99.0%; feature-UMI Pearson 0.9994; barcode Jaccard 0.992 (32,898 cells against 32,670); cell Pearson 0.99998; mean per-cell Pearson 0.991; gene Spearman 0.993, Pearson 0.9994 |
+| 10x Flex | JAX SC2300771 (Cell Ranger 9.0.1) | barcode Jaccard 0.988 (20,657 cells against 20,419); cell Pearson 0.99999; mean per-cell Pearson 0.9986; gene Spearman 0.99997, Pearson 0.9999997 |
+| 10x Flex | GSE325982 (submitters' Cell Ranger 9.0.1) | barcode Jaccard 0.994 (38,634 cells against 38,444); cell Pearson 0.99997; mean per-cell Pearson 0.9952; gene Spearman 0.99996, Pearson 0.9999993 |
+| 10x Flex | 10x 320k scFFPE (Cell Ranger 9.0.1) | barcode Jaccard 0.974 (333,411 cells against 325,410); cell Pearson 0.99998; mean per-cell Pearson 0.9990; gene Spearman 0.9999997, Pearson 0.9999997 |
 | SLAM-seq | GRAND-SLAM 100K human fixture (GRAND-SLAM) | NTR Pearson 0.9989 / 0.9961 / 0.9944 at >= 20 / 50 / 100 reads (30 s run) |
 
-Gene Spearman and Pearson are computed on raw per-gene totals over the cells
-both tools called, over every gene in both annotations (bulk: estimated read
-counts against Salmon). Barcode Jaccard is on the called-cell sets; for
-scRNA-seq and Perturb-seq, cell Pearson is on per-barcode UMI totals, and for
-Flex it is the mean per-cell Pearson of log counts over shared cells, averaged
-over samples. A Flex cell is its 16-base barcode together with its sample tag.
+Gene Spearman and Pearson correlate each gene's count, summed over the cells
+both tools called, across every gene in both annotations (bulk: the read counts
+each tool assigns to each gene, against Salmon). Cell Pearson correlates each
+shared cell's total UMI count across cells; mean per-cell Pearson correlates one
+shared cell's log-transformed counts across genes (genes with at least 20
+counts in both outputs, detected in at least 1% of shared cells) and averages
+over cells. Barcode Jaccard is the number of cells both tools call divided by
+the number either calls. The multiplexed Flex libraries are compared with all
+samples pooled, as quoted here; a Flex cell is its 16-base barcode together
+with its sample tag. Per-sample values, averaged over samples, differ from the
+pooled ones by less than 0.0001 for every correlation (JAX Jaccard 0.970-0.997
+across samples, GSE325982 0.994-0.995, 320k 0.958-0.984); they are in the
+manuscript's Supplementary Table S3 and are printed by
+[`scripts/paper/concordance_levels.py`](scripts/paper/concordance_levels.py).
 
 On the same PBMC 10K data, upstream STAR 2.7.11b with the community-optimized
 CellGENI STARsolo parameters took 30 min 43 s and gave gene Spearman 0.950,
