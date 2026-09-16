@@ -99,23 +99,34 @@ All references are GRCh38-2024-A; Flex uses probe set v1.1.0.
   section of `scripts/report_additional_parity_metrics.py` (run with
   `--gene-corr-min-counts 20 --gene-corr-min-cells-pct 0.01`; those thresholds
   only affect the `*_filtered_genes` fields, which are not reported). For Flex
-  the same quantities are computed per sample, from STAR Suite's per-sample MEX
-  against Cell Ranger's `sample_filtered_feature_bc_matrix`, and averaged over
-  samples, with `scripts/paper/flex_gene_correlation.py`. A Pearson correlation, or any correlation restricted to well-expressed
+  the same quantities are computed from STAR Suite's per-sample MEX against
+  Cell Ranger's `sample_filtered_feature_bc_matrix`, with all samples pooled
+  (the quoted values) and per sample, averaged over samples (Supplementary
+  Table S3), by `scripts/paper/concordance_levels.py`;
+  `scripts/paper/flex_gene_correlation.py` gives the per-sample gene values
+  alone. A Pearson correlation, or any correlation restricted to well-expressed
   genes, is dominated by the most abundant genes and hides differences in
   low-count genes, which is where counting rules differ most; both are reported.
-- **Cell calls.** Jaccard index on the called-cell sets. For Flex a cell is its
-  16-base barcode together with its sample tag, and the Jaccard is pooled over
-  samples.
-- **Per cell.** scRNA-seq and Perturb-seq: Pearson correlation of per-barcode UMI
-  totals over the cells both tools called. Flex: mean per-cell Pearson of
-  log-transformed counts over shared cells, for genes with at least 20 counts in
-  both outputs and detected in at least 1% of shared cells, averaged over
-  samples.
+- **Cell calls.** Jaccard index |A ∩ B| / |A ∪ B| on the called-cell sets. For
+  Flex a cell is its 16-base barcode together with its sample tag.
+- **Per cell.** Two different measures, both reported for every single-cell
+  benchmark and both on the cells called by both tools. *Cell Pearson*: Pearson
+  correlation, across cells, of each cell's total UMI count. *Mean per-cell
+  Pearson*: for each cell, Pearson correlation across genes of its
+  `log(1 + x)` counts in the two outputs, over genes with at least 20 counts in
+  both outputs and detected in at least 1% of shared cells, averaged over cells
+  (cells whose counts do not vary are skipped).
+- **Multiplexed libraries (Flex).** Every measure is computed with all samples
+  pooled, which ignores the samples and reflects cell calling and counting (the
+  quoted values), and per sample, averaged over samples, which also reflects any
+  disagreement in assigning reads to samples (Supplementary Table S3). Dropping
+  the sample tag and summing counts per barcode is not used: in the 320k
+  dataset 325,410 Cell Ranger cells share 128,394 barcodes, so that comparison
+  is between partitions, not cells.
 - **Feature barcodes.** Per-guide Pearson correlation of UMI sums over shared
   cells; CRISPR-call agreement is the fraction of shared cells whose called guide
   set is identical.
-- **Bulk RNA-seq.** Salmon `NumReads` against TranscriptVB `NumReads` at gene
+- **Bulk RNA-seq.** Assigned read counts, Salmon `NumReads` against TranscriptVB `NumReads`, at gene
   (`quant.genes.sf`) and transcript (`quant.sf`) level, all features, on the
   no-Y-removal benchmark.
 - **SLAM-seq.** NTR Pearson against GRAND-SLAM at >= 20, 50 and 100 reads.
