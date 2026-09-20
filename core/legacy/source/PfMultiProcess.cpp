@@ -67,6 +67,9 @@ struct PfPreparedFeatureLibrary {
     int starHashMinTotal = -1;
     int starHashMinTop = -1;
     double starHashMinRatio = -1.0;
+    string featureCaller;
+    int featureCallMinUmi = 1;
+    double featureCallMinRatio = 1.0;
     string starInputFormat;
     pf_split_read_layout splitReadLayout = {};
     string starBarcodeOutputMap;
@@ -183,6 +186,9 @@ struct PfMultiFeatureRun {
     int hashMinTotal = 3;
     int hashMinTop = 3;
     double hashMinRatio = 2.0;
+    string featureCaller;
+    int featureCallMinUmi = 1;
+    double featureCallMinRatio = 1.0;
     int nHashFeatures = 0;
     int nHashSinglet = 0;
     int nHashDoublet = 0;
@@ -1531,6 +1537,11 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
             prepared.starHashMinTotal = lib.starHashMinTotal;
             prepared.starHashMinTop = lib.starHashMinTop;
             prepared.starHashMinRatio = lib.starHashMinRatio;
+            prepared.featureCaller = lib.starFeatureCaller;
+            prepared.featureCallMinUmi = lib.starFeatureCallMinUmi < 0
+                ? 1 : lib.starFeatureCallMinUmi;
+            prepared.featureCallMinRatio = lib.starFeatureCallMinRatio < 0.0
+                ? 1.0 : lib.starFeatureCallMinRatio;
             prepared.tableBacked = lib.isTableBacked();
             prepared.starInputFormat = lib.starInputFormat.empty() ? "fastq" : lib.starInputFormat;
             if (prepared.tableBacked) {
@@ -3337,6 +3348,9 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             run.hashMinTotal = runAssignOpts.hashMinTotal;
             run.hashMinTop = runAssignOpts.hashMinTop;
             run.hashMinRatio = runAssignOpts.hashMinRatio;
+            run.featureCaller = preparedLib.featureCaller;
+            run.featureCallMinUmi = preparedLib.featureCallMinUmi;
+            run.featureCallMinRatio = preparedLib.featureCallMinRatio;
             if (tableBacked) {
                 run.tableImportStats = tableResult.stats;
             }
@@ -3476,6 +3490,14 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                 manifest << "hash_min_total\t" << run.hashMinTotal << "\n";
                 manifest << "hash_min_top\t" << run.hashMinTop << "\n";
                 manifest << "hash_min_ratio\t" << run.hashMinRatio << "\n";
+                manifest << "feature_caller\t"
+                         << (run.featureCaller.empty() ? "none" : run.featureCaller) << "\n";
+                if (!run.featureCaller.empty()) {
+                    manifest << "feature_call_min_umi\t" << run.featureCallMinUmi << "\n";
+                    manifest << "feature_call_min_ratio\t" << run.featureCallMinRatio << "\n";
+                    manifest << "feature_calls_path\touts/feature_analysis/"
+                             << run.libraryId << "/feature_calls.csv\n";
+                }
                 manifest << "n_hash_features\t" << run.nHashFeatures << "\n";
                 manifest << "n_hash_singlet\t" << run.nHashSinglet << "\n";
                 manifest << "n_hash_doublet\t" << run.nHashDoublet << "\n";
@@ -3889,6 +3911,36 @@ int finalizePfMultiConfig(Parameters& P,
             throw runtime_error("Failed to write filtered combined MEX");
         }
         P.inOut->logMain << "Filtered MEX written to: " << filteredOutDir << "\n";
+
+        for (const auto& run : featureRuns) {
+            if (run.featureCaller != "dominant") continue;
+
+            const string analysisRoot = outPrefix + "/outs/feature_analysis";
+            if (mkdir(analysisRoot.c_str(), 0755) != 0 && errno != EEXIST) {
+                throw runtime_error("Failed to create feature analysis directory: " + analysisRoot);
+            }
+            const string callOut = analysisRoot + "/" + run.libraryId;
+            const string filteredFeatureMex = run.assignOut + "/filtered";
+            cf_config *callConfig = cf_config_create();
+            if (!callConfig) {
+                throw runtime_error("Failed to allocate dominant feature caller config");
+            }
+            callConfig->min_deduped_counts = run.featureCallMinUmi;
+            callConfig->dominance_fraction = 0.0;
+            callConfig->dominance_margin = 1;
+            callConfig->dominance_min_ratio = run.featureCallMinRatio;
+            P.inOut->logMain << "Calling dominant features for " << run.libraryId
+                             << " from " << filteredFeatureMex
+                             << " (min_umi=" << run.featureCallMinUmi
+                             << ", min_ratio=" << run.featureCallMinRatio << ")\n";
+            const int callRet = cf_process_mex_dir(filteredFeatureMex.c_str(),
+                                                   callOut.c_str(), callConfig);
+            cf_config_destroy(callConfig);
+            if (callRet != 0) {
+                throw runtime_error("Dominant feature calling failed for library_id=" + run.libraryId);
+            }
+            P.inOut->logMain << "Dominant feature calls written to: " << callOut << "\n";
+        }
 
         bool hasCrisprFeatures = false;
         for (const auto& run : featureRuns) {
