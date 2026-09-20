@@ -35,6 +35,7 @@ typedef struct cf_config {
     int min_deduped_counts;      /* Minimum UMI count for a feature to be considered (default: 2) */
     double dominance_fraction;   /* Required fraction of total for dominant (default: 0.8) */
     int dominance_margin;        /* Required count margin over second-best (default: 1) */
+    double dominance_min_ratio;   /* Top/second UMI ratio; 0 disables (default: 0) */
     int include_ambiguous;       /* Include ambiguous calls in output (default: 1) */
 } cf_config;
 

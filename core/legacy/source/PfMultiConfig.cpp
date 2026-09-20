@@ -10,6 +10,7 @@
 #include <set>
 #include <stdexcept>
 #include <cstdlib>
+#include <cmath>
 
 namespace PfMultiConfig {
 
@@ -386,6 +387,33 @@ Config parseConfig(const string& configPath) {
                             if (!value.empty()) entry.starHashMinTop = std::atoi(value.c_str());
                         } else if (header == "star_hash_min_ratio" || header == "starhashminratio") {
                             if (!value.empty()) entry.starHashMinRatio = std::atof(value.c_str());
+                        } else if (header == "star_feature_caller" || header == "starfeaturecaller") {
+                            entry.starFeatureCaller = value;
+                            std::transform(entry.starFeatureCaller.begin(), entry.starFeatureCaller.end(),
+                                           entry.starFeatureCaller.begin(), ::tolower);
+                        } else if (header == "star_feature_call_min_umi" || header == "starfeaturecallminumi") {
+                            if (!value.empty()) {
+                                size_t consumed = 0;
+                                entry.starFeatureCallMinUmi = std::stoi(value, &consumed);
+                                if (consumed != value.size()) {
+                                    throw runtime_error("Invalid star_feature_call_min_umi: " + value);
+                                }
+                                if (entry.starFeatureCallMinUmi < 1) {
+                                    throw runtime_error("star_feature_call_min_umi must be >= 1");
+                                }
+                            }
+                        } else if (header == "star_feature_call_min_ratio" || header == "starfeaturecallminratio") {
+                            if (!value.empty()) {
+                                size_t consumed = 0;
+                                entry.starFeatureCallMinRatio = std::stod(value, &consumed);
+                                if (consumed != value.size()) {
+                                    throw runtime_error("Invalid star_feature_call_min_ratio: " + value);
+                                }
+                                if (!std::isfinite(entry.starFeatureCallMinRatio) ||
+                                    entry.starFeatureCallMinRatio < 1.0) {
+                                    throw runtime_error("star_feature_call_min_ratio must be >= 1");
+                                }
+                            }
                         } else {
                             applySplitReadHeader(entry, header, value);
                         }
@@ -564,6 +592,45 @@ Config parseConfig(const string& configPath) {
                         if (!value.empty()) {
                             entry.starMaxHamming = std::atoi(value.c_str());
                         }
+                    } else if (header == "star_hash_demux" || header == "starhashdemux") {
+                        entry.starHashDemux = value;
+                    } else if (header == "star_hash_feature_selector" || header == "starhashfeatureselector") {
+                        entry.starHashFeatureSelector = value;
+                    } else if (header == "star_hash_demux_method" || header == "starhashdemuxmethod") {
+                        entry.starHashDemuxMethod = value;
+                    } else if (header == "star_hash_min_total" || header == "starhashmintotal") {
+                        if (!value.empty()) entry.starHashMinTotal = std::atoi(value.c_str());
+                    } else if (header == "star_hash_min_top" || header == "starhashmintop") {
+                        if (!value.empty()) entry.starHashMinTop = std::atoi(value.c_str());
+                    } else if (header == "star_hash_min_ratio" || header == "starhashminratio") {
+                        if (!value.empty()) entry.starHashMinRatio = std::atof(value.c_str());
+                    } else if (header == "star_feature_caller" || header == "starfeaturecaller") {
+                        entry.starFeatureCaller = value;
+                        std::transform(entry.starFeatureCaller.begin(), entry.starFeatureCaller.end(),
+                                       entry.starFeatureCaller.begin(), ::tolower);
+                    } else if (header == "star_feature_call_min_umi" || header == "starfeaturecallminumi") {
+                        if (!value.empty()) {
+                            size_t consumed = 0;
+                            entry.starFeatureCallMinUmi = std::stoi(value, &consumed);
+                            if (consumed != value.size()) {
+                                throw runtime_error("Invalid star_feature_call_min_umi: " + value);
+                            }
+                            if (entry.starFeatureCallMinUmi < 1) {
+                                throw runtime_error("star_feature_call_min_umi must be >= 1");
+                            }
+                        }
+                    } else if (header == "star_feature_call_min_ratio" || header == "starfeaturecallminratio") {
+                        if (!value.empty()) {
+                            size_t consumed = 0;
+                            entry.starFeatureCallMinRatio = std::stod(value, &consumed);
+                            if (consumed != value.size()) {
+                                throw runtime_error("Invalid star_feature_call_min_ratio: " + value);
+                            }
+                            if (!std::isfinite(entry.starFeatureCallMinRatio) ||
+                                entry.starFeatureCallMinRatio < 1.0) {
+                                throw runtime_error("star_feature_call_min_ratio must be >= 1");
+                            }
+                        }
                     } else {
                         applySplitReadHeader(entry, header, value);
                     }
@@ -697,6 +764,29 @@ Config parseConfig(const string& configPath) {
             throw runtime_error("Invalid star_hash_demux value '" + lib.starHashDemux
                 + "' for library_id=" + lib.starLibraryId
                 + "; must be auto, yes, no, or empty");
+        }
+        if (!lib.starFeatureCaller.empty() && lib.starFeatureCaller != "dominant") {
+            throw runtime_error("Invalid star_feature_caller '" + lib.starFeatureCaller
+                + "' for library_id=" + lib.starLibraryId + "; must be dominant or empty");
+        }
+        if (lib.starFeatureCaller == "dominant") {
+            const string norm = lib.normalizedFeatureType();
+            if (norm == "geneexpression" || norm == "gex") {
+                throw runtime_error("star_feature_caller is not valid for GEX library_id="
+                    + lib.starLibraryId);
+            }
+            if (lib.starFeatureCallMinUmi != -1 && lib.starFeatureCallMinUmi < 1) {
+                throw runtime_error("star_feature_call_min_umi must be >= 1 for library_id="
+                    + lib.starLibraryId);
+            }
+            if (lib.starFeatureCallMinRatio != -1.0 &&
+                (!std::isfinite(lib.starFeatureCallMinRatio) || lib.starFeatureCallMinRatio < 1.0)) {
+                throw runtime_error("star_feature_call_min_ratio must be >= 1 for library_id="
+                    + lib.starLibraryId);
+            }
+        } else if (lib.starFeatureCallMinUmi != -1 || lib.starFeatureCallMinRatio != -1.0) {
+            throw runtime_error("star_feature_call thresholds require star_feature_caller=dominant for library_id="
+                + lib.starLibraryId);
         }
         if (!lib.starBarcodeOutputMap.empty()) {
             if (lib.starBarcodeOutputMap[0] != '/') {

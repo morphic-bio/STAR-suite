@@ -175,6 +175,44 @@ matching `assignBarcodes` CLI flags.
 
 ---
 
+## Per-Library Dominance Calling (Custom / LARRY)
+
+`pfMultiConfig` can call an individual non-GEX feature library inside the STAR
+run. Add these columns to the selected `[libraries]` row:
+
+```csv
+star_feature_caller,star_feature_call_min_umi,star_feature_call_min_ratio
+dominant,2,2.0
+```
+
+`star_feature_caller=dominant` is opt-in; an absent value leaves existing
+feature-library behavior unchanged. The thresholds default to 1 UMI and 1:1,
+with a required one-UMI margin, matching the production downstream rule
+`top_count > second_count`. A tie fails. Set `star_feature_call_min_umi=2` and
+`star_feature_call_min_ratio=2.0` explicitly for the stricter 2-UMI/2:1 policy.
+The ratio is against the second feature, not all other features combined.
+There is no additional fraction-of-total threshold on the integrated path.
+
+For a LARRY row with `star_library_id=larry_es`, STAR writes
+`outs/feature_analysis/larry_es/feature_calls.csv` and
+`feature_calls_summary.txt` during pf-multi finalization, using that library's
+filtered feature MEX. The CSV contains `barcode,feature_call,num_features,num_umis`;
+unassigned and ambiguous observed barcodes are marked `Unassigned` and
+`Multiplet`. The per-library `pf_library_provenance.tsv` records the policy
+and output path. `feature_per_cell.csv` remains a count summary, not the
+thresholded call table.
+
+The integrated caller uses the same `process_features` dominance engine as
+`call_features --guide-caller dominant`. Its standalone CLI now also accepts
+`--min-ratio`; use `--fraction 0 --min_counts 1 --min-ratio 1 --margin 1`
+to reproduce the integrated defaults. `--crGuideCaller` and `--crMinUmi`
+continue to control CRISPR GMM/FDR calling only.
+
+Regression checks:
+`tests/multi_feature/test_multi_feature_config.sh`,
+`tests/multi_feature/test_larry_dominant_calling.sh`, and
+`tests/multi_feature/test_larry_dominant_pf_multi.sh`.
+
 ## CRISPR Feature Calling (CR-Compat Mode)
 
 When running STAR with `--pfMultiConfig` and CRISPR Guide Capture features, STAR automatically runs GMM-based feature calling after EmptyDrops filtering.

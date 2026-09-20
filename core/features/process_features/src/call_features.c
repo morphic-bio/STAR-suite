@@ -95,6 +95,7 @@ cf_config* cf_config_create(void) {
     config->min_deduped_counts = 2;
     config->dominance_fraction = 0.8;
     config->dominance_margin = 1;
+    config->dominance_min_ratio = 0.0;
     config->include_ambiguous = 1;
     
     return config;
@@ -472,6 +473,7 @@ cf_call_results* cf_call_features(const cf_sparse_matrix *matrix, const cf_confi
         default_config.min_deduped_counts = 2;
         default_config.dominance_fraction = 0.8;
         default_config.dominance_margin = 1;
+        default_config.dominance_min_ratio = 0.0;
         default_config.include_ambiguous = 1;
         config = &default_config;
     }
@@ -530,12 +532,19 @@ cf_call_results* cf_call_features(const cf_sparse_matrix *matrix, const cf_confi
             /* Find top features */
             int max_idx = -1, max_count = 0;
             int second_idx = -1, second_count = 0;
+            int raw_max_count = 0, raw_second_count = 0;
             int total_count = 0;
             int num_passing = 0;
             
             for (int f = 0; f < matrix->num_rows; f++) {
                 if (feature_counts[f] > 0) {
                     total_count += feature_counts[f];
+                    if (feature_counts[f] > raw_max_count) {
+                        raw_second_count = raw_max_count;
+                        raw_max_count = feature_counts[f];
+                    } else if (feature_counts[f] > raw_second_count) {
+                        raw_second_count = feature_counts[f];
+                    }
                     
                     if (feature_counts[f] >= config->min_deduped_counts) {
                         num_passing++;
@@ -568,7 +577,9 @@ cf_call_results* cf_call_features(const cf_sparse_matrix *matrix, const cf_confi
                 call->feature_name = NULL;
                 call->umi_count = 0;
                 results->num_none++;
-            } else if (num_passing == 1) {
+            } else if (num_passing == 1 &&
+                       (raw_second_count == 0 ||
+                        (double)max_count / raw_second_count >= config->dominance_min_ratio)) {
                 /* Single feature - assign it */
                 call->call_type = CF_CALL_ASSIGNED;
                 call->feature_index = max_idx;
@@ -576,11 +587,14 @@ cf_call_results* cf_call_features(const cf_sparse_matrix *matrix, const cf_confi
                 call->umi_count = max_count;
                 results->num_assigned++;
             } else {
-                /* Multiple features - check dominance criteria */
+                /* Check dominance, including a runner-up below the UMI floor. */
                 double fraction = (total_count > 0) ? (double)max_count / total_count : 0.0;
                 int margin = max_count - second_count;
                 
-                if (fraction >= config->dominance_fraction && margin >= config->dominance_margin) {
+                if (fraction >= config->dominance_fraction &&
+                    margin >= config->dominance_margin &&
+                    (raw_second_count == 0 ||
+                     (double)max_count / raw_second_count >= config->dominance_min_ratio)) {
                     call->call_type = CF_CALL_ASSIGNED;
                     call->feature_index = max_idx;
                     call->feature_name = matrix->row_names[max_idx];
