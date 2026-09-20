@@ -13,6 +13,7 @@ VPATH = $(SRCDIR)
 LIBSCRNA_DIR = ../libscrna
 LIBSCRNA_INC = $(LIBSCRNA_DIR)/include
 LIBSCRNA = $(LIBSCRNA_DIR)/libscrna.a
+LEGACY_HTSLIB_INC = ../../legacy/source/htslib
 
 # Library flags (no cairo - heatmaps now use Plotly HTML+JSON)
 HTS_LIBS := -lhts
@@ -47,6 +48,7 @@ LDFLAGS=-lm -lpthread -lz -fopenmp -lstdc++ $(HTS_LIBS)
 # Object files
 OBJS=$(SRCS:.c=.o)
 CORE_OBJS=$(CORE_SRCS:.c=.o) pf_bgzf_input.o pf_BgzfRangeReader.o pf_BgzfBlockReader.o
+INTEGRATED_CORE_OBJS=$(filter-out pf_BgzfRangeReader.o pf_BgzfBlockReader.o,$(CORE_OBJS))
 BGZF_SOURCE = ../../legacy/source
 BGZF_CXXFLAGS = $(CFLAGS) -std=c++17 -I$(BGZF_SOURCE) -pthread
 
@@ -58,6 +60,7 @@ CALL_FEATURES_TARGET=call_features
 
 # Library target
 LIB_TARGET=libprocess_features.a
+INTEGRATED_LIB_TARGET=libprocess_features_integrated.a
 
 # demux_fastq sources/objects
 DEMUX_SRCS=demux_fastq.c io.c utils.c globals.c barcode_match.c
@@ -82,18 +85,24 @@ TEST_PREHASH_MEMORY_TARGET=tests/test_prehash_memory_safety
 TEST_CATATAC_SPLIT_TARGET=tests/test_catatac_split_read
 TEST_FEATURE_DUPLICATES_TARGET=tests/test_feature_duplicate_names
 TEST_ZERO_N_FALLBACK_TARGET=tests/test_zero_n_fallback
+TEST_FASTQ_PAIRING_TARGET=tests/test_fastq_pairing
 
 PF_BGZF_TEST = ../../../tests/pf_bgzf_harness
 $(PF_BGZF_TEST): ../../../tests/pf_bgzf_harness.cpp $(LIB_TARGET) $(LIBSCRNA)
 	$(CXX) $(BGZF_CXXFLAGS) $< $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS) -o $@
 
-.PHONY: all clean lib tools test test-adt-mex
+.PHONY: all clean lib lib-integrated tools test test-adt-mex
 
 all: lib tools
 
-test: $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) $(TEST_FEATURE_DUPLICATES_TARGET) $(TEST_ZERO_N_FALLBACK_TARGET) test-regression
+test: $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) $(TEST_FEATURE_DUPLICATES_TARGET) $(TEST_ZERO_N_FALLBACK_TARGET) $(TEST_FASTQ_PAIRING_TARGET) test-regression
 
 lib: $(LIB_TARGET)
+
+# STAR already links BgzfRangeReader.o and BgzfBlockReader.o directly. Keep a
+# separate archive for the integrated link so portable builds do not define
+# those symbols twice; standalone process_features tools use the full archive.
+lib-integrated: $(INTEGRATED_LIB_TARGET)
 
 tools: $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET)
 
@@ -103,7 +112,15 @@ $(LIBSCRNA):
 
 $(CORE_OBJS) main.o: include/common.h include/pf_api.h include/pf_bgzf_input.h
 
+# call_features uses only htslib's header-only numerical helpers. Resolve them
+# from STAR's bundled HTSlib without changing the SAM API headers used by the
+# standalone demux_bam tool.
+call_features.o: CFLAGS += -I$(LEGACY_HTSLIB_INC)
+
 $(LIB_TARGET): $(CORE_OBJS)
+	$(AR) rcs $@ $^
+
+$(INTEGRATED_LIB_TARGET): $(INTEGRATED_CORE_OBJS)
 	$(AR) rcs $@ $^
 
 $(TARGET): main.o $(LIB_TARGET) $(LIBSCRNA)
@@ -145,6 +162,10 @@ $(TEST_FEATURE_DUPLICATES_TARGET): tests/test_feature_duplicate_names.c $(LIB_TA
 $(TEST_ZERO_N_FALLBACK_TARGET): tests/test_zero_n_fallback.c $(LIB_TARGET) $(LIBSCRNA)
 	$(CC) $(CFLAGS) -c $< -o tests/test_zero_n_fallback.o
 	$(CXX) -o $@ tests/test_zero_n_fallback.o $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
+
+$(TEST_FASTQ_PAIRING_TARGET): tests/test_fastq_pairing.c $(LIB_TARGET) $(LIBSCRNA)
+	$(CC) $(CFLAGS) -c $< -o tests/test_fastq_pairing.o
+	$(CXX) -o $@ tests/test_fastq_pairing.o $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
 
 # Note: test_pf_counts.c is pure C, compile with gcc then link with g++ for libscrna
 $(TEST_PF_COUNTS_TARGET): tests/test_pf_counts.c $(LIB_TARGET) $(LIBSCRNA)
@@ -217,4 +238,4 @@ test-hash-demux-mex: $(TARGET)
 
 clean:
 	rm -f $(TEST_ZERO_N_FALLBACK_TARGET)
-	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) $(TEST_CATATAC_SPLIT_TARGET) $(TEST_FEATURE_DUPLICATES_TARGET) tests/*.o $(PF_BGZF_TEST)
+	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(INTEGRATED_LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) $(TEST_CATATAC_SPLIT_TARGET) $(TEST_FEATURE_DUPLICATES_TARGET) $(TEST_FASTQ_PAIRING_TARGET) tests/*.o $(PF_BGZF_TEST)

@@ -56,6 +56,9 @@ int main(int argc, char** argv) {
                  << " star_hash_min_total=" << lib.starHashMinTotal
                  << " star_hash_min_top=" << lib.starHashMinTop
                  << " star_hash_min_ratio=" << lib.starHashMinRatio
+                 << " star_feature_caller=" << lib.starFeatureCaller
+                 << " star_feature_call_min_umi=" << lib.starFeatureCallMinUmi
+                 << " star_feature_call_min_ratio=" << lib.starFeatureCallMinRatio
                  << endl;
         }
         return 0;
@@ -506,6 +509,49 @@ if echo "$OUTPUT" | grep -q 'Invalid star_hash_demux'; then
     pass "invalid star_hash_demux rejected"
 else
     fail "invalid star_hash_demux should fail config validation"
+fi
+
+# --- Test 20: per-library dominant caller configuration ---
+echo ""
+echo "--- Test 20: Custom library dominant caller ---"
+cat > "$WORK_DIR/config_dominant.csv" << EOF
+[libraries]
+fastqs,sample,feature_types,star_library_id,star_feature_ref,star_feature_caller,star_feature_call_min_umi,star_feature_call_min_ratio
+/path/to/larry,S1,Custom,larry_s1,$WORK_DIR/ref_larry.csv,dominant,2,2.0
+[feature]
+ref,$WORK_DIR/ref_larry.csv
+EOF
+OUTPUT=$("$HARNESS" "$WORK_DIR/config_dominant.csv" 2>&1)
+if echo "$OUTPUT" | grep -q 'star_feature_caller=dominant star_feature_call_min_umi=2 star_feature_call_min_ratio=2'; then
+    pass "per-library dominant caller and thresholds parsed"
+else
+    fail "per-library dominant caller should parse"
+fi
+
+# --- Test 21: caller settings cannot silently apply to GEX or another mode ---
+echo ""
+echo "--- Test 21: invalid dominant caller settings rejected ---"
+cat > "$WORK_DIR/config_dominant_gex.csv" << EOF
+[libraries]
+fastqs,sample,feature_types,star_library_id,star_feature_caller
+/path/to/mRNA,S1,Gene Expression,gex_s1,dominant
+EOF
+OUTPUT=$("$HARNESS" "$WORK_DIR/config_dominant_gex.csv" expect_fail 2>&1)
+if echo "$OUTPUT" | grep -q 'EXPECTED_FAIL.*not valid for GEX'; then
+    pass "dominant caller rejected on GEX"
+else
+    fail "dominant caller should be rejected on GEX"
+fi
+cat > "$WORK_DIR/config_dominant_bad_ratio.csv" << EOF
+[libraries]
+fastqs,sample,feature_types,star_library_id,star_feature_ref,star_feature_caller,star_feature_call_min_ratio
+/path/to/larry,S1,Custom,larry_s1,$WORK_DIR/ref_larry.csv,dominant,0.5
+EOF
+OUTPUT=$("$HARNESS" "$WORK_DIR/config_dominant_bad_ratio.csv" expect_fail 2>&1)
+if echo "$OUTPUT" | grep -q 'EXPECTED_FAIL.*min_ratio must be >= 1'; then
+    pass "invalid dominance ratio rejected"
+else
+    fail "invalid dominance ratio should be rejected"
 fi
 
 echo ""

@@ -18,6 +18,10 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
 MSK_ROOT="${MSK_ROOT:-/storage/MSK-perturb-comparison}"
 FASTQ_ROOT="${MSK_FASTQ_ROOT:-${MSK_ROOT}/msk30ko_full_3lib_20260304_095911/fastqs}"
+SAMPLE_LABEL="${MSK_SAMPLE_LABEL:-DE_30KO}"
+LIB_SUFFIX="${MSK_LIB_SUFFIX:-de}"
+LARRY_CALLER="${MSK_LARRY_CALLER:-}"
+GEX_READER="${MSK_GEX_READER:-zcat}"
 GEX_DIR="${MSK_GEX_DIR:-${FASTQ_ROOT}/mRNA}"
 GRNA_DIR="${MSK_GRNA_DIR:-${FASTQ_ROOT}/PolyIII}"
 LARRY_DIR="${MSK_LARRY_DIR:-${FASTQ_ROOT}/LARRY}"
@@ -31,6 +35,15 @@ OUTDIR="${MSK_OUTDIR:-/storage/MSK-perturb-comparison/paper_bench_$(date +%Y%m%d
 THREADS="${MSK_THREADS:-32}"
 MIN_UMI="${MSK_MIN_UMI:-2}"
 WITH_BAM="${MSK_WITH_BAM:-0}"
+
+case "${LARRY_CALLER}" in
+  ""|dominant) ;;
+  *) echo "ERROR: MSK_LARRY_CALLER must be dominant or empty" >&2; exit 2 ;;
+esac
+case "${GEX_READER}" in
+  zcat|internal) ;;
+  *) echo "ERROR: MSK_GEX_READER must be zcat or internal" >&2; exit 2 ;;
+esac
 
 # SSD disk-space preflight (to avoid mid-run ENOSPC).
 # Tuned for /storage on a shared NVMe; MSK full runs can be large if BAM is enabled.
@@ -60,6 +73,9 @@ Options:
   --no-bam             Skip BAM output (faster, but no CB/UB tags)
   --with-bam           Emit unsorted BAM (default)
   --star-bin PATH      STAR binary path
+  MSK_LARRY_CALLER=dominant enables integrated top-count LARRY calling.
+  MSK_SAMPLE_LABEL and MSK_LIB_SUFFIX select the sample/library IDs (default: DE).
+  MSK_GEX_READER=internal selects STAR's native gzip reader (default: zcat).
   -h, --help           Show help
 EOF
 }
@@ -96,6 +112,7 @@ echo "Threads:       ${THREADS}"
 echo "Chemistry:     Mixed (GEX=TRU, gRNA=NXT, LARRY=TRU)"
 echo "Min UMI:       ${MIN_UMI}"
 echo "BAM output:    $(if [[ "${WITH_BAM}" == "1" ]]; then echo "unsorted"; else echo "none"; fi)"
+echo "LARRY caller:  ${LARRY_CALLER:-none}"
 echo ""
 
 # Disk space preflight on the output filesystem.
@@ -119,10 +136,10 @@ echo ""
 MULTI_CONFIG="${OUTDIR}/multi_config.csv"
 cat > "${MULTI_CONFIG}" <<EOF
 [libraries]
-fastqs,sample,library_type,feature_types,star_chemistry,star_whitelist,star_feature_ref,star_library_id,star_max_hamming
-${GEX_DIR},DE_30KO,Gene Expression,Gene Expression,TRU,,,gex_de,
-${GRNA_DIR},DE_30KO,CRISPR Guide Capture,CRISPR Guide Capture,NXT,${GRNA_WHITELIST},${GRNA_FEATURE_REF},grna_de,1
-${LARRY_DIR},DE_30KO,Custom,Custom,TRU,${LARRY_WHITELIST},${LARRY_FEATURE_REF},larry_de,1
+fastqs,sample,library_type,feature_types,star_chemistry,star_whitelist,star_feature_ref,star_library_id,star_max_hamming,star_feature_caller
+${GEX_DIR},${SAMPLE_LABEL},Gene Expression,Gene Expression,TRU,,,gex_${LIB_SUFFIX},,
+${GRNA_DIR},${SAMPLE_LABEL},CRISPR Guide Capture,CRISPR Guide Capture,NXT,${GRNA_WHITELIST},${GRNA_FEATURE_REF},grna_${LIB_SUFFIX},1,
+${LARRY_DIR},${SAMPLE_LABEL},Custom,Custom,TRU,${LARRY_WHITELIST},${LARRY_FEATURE_REF},larry_${LIB_SUFFIX},1,${LARRY_CALLER}
 EOF
 
 echo "Multi-config: ${MULTI_CONFIG}"
@@ -134,12 +151,17 @@ echo ""
 # PARITY_BAM_TAG_POLICY: GX is alignment-level and UR is raw. This recipe uses
 # final GeneFull/CR-compatible MEX outputs for parity and deliberately omits them.
 export STAR_SOLO_NONFLEX_HASH_BRIDGE=1
+if [[ "${GEX_READER}" == "internal" ]]; then
+  READER_ARGS=(--readFilesBgzfMode auto)
+else
+  READER_ARGS=(--readFilesCommand zcat)
+fi
 CMD=(
   "${STAR_BIN}"
   --runThreadN "${THREADS}"
   --genomeDir "${GENOME_DIR}"
   --readFilesIn "${GEX_R2}" "${GEX_R1}"
-  --readFilesCommand zcat
+  "${READER_ARGS[@]}"
   --outFileNamePrefix "${OUTDIR}/"
   --clipAdapterType CellRanger4
   --alignEndsType Local
@@ -216,6 +238,9 @@ REQUIRED_OUTPUTS=(
   "${OUTDIR}/outs/filtered_feature_bc_matrix/matrix.mtx.gz"
   "${OUTDIR}/outs/crispr_analysis/protospacer_calls_per_cell.csv"
 )
+if [[ "${LARRY_CALLER}" == "dominant" ]]; then
+  REQUIRED_OUTPUTS+=("${OUTDIR}/outs/feature_analysis/larry_${LIB_SUFFIX}/feature_calls.csv")
+fi
 
 for f in "${REQUIRED_OUTPUTS[@]}"; do
   if [[ -f "$f" ]]; then
@@ -241,8 +266,11 @@ fi
 # ── Summary file ─────────────────────────────────────────────────────
 cat > "${OUTDIR}/BENCHMARK_SUMMARY.txt" <<EOF
 dataset=MSK_30polyKO
+sample=${SAMPLE_LABEL}
 chemistry=mixed_TRU_NXT
 libraries=3 (GEX + gRNA + LARRY)
+larry_caller=${LARRY_CALLER:-none}
+gex_reader=${GEX_READER}
 star_cells=${STAR_CELLS}
 wall_seconds=${ELAPSED}
 wall_minutes=${ELAPSED_MIN}

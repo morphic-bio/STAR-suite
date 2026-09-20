@@ -63,6 +63,12 @@ The tool can accept input FASTQ files in two ways:
 | `--barcode_fastq_pattern` | `[string]` | Pattern to identify barcode FASTQ files in directories. | `_R1_` |
 | `--forward_fastq_pattern` | `[string]` | Pattern to identify forward read FASTQ files. | `_R2_` |
 | `--reverse_fastq_pattern` | `[string]` | Pattern to identify reverse read FASTQ files. | `_R3_` |
+
+When a FASTQ directory is supplied, read-pattern matches are resolved as mate
+sets rather than as independent filename substrings. If a name contains more
+than one `_R1_` token, each position is tested by replacing that occurrence
+with the configured R2/R3 patterns. The unique position that produces existing
+mates is used. Multiple mate-producing positions are rejected as ambiguous.
 | `-k`, `--keep_existing` | | If output files exist, skip processing for that sample. | `false` |
 
 ### Barcode & Feature Processing
