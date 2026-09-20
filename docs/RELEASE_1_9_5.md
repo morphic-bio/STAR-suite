@@ -40,3 +40,27 @@ These are correctness fixtures, not full-slide performance or biological
 benchmarks. Full-slide paper results require the accepted public artifact and
 separate sealed runs. Existing README benchmark numbers and bundled evidence
 retain their original 1.9.4 identities.
+
+## Integrated feature calling
+
+The corrected 1.9.5 branch adds opt-in dominant calls for an individual
+non-GEX library in a three-library `--pfMultiConfig` run. Setting
+`star_feature_caller=dominant` on the LARRY row writes
+`outs/feature_analysis/<library_id>/feature_calls.csv` during STAR finalization.
+The default rule matches the existing MSK production integration:
+`top_count > second_count`; tied top counts are not assigned. Optional
+`star_feature_call_min_umi` and `star_feature_call_min_ratio` columns allow a
+stricter policy, such as 2 UMIs and a 2:1 ratio. The CRISPR GMM caller and
+runs without this setting are unchanged.
+
+On the MSK 30KO ES three-library SSD run, the v1.9.4-based development build
+produced 32,898 GeneFull filtered cells in 1,801 seconds with 32 threads,
+without BAM or Velocyto. The filtered GeneFull MEX was byte-identical to the
+unmodified v1.9.4 P02 control. The LARRY filtered MEX had identical counts
+after aligning barcode order. Among 26,521 cells shared with the released ES
+H5AD, all LARRY calls agreed: 26,017 identical assignments and 504 jointly
+unassigned. These are development validation results, not a new paper benchmark.
+
+The merged branch passed a clean build, 33 multi-feature configuration checks,
+the dominant-caller unit test, and a three-library integration fixture whose
+call CSV matched the standalone caller byte-for-byte.

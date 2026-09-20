@@ -9,8 +9,14 @@ star-suite (1.9.5-1) unstable; urgency=medium
   * Add spatial transaction, probe ambiguity, input-format and spill tests.
     Keep existing public benchmark and evidence records labelled by their
     original source releases.
+  * Add opt-in per-library dominant feature calls in three-library runs,
+    including the MSK production LARRY top-count rule, with optional minimum
+    UMI and top-to-runner-up ratio thresholds.
+  * Include FASTQ mate-token pairing and portable process-features build fixes.
+  * Add the release notes required by the GitHub release workflow and check
+    their presence before building release artifacts.
 
- -- STAR-suite Maintainers <maintainers@biodepot.example>  Tue, 15 Sep 2026 09:30:00 +0000
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sun, 20 Sep 2026 22:22:11 +0000
 
 star-suite (1.9.4-1) unstable; urgency=medium
 
