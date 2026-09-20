@@ -53,6 +53,11 @@ struct LibraryEntry {
     int starHashMinTop = -1;
     double starHashMinRatio = -1.0;
 
+    // Optional per-library calls from the filtered feature MEX.
+    string starFeatureCaller;           // dominant | empty (disabled)
+    int starFeatureCallMinUmi = -1;     // default 1 when dominant
+    double starFeatureCallMinRatio = -1.0; // default 1.0 when dominant
+
     bool isTableBacked() const;
 
     // Split-read guide layout (CAT-ATAC and similar assays)
