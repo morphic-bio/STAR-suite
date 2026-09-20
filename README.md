@@ -70,6 +70,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
   outside Flex.
 - **Solo Features**: `sF` BAM tag for feature type, `--soloCBtype String` for arbitrary barcode strings, `--soloCellReadStats Standard` for improved cell filtering.
 - **CR-compat GEX** (`--soloCrGexFeature auto|gene|genefull`): Controls which GEX source is merged in CR-compat mode.
+- **Per-library feature calls** (`star_feature_caller=dominant` in `--pfMultiConfig`): Opt-in in-process calls for a non-GEX library such as LARRY. The default rule is the production top-count rule (`top > runner-up`); optional per-library minimum UMI and top/runner-up ratio columns support stricter policies. See [feature barcode documentation](docs/feature_barcodes.md).
 - **Native Velocyto MEX Packaging**: Current production binaries write raw and
   filtered Velocyto MEX under `outs/` internally. `prepare_velocyto_mex.py` is a
   legacy repair/backfill helper for old STAR outputs, not the normal production
