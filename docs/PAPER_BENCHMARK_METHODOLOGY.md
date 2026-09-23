@@ -2,12 +2,12 @@
 
 This document records how the benchmarks in the STAR Suite manuscript and in
 the top-level `README.md` were run and evaluated. **Section 1 is the current
-methodology (STAR Suite 1.9.4) and matches the manuscript's Methods.** Section 2
+methodology (STAR Suite 1.9.5) and matches the manuscript's Methods.** Section 2
 keeps the records of earlier investigations for history; wherever Section 2
 disagrees with Section 1 (thresholds, comparator pipelines, datasets, script
 defaults), Section 1 applies.
 
-## 1. STAR Suite 1.9.4 manuscript methodology
+## 1. STAR Suite 1.9.5 manuscript methodology
 
 ### 1.1 Benchmark set
 
@@ -18,7 +18,7 @@ defaults), Section 1 applies.
 | Perturb-seq | A375 1k CRISPR 5' GEM-X (gene expression + CRISPR guides) | Cell Ranger 9.0.1 `multi` | `scripts/paper/run_a375_benchmark.sh` |
 | Perturb-seq | MSK 30-KO ES sample (gene expression + 30 CRISPR guides + 245,979-barcode LARRY library, one pass) | Sum of the Cell Ranger 9.0.1 GEX+guide and GEX+LARRY runs | `scripts/paper/run_msk_30polyko_benchmark.sh` on the ES staging set |
 | 10x Flex | JAX SC2300771 (4 tags, 8 lanes, 2.011B read pairs) | Cell Ranger 9.0.1 `multi` run made for this work | Direct STAR invocation (1.6) |
-| 10x Flex | GSE325982 pool (4 single-tag samples, 1.121B read pairs) | The submitters' Cell Ranger 9.0.1 outputs (GEO), produced with `filter-probes` false | Direct STAR invocation (1.6) |
+| 10x Flex | GSE325982 pool (4 single-tag samples, 1.121B read pairs) | Cell Ranger 9.0.1 `multi` run made for this work, default probe filtering; a second run with the submitters' `filter-probes` false reproduces their GEO deposit byte for byte | Direct STAR invocation (1.6) |
 | 10x Flex | 10x 320k scFFPE GEM-X (16 tags pooled in pairs into 8 samples, 7.303B read pairs) | Cell Ranger 9.0.1 `multi` run made for this work | Direct STAR invocation (1.6) |
 | SLAM-seq | GRAND-SLAM 100K-read human fixture (external BED SNP mask) | GRAND-SLAM reference NTRs (`from_nosnp` oracle) | `tests/run_slam_fixture_parity.sh` |
 
@@ -31,7 +31,12 @@ the comparator's matrix header is a Cell Ranger 9 run, and `--soloStrand Reverse
 ES output labels and a 28-file input-inventory check (MSK); STAR run and EM
 comparison switched on (they default off), 32 threads and an explicit SNP-mask
 arm (SLAM), with parity scored against the canonical `from_nosnp` oracle.
-All references are GRCh38-2024-A; Flex uses probe set v1.1.0.
+All references are GRCh38-2024-A; Flex uses probe set v1.1.0 restricted to its
+included probes, Cell Ranger's default, on all three datasets and for every tool.
+GSE325982's submitters deposited outputs made with filtering off; running Cell
+Ranger that way reproduces their matrices byte for byte, and the two settings
+call identical cells and give per-cell and per-gene correlations of 1.000000 on
+the genes both report.
 
 ### 1.2 Timing protocol
 
@@ -54,7 +59,9 @@ All references are GRCh38-2024-A; Flex uses probe set v1.1.0.
   only when the pipeline finishes. Where the same work needs two Cell Ranger
   runs (MSK 30-KO), the walls are summed. If a Cell Ranger run fails, the
   failure is recorded, the same pipestance is resumed with the identical command
-  and the attempts are summed; no reported run needed this. The time at which
+  and the attempts are summed. One Cell Ranger run needed attention: the
+  2026-09-23 GSE325982 run crashed after writing its per-sample matrices, and a
+  clean re-run with the identical command is the run reported. The time at which
   Cell Ranger writes the per-sample matrices is recorded for reference only.
 - CBQ (BINSEQ) input is converted once from the FASTQ; the conversion time is
   excluded for STAR Suite and cyto alike.
@@ -87,7 +94,8 @@ All references are GRCh38-2024-A; Flex uses probe set v1.1.0.
   `--soloCellFilter EmptyDrops_CR`; its `GeneFull` filtered matrix is compared.
 - **cyto 0.4.7** (Flex), pinned by absolute path. Its probe-to-gene tables are
   derived from the probe set CSV of the corresponding Cell Ranger run and follow
-  that run's `filter-probes` setting.
+  that run's `filter-probes` setting, which is the default (included probes) for
+  every reported run.
 
 ### 1.5 Parity metrics
 
@@ -152,7 +160,7 @@ scRNA-seq (PBMC 10K), with `STAR_SOLO_NONFLEX_HASH_BRIDGE=1` in the environment:
 --outSAMtype None --soloInlineHashMode yes
 ```
 
-Perturb-seq, options shared by A375 and MSK (as recorded in the 1.9.4 runs'
+Perturb-seq, options shared by A375 and MSK (as recorded in the 1.9.5 runs'
 `Log.out`):
 
 ```

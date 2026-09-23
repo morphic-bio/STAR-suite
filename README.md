@@ -4,7 +4,7 @@ STAR Suite updates the original STAR aligner by integrating four modules — STA
 
 Current production release: **[STAR Suite v1.9.5](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.9.5)**. The suite release tag and
 source-packaging version are `v1.9.5` / `1.9.5-1`; `STAR --version` reports
-`1.9.5`. The benchmark results below retain their measured 1.9.4 identity.
+`1.9.5`. The benchmark results below were measured on 1.9.5.
 GitHub Releases also provides Ubuntu 22.04- and 24.04-built `.deb`
 packages from the same source revision.
 Use `STAR --upstream-version` for the underlying upstream STAR base
@@ -22,7 +22,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 
 ## Core Additions over STAR 2.7.11b
 
-- **Speedup** (STAR Suite 1.9.4; see [Benchmarks](#benchmarks)): bulk RNA-seq **1.6x** faster than an external Trim Galore + STAR + Salmon pipeline and **4.2x** with Y-chromosome removal; scRNA-seq **3.9x** faster than Cell Ranger 9.0.1 on the public 10x PBMC 10K library; Perturb-seq **4.8x** (A375) and **5.8x** (MSK 30-KO, three feature libraries in one pass against two Cell Ranger runs); Flex **16.8–22.8x** from the delivered FASTQ and **20.2–41.8x** from CBQ input. Gene-level Spearman and Pearson **0.98–1.0** against the reference outputs.
+- **Speedup** (STAR Suite 1.9.5; see [Benchmarks](#benchmarks)): bulk RNA-seq **1.6x** faster than an external Trim Galore + STAR + Salmon pipeline and **4.3x** with Y-chromosome removal; scRNA-seq **3.9x** faster than Cell Ranger 9.0.1 on the public 10x PBMC 10K dataset; Perturb-seq **4.7x** (A375) and **6.2x** (MSK 30-KO, three feature libraries in one pass against two Cell Ranger runs); Flex **17.2–22.6x** from the original FASTQ and **20.2–41.0x** from CBQ input. Gene-level Spearman and Pearson **0.98–1.0** against the reference outputs.
 - **Batch Mode** (`--batchMode 1`): Processes multiple FASTQs in one STAR invocation while reusing the loaded genome. Removes the need for `--genomeLoad` keep-in-memory workflows. Single-pass only (no `--twopassMode`); not supported with Solo (`--soloType`). Use `--outFileNamePrefixAuto 1` for per-sample subdirectories.
 - **TranscriptVB Quantification** (`--quantMode TranscriptVB`): Variational Bayes and EM quantification for transcript-level abundance, with parity-oriented behavior against Salmon alignment-mode. Gene-level summarization via `--quantVBgenesMode Tximport`.
 - **TranscriptVB Scatter/Gather** (`--quantVBSidecarOnly 1`): Writes compact,
@@ -129,7 +129,7 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 
 ## Benchmarks
 
-These are the STAR Suite **1.9.4** results reported in the manuscript. The
+These are the STAR Suite **1.9.5** results reported in the manuscript. The
 protocol, comparator commands and parity definitions are in
 [docs/PAPER_BENCHMARK_METHODOLOGY.md](docs/PAPER_BENCHMARK_METHODOLOGY.md); the
 benchmark entry points are listed in
@@ -146,25 +146,27 @@ the same size (m6id.16xlarge at 32 vCPUs and 126 GiB, local NVMe) because that
 Cell Ranger run needs about 3 TB of scratch. The reference is Cell Ranger 9.0.1
 with BAM output and secondary analysis disabled (`--create-bam=false`,
 `--nosecondary`), timed to completion; the MSK 30-KO reference is the sum of the
-two Cell Ranger runs needed for the same outputs. The bulk RNA-seq reference is
+two Cell Ranger runs needed for the same outputs. Every Flex run of every tool
+uses Cell Ranger's default probe filtering (the included probes of probe set
+v1.1.0) on all three datasets. The bulk RNA-seq reference is
 an external stepwise pipeline: Trim Galore 0.6.10 with FastQC, upstream STAR
 2.7.11b (`--quantMode TranscriptomeSAM`), and Salmon 1.10.3 in alignment mode
 with automatic library-type detection (`-l A --gcBias`); the with-Y-removal
 reference adds an `awk`/`samtools`/`gzip` Y split. CBQ rows read binary input
 converted once from the FASTQ; the conversion is excluded.
 
-| Assay | Benchmark | STAR Suite 1.9.4 | Reference | Speedup |
+| Assay | Benchmark | STAR Suite 1.9.5 | Reference | Speedup |
 |---|---|---:|---:|---:|
-| Bulk RNA-seq | PPARG 35.1M PE, no Y-removal | 8 min 2 s | 12 min 49 s | 1.6x |
-| Bulk RNA-seq | PPARG 35.1M PE, with Y-removal | 9 min 40 s | 40 min 47 s | 4.2x |
-| scRNA-seq | 10x PBMC 10K, 3' v3 (638.9M pairs) | 16 min 8 s | 63 min 0 s | 3.9x |
-| Perturb-seq | A375, gene expression + CRISPR guides | 2 min 21 s | 11 min 25 s | 4.8x |
-| Perturb-seq | MSK 30-KO ES, gene expression + guides + LARRY, one pass | 28 min 39 s | 167 min 2 s | 5.8x |
-| 10x Flex | JAX SC2300771 (2.01B pairs), delivered BGZF FASTQ | 3 min 19 s | 57 min 6 s | 17.2x |
+| Bulk RNA-seq | PPARG 35.1M PE, no Y-removal | 8 min 6 s | 12 min 49 s | 1.6x |
+| Bulk RNA-seq | PPARG 35.1M PE, with Y-removal | 9 min 35 s | 40 min 47 s | 4.3x |
+| scRNA-seq | 10x PBMC 10K, 3' v3 (638.9M pairs) | 16 min 18 s | 63 min 0 s | 3.9x |
+| Perturb-seq | A375, gene expression + CRISPR guides | 2 min 26 s | 11 min 25 s | 4.7x |
+| Perturb-seq | MSK 30-KO ES, gene expression + guides + LARRY, one pass | 27 min 6 s | 167 min 2 s | 6.2x |
+| 10x Flex | JAX SC2300771 (2.01B pairs), original BGZF FASTQ | 3 min 20 s | 57 min 6 s | 17.2x |
 | 10x Flex | JAX SC2300771, CBQ | 2 min 50 s | 57 min 6 s | 20.2x |
-| 10x Flex | GSE325982 (1.12B pairs), plain gzip via rapidgzip | 4 min 28 s | 74 min 45 s | 16.8x |
-| 10x Flex | GSE325982, CBQ | 1 min 47 s | 74 min 45 s | 41.8x |
-| 10x Flex | 10x 320k scFFPE (7.30B pairs), delivered BGZF FASTQ (cloud) | 17 min 25 s | 6 h 37 min 38 s | 22.8x |
+| 10x Flex | GSE325982 (1.12B pairs), plain gzip via rapidgzip | 4 min 17 s | 74 min 6 s | 17.3x |
+| 10x Flex | GSE325982, CBQ | 1 min 48 s | 74 min 6 s | 41.0x |
+| 10x Flex | 10x 320k scFFPE (7.30B pairs), original BGZF FASTQ (cloud) | 17 min 36 s | 6 h 37 min 38 s | 22.6x |
 | 10x Flex | 10x 320k scFFPE, CBQ (cloud) | 10 min 45 s | 6 h 37 min 38 s | 37.0x |
 
 | Assay | Benchmark (reference) | Concordance |
@@ -174,9 +176,9 @@ converted once from the FASTQ; the conversion is excluded.
 | Perturb-seq | A375 (Cell Ranger 9.0.1) | CRISPR calls 100% (1,076 shared cells); feature-UMI Pearson 0.99999; barcode Jaccard 0.992; cell Pearson 0.99995; mean per-cell Pearson 0.992; gene Spearman 0.988, Pearson 0.980 |
 | Perturb-seq | MSK 30-KO ES (Cell Ranger 9.0.1) | CRISPR calls 99.0%; feature-UMI Pearson 0.9994; barcode Jaccard 0.992 (32,898 cells against 32,670); cell Pearson 0.99998; mean per-cell Pearson 0.991; gene Spearman 0.993, Pearson 0.9994 |
 | 10x Flex | JAX SC2300771 (Cell Ranger 9.0.1) | barcode Jaccard 0.988 (20,657 cells against 20,419); cell Pearson 0.99999; mean per-cell Pearson 0.9986; gene Spearman 0.99997, Pearson 0.9999997 |
-| 10x Flex | GSE325982 (submitters' Cell Ranger 9.0.1) | barcode Jaccard 0.994 (38,634 cells against 38,444); cell Pearson 0.99997; mean per-cell Pearson 0.9952; gene Spearman 0.99996, Pearson 0.9999993 |
+| 10x Flex | GSE325982 (Cell Ranger 9.0.1) | barcode Jaccard 0.994 (38,671 cells against 38,444); cell Pearson 0.99997; mean per-cell Pearson 0.9952; gene Spearman 0.99996, Pearson 0.9999993 |
 | 10x Flex | 10x 320k scFFPE (Cell Ranger 9.0.1) | barcode Jaccard 0.974 (333,411 cells against 325,410); cell Pearson 0.99998; mean per-cell Pearson 0.9990; gene Spearman 0.9999997, Pearson 0.9999997 |
-| SLAM-seq | GRAND-SLAM 100K human fixture (GRAND-SLAM) | NTR Pearson 0.9989 / 0.9961 / 0.9944 at >= 20 / 50 / 100 reads (30 s run) |
+| SLAM-seq | GRAND-SLAM 100K human fixture (GRAND-SLAM) | NTR Pearson 0.9989 / 0.9961 / 0.9944 at >= 20 / 50 / 100 reads (26 s run) |
 
 Gene Spearman and Pearson correlate each gene's count, summed over the cells
 both tools called, across every gene in both annotations (bulk: the read counts
@@ -198,9 +200,10 @@ CellGENI STARsolo parameters took 30 min 43 s and gave gene Spearman 0.950,
 Pearson 0.993 and barcode Jaccard 0.994 against Cell Ranger 9.0.1; STAR Suite's
 poly-G clipping and Cell Ranger-matched multimapper policy account for the
 difference in gene-level counts. STAR-Flex loads no genome index: peak memory
-was 23 GiB on JAX and 72 GiB on 320k with cell-barcode buckets held in memory.
+was 24 GiB on JAX, 18 GiB on GSE325982 and 72 GiB on 320k with cell-barcode
+buckets held in memory.
 On spinning disk (matched cloud instances, reported in the manuscript's
-supplement) STAR-Flex remains 12-18x faster than Cell Ranger from the delivered
+supplement) STAR-Flex remains 12-20x faster than Cell Ranger from the original
 files.
 
 ## Building & Installing
