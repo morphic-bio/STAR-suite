@@ -1,3 +1,13 @@
+> **Note:** `core/features/feature_barcodes` is an older copy kept only as a
+> compatibility path; `make feature-barcodes-tools` builds the canonical
+> implementation in `core/features/process_features`, which is what STAR uses.
+> That implementation matches feature barcodes with tiered exact, 1-mismatch and
+> 2-mismatch hash tables and uses the exhaustive (fast-Hamming) search described
+> below only as a fallback; ambiguous table entries are left unassigned. Some
+> defaults also differ (for example `--max_barcode_mismatches` is 3 there). See
+> [`core/features/process_features/README.md`](../process_features/README.md)
+> and [`docs/feature_barcodes.md`](../../../docs/feature_barcodes.md).
+
 ## Introduction
 
 `assignBarcodes` is a fast, parallelized utility designed for targeted sequencing analysis in single-cell experiments. It efficiently assigns feature barcodes from FASTQ files to a known set of sequence barcodes, serving as a powerful, open-source alternative to proprietary tools.
@@ -53,6 +63,12 @@ The tool can accept input FASTQ files in two ways:
 | `--barcode_fastq_pattern` | `[string]` | Pattern to identify barcode FASTQ files in directories. | `_R1_` |
 | `--forward_fastq_pattern` | `[string]` | Pattern to identify forward read FASTQ files. | `_R2_` |
 | `--reverse_fastq_pattern` | `[string]` | Pattern to identify reverse read FASTQ files. | `_R3_` |
+
+When a FASTQ directory is supplied, read-pattern matches are resolved as mate
+sets rather than as independent filename substrings. If a name contains more
+than one `_R1_` token, each position is tested by replacing that occurrence
+with the configured R2/R3 patterns. The unique position that produces existing
+mates is used. Multiple mate-producing positions are rejected as ambiguous.
 | `-k`, `--keep_existing` | | If output files exist, skip processing for that sample. | `false` |
 
 ### Barcode & Feature Processing

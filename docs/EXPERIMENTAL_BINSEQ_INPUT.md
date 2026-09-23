@@ -1,7 +1,8 @@
 # CBQ/BINSEQ Input
 
-Status: released in STAR Suite `v1.1.0` for the STAR mapper, STARsolo, OCM,
-Flex, SLAM, and process_features adapter surfaces listed below. Current BINSEQ
+Status: experimental. First released in STAR Suite `v1.1.0` for the STAR
+mapper, STARsolo, OCM, Flex, SLAM, and process_features adapter surfaces listed
+below; FASTQ remains the primary input. Current BINSEQ
 support validates `.cbq` files against the STAR-suite input contract through
 both the original bqtools-backed probe and the native C++ CBQ reader, and it is
 wired into the STAR mapper as a native input path:
@@ -62,14 +63,20 @@ and STAR/process_features/Chromap adapter surfaces are documented in
   currently exercises the harness/API surface; the production PF CLI flag is
   still pending.
 - FLEX CBQ input uses the standard STAR CBQ adapter path for general
-  genome-backed runs. Fully fused count-only FlexPipeline runs
-  (`--flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1`) use the
-  CBQ-native lane producer. `tests/run_cbq_flex_tiny_public_smoke.sh` covers
-  FASTQ-vs-CBQ parity on a generated public tiny FLEX fixture; the host-local
+  genome-backed runs (legacy Flex routes, `--flexLegacy yes`). Fully fused
+  count-only FlexPipeline runs
+  (`--flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1`, which
+  `--flex yes` sets by default from 1.9.4) use the CBQ-native lane producer.
+  `tests/run_cbq_flex_tiny_public_smoke.sh` covers FASTQ-vs-CBQ parity on a generated public tiny FLEX fixture; the host-local
   SC2300771 100K FLEX downsample also passed count parity and order-normalized
   BAM payload parity.
 - FLEX count-only no-genome production is the first full-size topline CBQ use
-  case. On SC2300771, indexed level-0 CBQ no-genome completed in `7:22.46`
+  case. The timings in this bullet and under "How This Differs From FASTQ"
+  were measured before release 1.9.4, when FASTQ.gz was read through the
+  single zlib stream rather than the parallel BGZF reader; for the 1.9.4
+  numbers (CBQ rows exclude the one-time FASTQ-to-CBQ conversion) see the
+  "Benchmarks" section of the top-level `README.md`. On
+  SC2300771, indexed level-0 CBQ no-genome completed in `7:22.46`
   versus FASTQ.gz internal-gzip no-genome in `10:17.97`; the earlier whole-lane
   CBQ result was `8:38.52`. The FASTQ and original CBQ no-genome outputs were
   byte-identical for `Solo.out/Gene`, `Barcodes.stats`, and
@@ -98,8 +105,8 @@ and STAR/process_features/Chromap adapter surfaces are documented in
 ## Current Limitations
 
 - FLEX has full-size production count-only no-genome parity/timing, but
-  genome-backed FLEX alignment and BAM/SAM output surfaces still need separate
-  full-size validation.
+  genome-backed FLEX alignment and BAM/SAM output surfaces (legacy routes from
+  1.9.4) still need separate full-size validation.
 - STAR core indexed CBQ range mode supports order-independent `None` and
   coordinate-sorted `BAM` outputs, including `--readMapNumber` caps. Direct
   `SAM`, `BAM Unsorted`, `PairedKeepInputOrder`, Y/noY sidecars, batch mode,
@@ -140,7 +147,8 @@ optimized FASTQ path unchanged.
 For FLEX count-only production runs, CBQ is now a validated performance path.
 With the strict no-genome FLEX surface, both FASTQ.gz and level-0 CBQ avoid STAR
 genome loading and produce byte-identical counts on the original parity pair.
-On the full SC2300771 production run, indexed level-0 CBQ completed in
+On the full SC2300771 production run (before release 1.9.4; see the note
+above), indexed level-0 CBQ completed in
 `7:22.46` while FASTQ.gz internal gzip completed in `10:17.97`; the previous whole-lane CBQ
 reader completed in `8:38.52`. The indexed CBQ run improves over whole-lane CBQ
 by `1.17x` wall time and over FASTQ.gz by `1.40x`, at a higher peak RSS

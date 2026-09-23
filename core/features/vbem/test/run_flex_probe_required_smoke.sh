@@ -59,7 +59,7 @@ OUTPUT_A="$(timeout 10 "$STAR_BIN" --runMode alignReads \
      --soloCBlen 16 --soloUMIlen 12 --soloUMIstart 17 --soloCBstart 1 --soloBarcodeReadLength 0 \
      --soloCBwhitelist "$TEST_CB_WHITELIST" \
      --soloFeatures Gene \
-     --flex yes \
+     --flex yes --flexLegacy yes \
      --soloFlexExpectedCellsPerTag 1000 \
      --outFileNamePrefix "$TEST_DIR/test_a_no_probe/" \
      --runThreadN 1 2>&1 || true)"
@@ -86,7 +86,7 @@ OUTPUT_B="$(timeout 10 "$STAR_BIN" --runMode alignReads \
      --soloCBwhitelist "$TEST_CB_WHITELIST" \
      --soloFeatures Gene \
      --soloProbeList "$TEST_PROBE_LIST" \
-     --flex yes \
+     --flex yes --flexLegacy yes \
      --soloFlexExpectedCellsPerTag 1000 \
      --outFileNamePrefix "$TEST_DIR/test_b_with_probe/" \
      --runThreadN 1 2>&1 || true)"

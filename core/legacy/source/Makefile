@@ -41,6 +41,7 @@ LIBEM_LIB := $(LIBEM_DIR)/libem.a
 COMPUTE_EXPECTED_GC_BIN := $(COMPUTE_EXPECTED_GC_DIR)/compute_expected_gc
 PROCESS_FEATURES_DIR := $(ROOT_DIR)/core/features/process_features
 PROCESS_FEATURES_LIB := $(PROCESS_FEATURES_DIR)/libprocess_features.a
+PROCESS_FEATURES_INTEGRATED_LIB := $(PROCESS_FEATURES_DIR)/libprocess_features_integrated.a
 LIBSCRNA_DIR := $(ROOT_DIR)/core/features/libscrna
 LIBSCRNA_INC := $(LIBSCRNA_DIR)/include
 LIBSCRNA_LIB := $(LIBSCRNA_DIR)/libscrna.a
@@ -271,15 +272,15 @@ OCM_UNIT_TEST_SRC := $(ROOT_DIR)/tests/test_ocm_multi_unit.cpp
 .PHONY: ocm-multi-unit-tests
 ocm-multi-unit-tests : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 ocm-multi-unit-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-ocm-multi-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS) $(OCM_UNIT_TEST_SRC)
-	$(CXX) -o ocm_multi_unit_tests $(CXXFLAGS) $(OCM_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
+ocm-multi-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features_integrated $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS) $(OCM_UNIT_TEST_SRC)
+	$(CXX) -o ocm_multi_unit_tests $(CXXFLAGS) $(OCM_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
 
 SLAM_FIT_TEST_SRC := $(ROOT_DIR)/tests/slam/test_slam_fit_reuse.cpp
 .PHONY: slam-fit-reuse-tests
 slam-fit-reuse-tests : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 slam-fit-reuse-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-slam-fit-reuse-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS) $(SLAM_FIT_TEST_SRC)
-	$(CXX) -o slam_fit_reuse_tests $(CXXFLAGS) $(SLAM_FIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
+slam-fit-reuse-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features_integrated $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS) $(SLAM_FIT_TEST_SRC)
+	$(CXX) -o slam_fit_reuse_tests $(CXXFLAGS) $(SLAM_FIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
 
 # Standalone sidecar gather parity harness. Links only the sidecar reader and
 # libem: no Genome, no suffix array, no STAR index. Demonstrates the gather half
@@ -448,9 +449,12 @@ cbq-chromap-adapter-harness : CbqInputModule.o CbqChromapAdapter.o input/cbq_chr
 
 # Standalone star_feature_call tool for perturb-seq processing
 # Requires libprocess_features.a to be built first
-.PHONY: star_feature_call libprocess_features
+.PHONY: star_feature_call libprocess_features libprocess_features_integrated
 libprocess_features:
 	$(MAKE) -C $(PROCESS_FEATURES_DIR) lib
+
+libprocess_features_integrated:
+	$(MAKE) -C $(PROCESS_FEATURES_DIR) lib-integrated
 
 star_feature_call: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 star_feature_call: LDFLAGS_PF := -L$(PROCESS_FEATURES_DIR) -lprocess_features -L$(LIBSCRNA_DIR) -lscrna -lm -lpthread -lz -fopenmp -Lhtslib -lhts
@@ -587,6 +591,12 @@ test_SpatialGexDownstreamSpool: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(
 test_SpatialGexDownstreamSpool: SpatialGexDownstreamSpool.o
 	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_gex_downstream_spool.cpp SpatialGexDownstreamSpool.o -o ../test/test_spatial_gex_downstream_spool
 	../test/test_spatial_gex_downstream_spool
+
+# Runtime fixture paths are explicit; building this target launches no dataset.
+.PHONY: build_test_SpatialFlexTransactions
+build_test_SpatialFlexTransactions: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+build_test_SpatialFlexTransactions: SpatialGex.o SpatialR1Decoder.o SpatialGexPipeline.o SpatialGexSpill.o SpatialGexDownstreamSpool.o MultiGeneUmiCr.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_flex_transactions.cpp $^ -o ../test/test_spatial_flex_transactions
 
 .PHONY: test_MultiGeneUmiCr
 test_MultiGeneUmiCr: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
@@ -761,6 +771,7 @@ clean:
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean
 	$(MAKE) -C $(COMPUTE_EXPECTED_GC_DIR) clean
+	$(MAKE) -C $(PROCESS_FEATURES_DIR) clean
 	$(MAKE) -C $(LIBSCRNA_DIR) clean
 
 .PHONY: CLEAN
@@ -870,13 +881,13 @@ $(CHROMAP_RAPIDMACS_LIB): FORCE
 
 STAR$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STAR$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(GLIB_LIBS_SHARED)
-STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
-	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
+STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features_integrated $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
+	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
 
 STARstatic$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STARstatic$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS) $(GLIB_LIBS_STATIC)
-STARstatic$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
-	$(CXX) -o STAR$(SFX) $(filter-out -fopenmp,$(CXXFLAGS)) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
+STARstatic$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features_integrated $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
+	$(CXX) -o STAR$(SFX) $(filter-out -fopenmp,$(CXXFLAGS)) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
 
 STARlong$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) -D'COMPILE_FOR_LONG_READS' $(CXXFLAGS)
 STARlong$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
@@ -897,8 +908,8 @@ POSIXSHARED : $(CHROMAP_UNSUPPORTED_TARGET) Depend.list parametersDefault.xxd $(
 
 gdb : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_gdb) $(CXXFLAGS)
 gdb : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-gdb : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
-	$(CXX) -o STAR $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
+gdb : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features_integrated $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
+	$(CXX) -o STAR $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
 
 gdb-long : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_gdb) -D'COMPILE_FOR_LONG_READS' $(CXXFLAGS)
 gdb-long : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")

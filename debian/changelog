@@ -1,3 +1,45 @@
+star-suite (1.9.5-1) unstable; urgency=medium
+
+  * Migrate Visium HD Flex to the fused half-probe path without a genome
+    index or alignment fallback; retain candidate-specific spatial molecule
+    resolution and all four matrix policies at 2, 8 and 16 micrometers.
+  * Preserve raw spatial barcode/UMI evidence and deterministic lane/read
+    identities across ordinary gzip, native BGZF and bounded spill modes.
+  * Reject malformed spatial FASTQ pairs and retired spatial legacy routes.
+  * Add spatial transaction, probe ambiguity, input-format and spill tests.
+    Keep existing public benchmark and evidence records labelled by their
+    original source releases.
+  * Add opt-in per-library dominant feature calls in three-library runs,
+    including the MSK production LARRY top-count rule, with optional minimum
+    UMI and top-to-runner-up ratio thresholds.
+  * Include FASTQ mate-token pairing and portable process-features build fixes.
+  * Add the release notes required by the GitHub release workflow and check
+    their presence before building release artifacts.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sun, 20 Sep 2026 22:22:11 +0000
+
+star-suite (1.9.4-1) unstable; urgency=medium
+
+  * Make the half-probe (H1X2) method the Flex default: --flex yes assigns
+    reads from the H1X2 cache with no alignment, defaults flexNoAlign=1, the
+    fully fused pipeline and outSAMtype None, and requires an H1X2 cache.
+  * Retire the other Flex routes as legacy behind the new --flexLegacy yes:
+    H0/H1 caches, aligning cache misses, --no-hash-screen, SAM/BAM output and
+    spatial Flex. --hashCacheTiers now defaults to H0,H1X2.
+  * Cut peak memory for a full 320k Flex run from 176.1 to 75.3 GiB with
+    identical outputs, including eight-byte in-memory barcode records.
+  * Update run_flex_cr_config.sh and the Flex recipes for the half-probe
+    default, and add tests/test_flex_v194_default_route.sh.
+  * Remove a stale libflex copy under core/legacy/source that shadowed the
+    live FlexFilter.h, leaving the tag-aware caller's thread-permit setting
+    uninitialized; the test now checks scheduling and header resolution.
+  * Move the release and container Flex smokes, the Codespaces demo and the
+    BGZF Flex end-to-end test to the half-probe route; run_flex_cr_config.sh
+    builds or reuses the H1X2 cache; legacy-route callers pass --flexLegacy yes.
+  * Report STAR Suite 1.9.4 from STAR --version; retain index compatibility.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sun, 13 Sep 2026 00:26:33 +0000
+
 star-suite (1.9.3-1) unstable; urgency=medium
 
   * Restore feature-position learning when a feature offset is given explicitly,

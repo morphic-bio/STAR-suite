@@ -115,7 +115,8 @@ build_star_cmd() {
     --soloMultiMappers Unique
     --soloCellFilter EmptyDrops_CR
     --soloCbUbRequireTogether no
-    --soloStrand Unstranded
+    # 10x 5' R2-only library (A375, SC5P-R2): read 2 is antisense to the transcript.
+    --soloStrand Reverse
     --soloFeatures GeneFull
     --soloCrGexFeature genefull
     --soloCrMultimapRescue yes

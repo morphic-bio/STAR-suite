@@ -1,6 +1,7 @@
 #!/bin/bash
 # Production script for STAR-Flex pipeline
-# Uses --flex yes to enable the inline hash pipeline with sample detection and FlexFilter
+# Uses --flex yes to enable the inline hash pipeline with sample detection and FlexFilter.
+# BAM output with genomic alignment is a LEGACY Flex route in STAR Suite 1.9.4 (--flexLegacy yes).
 
 # Optional debug/trace environment variables:
 #export STAR_INLINE_REJECT_LOG=/storage/trace/inline_resolver_BC004.tsv
@@ -21,7 +22,7 @@ mkdir -p "$OUTPUT_DIR"
   --soloType CB_UMI_Simple \
   --soloCBlen 16 --soloUMIlen 12 --soloUMIstart 17 --soloCBstart 1 --soloBarcodeReadLength 0 \
   --soloCBwhitelist /storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt \
-  --flex yes \
+  --flex yes --flexLegacy yes \
   --soloFlexExpectedCellsPerTag 3000 \
   --soloSampleWhitelist /storage/SC2300771_whitelist.tsv \
   --soloSampleProbes /mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt \

@@ -127,7 +127,7 @@ if [[ -d "$FIXTURE_DIR/genome" ]] && [[ -d "$FIXTURE_DIR/SC2300771" ]]; then
         --genomeDir "$FIXTURE_DIR/genome" \
         --readFilesIn "$FIXTURE_DIR/SC2300771/reads_R2.fastq" "$FIXTURE_DIR/SC2300771/reads_R1.fastq" \
         --outFileNamePrefix "$OUT_DIR/flex_on/" \
-        --flex yes \
+        --flex yes --flexLegacy yes \
         --soloType CB_UMI_Simple \
         --soloCBwhitelist "$FIXTURE_DIR/737K-august-2016.txt" \
         --soloCBlen 16 \

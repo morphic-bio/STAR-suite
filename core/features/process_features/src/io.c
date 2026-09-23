@@ -995,6 +995,205 @@ char **find_files_with_pattern(const char *directory_path, const char *pattern, 
 
     return filepaths;  // Return the array of filepaths
 }
+
+static int regular_file_exists(const char *path) {
+    struct stat file_stat;
+    return stat(path, &file_stat) == 0 && S_ISREG(file_stat.st_mode);
+}
+
+static char *replace_pattern_at(const char *path,
+                                const char *position,
+                                const char *old_pattern,
+                                const char *new_pattern) {
+    size_t prefix_length = (size_t)(position - path);
+    size_t old_length = strlen(old_pattern);
+    size_t new_length = strlen(new_pattern);
+    size_t suffix_length = strlen(position + old_length);
+    char *result = malloc(prefix_length + new_length + suffix_length + 1);
+    if (!result) {
+        perror("Failed to allocate FASTQ mate path");
+        exit(EXIT_FAILURE);
+    }
+    memcpy(result, path, prefix_length);
+    memcpy(result + prefix_length, new_pattern, new_length);
+    memcpy(result + prefix_length + new_length, position + old_length, suffix_length + 1);
+    return result;
+}
+
+static int path_is_already_paired(const char *path,
+                                  char **barcode_files, int num_barcode_files,
+                                  char **forward_files, int num_forward_files,
+                                  char **reverse_files, int num_reverse_files) {
+    for (int i = 0; i < num_barcode_files; i++) {
+        if (strcmp(path, barcode_files[i]) == 0) return 1;
+    }
+    for (int i = 0; i < num_forward_files; i++) {
+        if (strcmp(path, forward_files[i]) == 0) return 1;
+    }
+    for (int i = 0; i < num_reverse_files; i++) {
+        if (strcmp(path, reverse_files[i]) == 0) return 1;
+    }
+    return 0;
+}
+
+static void free_file_list(char **files, int count) {
+    if (!files) return;
+    for (int i = 0; i < count; i++) free(files[i]);
+    free(files);
+}
+
+int find_paired_fastq_files(const char *directory_path,
+                            const char *barcode_pattern,
+                            const char *forward_pattern,
+                            const char *reverse_pattern,
+                            char ***barcode_files,
+                            int *num_barcode_files,
+                            char ***forward_files,
+                            int *num_forward_files,
+                            char ***reverse_files,
+                            int *num_reverse_files) {
+    *barcode_files = NULL;
+    *forward_files = NULL;
+    *reverse_files = NULL;
+    *num_barcode_files = 0;
+    *num_forward_files = 0;
+    *num_reverse_files = 0;
+    if (!barcode_pattern || !*barcode_pattern ||
+        !forward_pattern || !*forward_pattern ||
+        !reverse_pattern || !*reverse_pattern ||
+        strcmp(barcode_pattern, forward_pattern) == 0 ||
+        strcmp(barcode_pattern, reverse_pattern) == 0 ||
+        strcmp(forward_pattern, reverse_pattern) == 0) {
+        fprintf(stderr, "Error: FASTQ read patterns must be non-empty and distinct\n");
+        return -1;
+    }
+    int candidate_count = 0;
+    char **candidates = find_files_with_pattern(directory_path, barcode_pattern, &candidate_count);
+    if (candidate_count == 0) return 0;
+
+    *barcode_files = calloc((size_t)candidate_count, sizeof(char *));
+    *forward_files = calloc((size_t)candidate_count, sizeof(char *));
+    *reverse_files = calloc((size_t)candidate_count, sizeof(char *));
+    if (!*barcode_files || !*forward_files || !*reverse_files) {
+        perror("Failed to allocate paired FASTQ lists");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int i = 0; i < candidate_count; i++) {
+        const char *candidate = candidates[i];
+        const char *basename = get_basename(candidate);
+        const char *search = basename;
+        int valid_positions = 0;
+        char *selected_forward = NULL;
+        char *selected_reverse = NULL;
+
+        while ((search = strstr(search, barcode_pattern)) != NULL) {
+            const char *path_position = search;
+            char *forward = replace_pattern_at(candidate, path_position,
+                                               barcode_pattern, forward_pattern);
+            char *reverse = replace_pattern_at(candidate, path_position,
+                                               barcode_pattern, reverse_pattern);
+            int has_forward = regular_file_exists(forward);
+            int has_reverse = regular_file_exists(reverse);
+
+            if (has_forward || has_reverse) {
+                valid_positions++;
+                if (valid_positions == 1) {
+                    selected_forward = has_forward ? forward : NULL;
+                    selected_reverse = has_reverse ? reverse : NULL;
+                    if (!has_forward) free(forward);
+                    if (!has_reverse) free(reverse);
+                } else {
+                    free(forward);
+                    free(reverse);
+                }
+            } else {
+                free(forward);
+                free(reverse);
+            }
+            search++;
+        }
+
+        if (valid_positions > 1) {
+            fprintf(stderr,
+                    "Error: FASTQ file %s has multiple '%s' positions that produce existing mates; "
+                    "use explicit FASTQ lists or unambiguous names\n",
+                    candidate, barcode_pattern);
+            free(selected_forward);
+            free(selected_reverse);
+            free_file_list(candidates, candidate_count);
+            free_file_list(*barcode_files, *num_barcode_files);
+            free_file_list(*forward_files, *num_forward_files);
+            free_file_list(*reverse_files, *num_reverse_files);
+            *barcode_files = *forward_files = *reverse_files = NULL;
+            *num_barcode_files = *num_forward_files = *num_reverse_files = 0;
+            return -1;
+        }
+        if (valid_positions == 0) continue;
+
+        if (path_is_already_paired(candidate,
+                                   *barcode_files, *num_barcode_files,
+                                   *forward_files, *num_forward_files,
+                                   *reverse_files, *num_reverse_files) ||
+            (selected_forward && path_is_already_paired(selected_forward,
+                                   *barcode_files, *num_barcode_files,
+                                   *forward_files, *num_forward_files,
+                                   *reverse_files, *num_reverse_files)) ||
+            (selected_reverse && path_is_already_paired(selected_reverse,
+                                   *barcode_files, *num_barcode_files,
+                                   *forward_files, *num_forward_files,
+                                   *reverse_files, *num_reverse_files))) {
+            fprintf(stderr, "Error: FASTQ mate is claimed by more than one read set near %s\n", candidate);
+            free(selected_forward);
+            free(selected_reverse);
+            free_file_list(candidates, candidate_count);
+            free_file_list(*barcode_files, *num_barcode_files);
+            free_file_list(*forward_files, *num_forward_files);
+            free_file_list(*reverse_files, *num_reverse_files);
+            *barcode_files = *forward_files = *reverse_files = NULL;
+            *num_barcode_files = *num_forward_files = *num_reverse_files = 0;
+            return -1;
+        }
+
+        (*barcode_files)[(*num_barcode_files)++] = strdup(candidate);
+        if (!(*barcode_files)[*num_barcode_files - 1]) {
+            perror("Failed to copy barcode FASTQ path");
+            exit(EXIT_FAILURE);
+        }
+        if (selected_forward) (*forward_files)[(*num_forward_files)++] = selected_forward;
+        if (selected_reverse) (*reverse_files)[(*num_reverse_files)++] = selected_reverse;
+    }
+    free_file_list(candidates, candidate_count);
+
+    if ((*num_forward_files != 0 && *num_forward_files != *num_barcode_files) ||
+        (*num_reverse_files != 0 && *num_reverse_files != *num_barcode_files)) {
+        fprintf(stderr,
+                "Error: Incomplete FASTQ mate sets in %s after resolving read-token positions "
+                "(R1=%d R2=%d R3=%d)\n",
+                directory_path, *num_barcode_files, *num_forward_files, *num_reverse_files);
+        free_file_list(*barcode_files, *num_barcode_files);
+        free_file_list(*forward_files, *num_forward_files);
+        free_file_list(*reverse_files, *num_reverse_files);
+        *barcode_files = *forward_files = *reverse_files = NULL;
+        *num_barcode_files = *num_forward_files = *num_reverse_files = 0;
+        return -1;
+    }
+
+    if (*num_barcode_files == 0) {
+        free(*barcode_files);
+        *barcode_files = NULL;
+    }
+    if (*num_forward_files == 0) {
+        free(*forward_files);
+        *forward_files = NULL;
+    }
+    if (*num_reverse_files == 0) {
+        free(*reverse_files);
+        *reverse_files = NULL;
+    }
+    return 0;
+}
+
 void organize_fastq_files_by_directory(int positional_arg_count, int argc, char *argv[], int optind, char *barcodeFastqFilesString, char *forwardFastqFilesString, char *reverseFastqFilesString, fastq_files_collection *fastq_files, char *barcode_pattern, char *forward_pattern, char *reverse_pattern) {
     fastq_files->barcode_fastq = 0;
     fastq_files->forward_fastq = 0;
@@ -1003,48 +1202,32 @@ void organize_fastq_files_by_directory(int positional_arg_count, int argc, char 
     fastq_files->nforward_files = 0;
     fastq_files->nreverse_files = 0;
     if (positional_arg_count) {
-        //count the files in the first directory
-        int barcode_file_exist=count_files_with_pattern(argv[optind], barcode_pattern);
-        int forward_file_exist=count_files_with_pattern(argv[optind], forward_pattern);
-        int reverse_file_exist=count_files_with_pattern(argv[optind], reverse_pattern);
-        int total_barcode_files_found=0;
+        int total_barcode_candidates=0;
         for (int i=0;i < positional_arg_count;i++){
-            total_barcode_files_found+=count_files_with_pattern(argv[optind+i], barcode_pattern);
+            int count = count_files_with_pattern(argv[optind+i], barcode_pattern);
+            if (count < 0) exit(EXIT_FAILURE);
+            total_barcode_candidates += count;
         }
-        if (!barcode_file_exist) {
-            fprintf(stderr, "Error: No barcode fastq files found in directory %s\n", argv[optind]);
-            exit(EXIT_FAILURE);
-        }       
-        if (!forward_file_exist && !reverse_file_exist) {
-            fprintf(stderr, "Error: No forward or reverse fastq files found in directory %s\n", argv[optind]);
+        if (!total_barcode_candidates) {
+            fprintf(stderr, "Error: No barcode fastq files found in input directories\n");
             exit(EXIT_FAILURE);
         }
-        if (forward_file_exist) {
-            fastq_files->forward_fastq = calloc(total_barcode_files_found, sizeof(char *));
-            if (fastq_files->forward_fastq == NULL) {
-                perror("Failed to allocate memory for forward fastq files");
-                exit(EXIT_FAILURE);
-            }       
-        }
-        if (reverse_file_exist) {
-            fastq_files->reverse_fastq = calloc(total_barcode_files_found, sizeof(char *));
-            if (fastq_files->reverse_fastq == NULL) {
-                perror("Failed to allocate memory for reverse fastq files");
-                exit(EXIT_FAILURE);
-            }
-        }
-        fastq_files->barcode_fastq = calloc(total_barcode_files_found, sizeof(char *));
+        fastq_files->barcode_fastq = calloc(total_barcode_candidates, sizeof(char *));
+        fastq_files->forward_fastq = calloc(total_barcode_candidates, sizeof(char *));
+        fastq_files->reverse_fastq = calloc(total_barcode_candidates, sizeof(char *));
         fastq_files->sample_sizes=calloc(positional_arg_count,sizeof(int));
         fastq_files->sample_names=malloc(positional_arg_count*sizeof(char*));
         fastq_files->sample_offsets=malloc(positional_arg_count*sizeof(int));
         fastq_files->nsamples=positional_arg_count;
         fastq_files->sorted_index=malloc(positional_arg_count*sizeof(int));
         //check that the memory allocation was successful
-        if (fastq_files->barcode_fastq == NULL || (forward_file_exist && fastq_files->forward_fastq == NULL) || (reverse_file_exist && fastq_files->reverse_fastq == NULL) || !fastq_files->sample_sizes || !fastq_files->sample_names || !fastq_files->sample_offsets || !fastq_files->sorted_index) {
+        if (fastq_files->barcode_fastq == NULL || fastq_files->forward_fastq == NULL || fastq_files->reverse_fastq == NULL || !fastq_files->sample_sizes || !fastq_files->sample_names || !fastq_files->sample_offsets || !fastq_files->sorted_index) {
             perror("Failed to allocate memory for fastq files");
             exit(EXIT_FAILURE);
         }
-        total_barcode_files_found=0;
+        int total_barcode_files_found=0;
+        int expect_forward = -1;
+        int expect_reverse = -1;
         for (int i = 0; i < positional_arg_count; i++) {
             int num_barcode_files_found = 0;
             int num_forward_files_found = 0;
@@ -1052,27 +1235,28 @@ void organize_fastq_files_by_directory(int positional_arg_count, int argc, char 
             char *directory = strdup(argv[optind + i]); //this gets modified later
             char **sample_barcode_fastq=0, **sample_forward_fastq=0, **sample_reverse_fastq=0;
 
-            sample_barcode_fastq=find_files_with_pattern(directory,barcode_pattern, &num_barcode_files_found);
-            if (forward_file_exist) {
-                sample_forward_fastq=find_files_with_pattern(directory,forward_pattern, &num_forward_files_found);
-            }
-            if (reverse_file_exist) {
-                sample_reverse_fastq=find_files_with_pattern(directory,reverse_pattern, &num_reverse_files_found);
+            if (find_paired_fastq_files(directory,
+                                        barcode_pattern, forward_pattern, reverse_pattern,
+                                        &sample_barcode_fastq, &num_barcode_files_found,
+                                        &sample_forward_fastq, &num_forward_files_found,
+                                        &sample_reverse_fastq, &num_reverse_files_found) != 0) {
+                exit(EXIT_FAILURE);
             }
             if (!num_barcode_files_found) {
-                fprintf(stderr, "Error: No barcode fastq files found in directory %s\n", directory);
+                fprintf(stderr, "Error: No barcode fastq files with resolvable mates found in directory %s\n", directory);
                 exit(EXIT_FAILURE);
             }
             if (!num_forward_files_found && !num_reverse_files_found) {
                 fprintf(stderr, "Error: No forward or reverse fastq files found in directory %s\n", directory);
                 exit(EXIT_FAILURE);
             }
-            if (num_forward_files_found && num_forward_files_found != num_barcode_files_found) {
-                fprintf(stderr, "Error: Unequal number of barcode and forward fastq files in directory %s\n", directory);
-                exit(EXIT_FAILURE);
-            }
-            if (num_reverse_files_found && num_reverse_files_found != num_barcode_files_found) {
-                fprintf(stderr, "Error: Unequal number of barcode and reverse fastq files in directory %s\n", directory);
+            int has_forward = num_forward_files_found != 0;
+            int has_reverse = num_reverse_files_found != 0;
+            if (expect_forward < 0) {
+                expect_forward = has_forward;
+                expect_reverse = has_reverse;
+            } else if (expect_forward != has_forward || expect_reverse != has_reverse) {
+                fprintf(stderr, "Error: FASTQ read layout differs across input directories at %s\n", directory);
                 exit(EXIT_FAILURE);
             }
             fastq_files->sample_sizes[i]=num_barcode_files_found;
@@ -1080,10 +1264,10 @@ void organize_fastq_files_by_directory(int positional_arg_count, int argc, char 
             total_barcode_files_found+=num_barcode_files_found;
             for(int j=0;j<num_barcode_files_found;j++){
                 fastq_files->barcode_fastq[fastq_files->nbarcode_files++]=sample_barcode_fastq[j];
-                if (num_forward_files_found){
+                if (has_forward){
                     fastq_files->forward_fastq[fastq_files->nforward_files++]=sample_forward_fastq[j];
                 }
-                if (num_reverse_files_found){
+                if (has_reverse){
                     fastq_files->reverse_fastq[fastq_files->nreverse_files++]=sample_reverse_fastq[j];
                 }
             }
@@ -1095,6 +1279,14 @@ void organize_fastq_files_by_directory(int positional_arg_count, int argc, char 
             free(sample_barcode_fastq);
             if (sample_forward_fastq) free(sample_forward_fastq);
             if (sample_reverse_fastq) free(sample_reverse_fastq);
+        }
+        if (!fastq_files->nforward_files) {
+            free(fastq_files->forward_fastq);
+            fastq_files->forward_fastq = NULL;
+        }
+        if (!fastq_files->nreverse_files) {
+            free(fastq_files->reverse_fastq);
+            fastq_files->reverse_fastq = NULL;
         }
     }    
     sort_samples_by_size(fastq_files, fastq_files->sorted_index);

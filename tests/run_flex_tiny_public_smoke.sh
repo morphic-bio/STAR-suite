@@ -99,14 +99,21 @@ fi
 
 RUN_ROOT="${OUT_BASE}/${RUN_ID}"
 [[ -f "${RUN_ROOT}/RUN_MANIFEST.txt" ]] || die "missing RUN_MANIFEST.txt"
-[[ -f "${RUN_ROOT}/Aligned.out.bam" ]] || die "missing BAM output"
 [[ -f "${RUN_ROOT}/Log.final.out" ]] || die "missing Log.final.out"
 [[ -f "${RUN_ROOT}/Solo.out/Barcodes.stats" ]] || die "missing Barcodes.stats"
+# STAR Suite 1.9.4 default route: the launcher builds a half-probe (H1X2) cache and STAR aligns nothing.
+[[ -s "${RUN_ROOT}/flex_h01x2_sequence_cache.bin" ]] || die "missing generated half-probe cache"
+[[ ! -e "${RUN_ROOT}/Aligned.out.bam" ]] || die "BAM written on the half-probe route"
+[[ -s "${RUN_ROOT}/Solo.out/Gene/raw/matrix.mtx" ]] || die "missing raw Gene matrix"
+awk 'NR > 3 { n++ } END { exit !(n > 0) }' "${RUN_ROOT}/Solo.out/Gene/raw/matrix.mtx" || die "raw Gene matrix has no entries"
+[[ -f "${RUN_ROOT}/per_sample/flexfilter_summary.tsv" ]] || die "missing per-sample FlexFilter summary"
 
 grep -F "sample_probe_offset=68" "${RUN_ROOT}/RUN_MANIFEST.txt" >/dev/null || die "manifest missing sample_probe_offset"
 grep -F "sample_probe_catalog=${PROBE_CATALOG}" "${RUN_ROOT}/RUN_MANIFEST.txt" >/dev/null || die "manifest missing sample_probe_catalog"
+grep -F "hash_cache_source=generated" "${RUN_ROOT}/RUN_MANIFEST.txt" >/dev/null || die "manifest missing generated hash cache"
 grep -F "Enabled Flex pipeline with production defaults" "${RUN_ROOT}/Log.out" >/dev/null || die "log missing Flex enablement"
-grep -F "SampleDetector initialized successfully" "${RUN_ROOT}/Log.out" >/dev/null || die "log missing sample detector init"
+grep -F "Flex probe route: half-probe H1X2 (1.9.4 default)" "${RUN_ROOT}/Log.out" >/dev/null || die "log missing half-probe route"
+grep -F "Flex count-only no-genome: active" "${RUN_ROOT}/Log.out" >/dev/null || die "log missing count-only no-genome route (genome index was loaded)"
 
 echo "PASS: public tiny Flex smoke"
 echo "Workdir: ${WORKDIR}"

@@ -46,6 +46,8 @@ CRISPR_TIER_DIR="${PF_DYNAMIC_100K_CRISPR_DIR:-${CRISPR_BASE}/downsampled_${TIER
 
 FEATURE_REF="${CR_MULTI_FEATURE_REF:-/storage/A375/1k_CRISPR_5p_gemx_Multiplex_count_feature_reference.csv}"
 WHITELIST="${CR_MULTI_WHITELIST:-/storage/A375/3M-5pgex-jan-2023.txt}"
+# A375 is a 10x 5' R2-only library (SC5P-R2), so read 2 is antisense: count Reverse, not Unstranded (1.9.4 methodology).
+SOLO_STRAND="${A375_SOLO_STRAND:-Reverse}"
 GENOME_DIR="${CR_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 LAST_API_RUN=""
 
@@ -222,7 +224,7 @@ run_mode() {
     --soloMultiMappers Unique \
     --soloCellFilter EmptyDrops_CR \
     --soloCbUbRequireTogether no \
-    --soloStrand Unstranded \
+    --soloStrand "${SOLO_STRAND}" \
     --soloFeatures GeneFull \
     --soloCrGexFeature genefull \
     --pfMultiConfig "${multi_cfg}" \
@@ -431,7 +433,7 @@ run_forced_exit_probe() {
     --soloMultiMappers Unique \
     --soloCellFilter EmptyDrops_CR \
     --soloCbUbRequireTogether no \
-    --soloStrand Unstranded \
+    --soloStrand "${SOLO_STRAND}" \
     --soloFeatures GeneFull \
     --soloCrGexFeature genefull \
     --pfMultiConfig "${multi_cfg}" \

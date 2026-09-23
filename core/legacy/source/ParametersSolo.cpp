@@ -525,6 +525,22 @@ void ParametersSolo::initialize(Parameters *pPin)
     }
     
     //////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////// Flex legacy routes (STAR Suite 1.9.4: half-probe H1X2 is the default)
+    {
+        string legacy = flexLegacyStr;
+        transform(legacy.begin(), legacy.end(), legacy.begin(), ::tolower);
+        if (legacy == "yes") {
+            flexLegacy = true;
+        } else if (legacy == "no" || legacy.empty()) {
+            flexLegacy = false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --flexLegacy=" << flexLegacyStr << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    }
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////// Flex omnibus mode - sets production defaults for full Flex pipeline
     {
         if (flexModeStr == "yes") {
@@ -637,6 +653,26 @@ void ParametersSolo::initialize(Parameters *pPin)
                 else umiCorrectionMode = 0;
             }
             
+            // STAR Suite 1.9.4: the half-probe (H1X2) route is the Flex default. It
+            // assigns probes from the cache without genomic alignment and runs the
+            // fully fused pipeline. Explicit settings are preserved; --flexLegacy yes
+            // keeps the earlier defaults. Alignment runs only, so --runMode
+            // hashCacheGenerate still loads the genome it needs to build a cache.
+            const bool halfProbeDefaults = !flexLegacy && pP->runMode == "alignReads";
+            auto applyRouteDefault = [&](const string& name, int& value, int wanted) -> const char* {
+                if (!halfProbeDefaults) {
+                    return flexLegacy ? "legacy" : "not an alignment run";
+                }
+                ParameterInfoBase *param = findParam(name);
+                if (param != nullptr && param->inputLevel == 0) {
+                    value = wanted;
+                    return "half-probe default";
+                }
+                return "explicit";
+            };
+            const char *noAlignSource = applyRouteDefault("flexNoAlign", flexNoAlign, 1);
+            const char *nTriageSource = applyRouteDefault("flexPipelineNTriage", flexPipelineNTriage, 0);
+            const char *nSoloSource = applyRouteDefault("flexPipelineNSolo", flexPipelineNSolo, 0);
             pP->inOut->logMain << "--flex yes: Enabled Flex pipeline with production defaults\n";
             pP->inOut->logMain << "    soloRunFlexFilter=" << runFlexFilterStr << "\n";
             pP->inOut->logMain << "    soloInlineCBCorrection=" << inlineCBCorrectionStr << "\n";
@@ -652,6 +688,11 @@ void ParametersSolo::initialize(Parameters *pPin)
             pP->inOut->logMain << "    outFilterMatchNminOverLread="
                                << pP->outFilterMatchNminOverLread << " ("
                                << matchLengthGateSource << ")\n";
+            pP->inOut->logMain << "    flexProbeRoute="
+                               << (flexLegacy ? "LEGACY (--flexLegacy yes)" : "half-probe H1X2 (default)") << "\n";
+            pP->inOut->logMain << "    flexNoAlign=" << flexNoAlign << " (" << noAlignSource << ")\n";
+            pP->inOut->logMain << "    flexPipelineNTriage=" << flexPipelineNTriage << " (" << nTriageSource << ")\n";
+            pP->inOut->logMain << "    flexPipelineNSolo=" << flexPipelineNSolo << " (" << nSoloSource << ")\n";
             
         } else if (flexModeStr != "no" && !flexModeStr.empty()) {
             ostringstream errOut;
@@ -779,6 +820,42 @@ void ParametersSolo::initialize(Parameters *pPin)
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
 
+        // STAR Suite 1.9.4: the half-probe (H1X2) cache is the Flex default and every
+        // other probe-assignment route is LEGACY. A non-legacy Flex alignment run must
+        // load an H1X2 cache and align nothing. Other run modes are exempt, so
+        // --runMode hashCacheGenerate can always build the cache.
+        const bool enforceHalfProbe = flexMode && !flexLegacy && pP->runMode == "alignReads";
+        auto legacyRouteError = [&](const string& what) {
+            ostringstream errOut;
+            errOut << "EXITING because " << what << " is a LEGACY Flex route in STAR Suite 1.9.4.\n"
+                   << "The Flex default assigns probes from the half-probe (H1X2) cache with no genomic alignment.\n"
+                   << "SOLUTION: remove that option to use the default route, or add --flexLegacy yes "
+                      "to reproduce results from an earlier release.\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        };
+        auto missingHalfProbeError = [&](const string& what) {
+            ostringstream errOut;
+            errOut << "EXITING because --flex yes requires a half-probe (H1X2) cache, but " << what << ".\n"
+                   << "SOLUTION: build one with --runMode hashCacheGenerate --hashCacheTiers H0,H1X2 "
+                      "--hashCacheOutput <file> and pass it with --soloHashScreenFile <file>, "
+                      "or add --flexLegacy yes to use a legacy route.\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        };
+        if (enforceHalfProbe) {
+            if (hashScreenDisabled) {
+                legacyRouteError("--no-hash-screen yes");
+            }
+            if (!inlineHashMode) {
+                legacyRouteError("--soloInlineHashMode no");
+            }
+            if (flexNoAlign == 0) {
+                legacyRouteError("--flexNoAlign 0 (aligning hash-screen misses)");
+            }
+            if (!pP->outSAMtype.empty() && pP->outSAMtype.at(0) != "None") {
+                legacyRouteError("--outSAMtype " + pP->outSAMtype.at(0) + " (SAM/BAM output needs genomic alignment)");
+            }
+        }
+
         hashScreenEnabled = flexMode && inlineHashMode && !hashScreenDisabled;
 
         if (hashScreenEnabled) {
@@ -790,20 +867,35 @@ void ParametersSolo::initialize(Parameters *pPin)
             if (hashScreenFile.empty() && !probeListPath.empty() && probeListPath != "-") {
                 size_t slashPos = probeListPath.find_last_of("/\\");
                 string probeDir = slashPos == string::npos ? string(".") : probeListPath.substr(0, slashPos);
-                string candidate = probeDir + "/flex_h01_sequence_cache.bin";
-                ifstream cacheTest(candidate.c_str(), ios::binary);
-                if (cacheTest.good()) {
-                    hashScreenFile = candidate;
+                const vector<string> cacheNames = enforceHalfProbe
+                    ? vector<string>{"flex_h01x2_cache.half.khash", "flex_h01x2_sequence_cache.bin"}
+                    : vector<string>{"flex_h01_sequence_cache.bin"};
+                for (const string& name : cacheNames) {
+                    string candidate = probeDir + "/" + name;
+                    ifstream cacheTest(candidate.c_str(), ios::binary);
+                    if (cacheTest.good()) {
+                        hashScreenFile = candidate;
+                        break;
+                    }
                 }
             }
 
             if (hashScreenFile.empty()) {
+                if (enforceHalfProbe) {
+                    missingHalfProbeError("no cache was given with --soloHashScreenFile or found next to the probe list");
+                }
                 hashScreenEnabled = false;
                 pP->inOut->logMain << "H0/H1 hash screen: disabled (no cache discovered)\n";
             } else {
                 std::string loadError;
                 bool loaded = FlexHashScreenCache::instance().ensureLoaded(*this, &loadError);
                 if (loaded) {
+                    if (enforceHalfProbe && !FlexHashScreenCache::instance().hasH1X2()) {
+                        missingHalfProbeError("the cache " + hashScreenFile + " has no H1X2 tier (it is a legacy H0/H1 cache)");
+                    }
+                    pP->inOut->logMain << "Flex probe route: "
+                                       << (enforceHalfProbe ? "half-probe H1X2 (1.9.4 default)"
+                                           : (flexLegacy ? "LEGACY (--flexLegacy yes)" : "not an alignment run")) << "\n";
                     pP->inOut->logMain << "H0/H1 hash screen: enabled with cache " << hashScreenFile
                                        << " (" << FlexHashScreenCache::instance().recordCount()
                                        << " records, format v"
@@ -841,6 +933,9 @@ void ParametersSolo::initialize(Parameters *pPin)
                                "reported unavailable\n";
                     }
                 } else {
+                    if (enforceHalfProbe) {
+                        missingHalfProbeError("the cache could not be loaded (" + loadError + "): " + hashScreenFile);
+                    }
                     hashScreenEnabled = false;
                     pP->inOut->logMain << "H0/H1 hash screen: disabled (" << loadError << "): " << hashScreenFile << "\n";
                 }
@@ -1494,7 +1589,7 @@ void ParametersSolo::initialize(Parameters *pPin)
         const bool snapshotRequested =
             std::getenv("STAR_SOLO_FLEX_HASH_SNAPSHOT_IN") != nullptr
             || std::getenv("STAR_SOLO_FLEX_HASH_SNAPSHOT_OUT") != nullptr;
-        bucketStoreEnabled = bucketMode != BucketOff
+        bucketStoreEnabled = !pP->soloSpatialFlexIntegratedEnabled && bucketMode != BucketOff
             && pP->runMode == "alignReads"
             && flexMode && inlineHashMode && cbWLyes && !snapshotRequested
             && featureYes[SoloFeatureTypes::Gene];
@@ -1573,7 +1668,8 @@ void ParametersSolo::initialize(Parameters *pPin)
         // STARsolo uses matchCBtoWL() and does not consume this structure.
         // Building it unconditionally for the 10x 3M whitelist costs several
         // GB and serial startup time without affecting the legacy matrix.
-        const bool needCbCorrector = inlineCBCorrection || inlineHashMode;
+        const bool needCbCorrector = !pP->soloSpatialFlexIntegratedEnabled
+            && (inlineCBCorrection || inlineHashMode);
         if (needCbCorrector && cbWLyes && !cbWLstr.empty()) {
             // CBQ's packed sequence already has the first base in the low
             // bits. Build this run's lookup tables in that order so the fused

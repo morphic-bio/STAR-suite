@@ -48,7 +48,7 @@ if [[ -x "${STAR_BIN}" ]]; then
         --soloFeatures Gene \
         --soloProbeList \
             "${ROOT_DIR}/tests/fixtures/flex_probe_gene_list_tiny.txt" \
-        --flex yes \
+        --flex yes --flexLegacy yes \
         --soloRunFlexFilter no \
         --soloFlexGdna yes \
         --outFileNamePrefix "${TMP_DIR}/no-filter." \

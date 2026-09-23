@@ -2,6 +2,15 @@
 
 **Purpose**: Read composite MEX files (CB+TAG barcodes) and run libflexfilter pipeline to produce per-sample split MEX outputs.
 
+> **STAR Suite 1.9.4:** this tool runs the **legacy** per-tag caller
+> (expected-cell allocation, per-tag OrdMag/EmptyDrops, partition-occupancy
+> filter) and strips output barcodes to 16 bases unless `--keep-cb-tag` is given.
+> STAR's default Flex caller is now `--soloFlexCellCaller tag-aware`, which calls
+> tags that share a sample label as one group, keeps CB16+TAG8 identities and
+> fits occupancy jointly across samples (see `docs/FLEX_MODEL_FEATURES.md`), so
+> this tool does not reproduce STAR's default calls. The option names below
+> follow the current `run_flexfilter_mex --help`.
+
 ---
 
 ## Overview
@@ -62,11 +71,10 @@ cd tools/flexfilter && make
   --mex-dir /path/to/composite_mex \
   --total-expected 12000 \
   --output-prefix /path/to/output \
-  --ordmag-nsamples 5000 \
-  --ordmag-target-pct 0.99 \
-  --ed-lower 100 \
-  --ed-niters 10000 \
-  --ed-fdr-threshold 0.001 \
+  --simple-ed-expected-cells 5000 \
+  --ed-lower-bound 500 \
+  --ed-sim-n 10000 \
+  --ed-fdr 0.01 \
   --total-partitions 115000 \
   --recovery-factor 0.606
 ```
@@ -154,23 +162,27 @@ Path to JSON file specifying expected cells per tag (overrides auto-allocation).
 
 ## Parameters
 
-### OrdMag Parameters
+### Tag Allocation Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--ordmag-nsamples` | 2500 | Number of random samples for OrdMag |
-| `--ordmag-ambient-umi` | 10 | Max ambient UMI count |
-| `--ordmag-target-pct` | 0.99 | Target percentile for threshold |
-| `--dominance-ratio` | 0 | Dominance filter before split (0 = disabled) |
-| `--tag-weights-umi` | (off) | Use UMI-weighted expected cell allocation (instead of ncells_simple) |
+| `--simple-ed-expected-cells` (alias `--ordmag-expected-cells`) | 3000 | Expected cells for allocation |
+| `--no-tag-weights-umi` | (off) | Allocate expected cells equally across tags instead of UMI-weighted |
 
 ### EmptyDrops Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--ed-lower` | 10 | Lower UMI bound for EmptyDrops |
-| `--ed-niters` | 10000 | Monte Carlo iterations |
-| `--ed-fdr-threshold` | 0.001 | FDR threshold for cell calling |
+| `--ed-sim-n` | 10000 | Monte Carlo iterations |
+| `--ed-fdr` | 0.01 | FDR threshold for cell calling |
+| `--ed-use-fdr` / `--ed-use-rawp` | FDR gate | Select the FDR gate or the raw p-value gate |
+| `--ed-rawp-threshold` | - | Raw p-value threshold when the raw p-value gate is used |
+| `--ed-lower-bound` | 500 | Inclusive UMI floor for candidates |
+| `--ed-ambient-umi-max` | 100 | Maximum UMI count for ambient barcodes |
+| `--ed-retain-count` | 120000 | Retain window size |
+| `--use-simple-empty-drops` | (off) | Force Simple EmptyDrops (otherwise fallback only) |
+| `--simple-ed-min-rescues` / `--simple-ed-min-ambient` / `--simple-ed-min-candidates` | 50 / 100 / 100 | Fallback triggers |
+| `--bootstrap-seed` | 0 | Bootstrap RNG seed |
 
 ### Occupancy Parameters
 
@@ -179,12 +191,13 @@ Path to JSON file specifying expected cells per tag (overrides auto-allocation).
 | `--total-partitions` | 115000 | Total partitions (for occupancy) |
 | `--recovery-factor` | 0.606 | Recovery factor (1/1.65) |
 | `--occupancy-percentile` | 0.999 | Percentile for occupancy cutoff |
-| `--low-umi-threshold` | 0 | Low UMI threshold (0=auto) |
+| `--occupancy-sim-gems` | 1000000 | Monte Carlo GEMs |
 
-### Debug/Testing Flags
+### Output and Debug/Testing Flags
 
 | Flag | Description |
 |------|-------------|
+| `--keep-cb-tag` | Keep full CB16+TAG8 barcodes in output (default: strip to 16 bases) |
 | `--disable-occupancy` | Disable occupancy filter (for testing) |
 | `--debug-tag-log` | Enable detailed per-tag logging |
 | `--debug-output-dir <path>` | Directory for debug outputs |

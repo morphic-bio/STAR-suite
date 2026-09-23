@@ -1,0 +1,42 @@
+{
+  "schema": "starsuite.provenance_record/v1",
+  "record_id": "paper-2026-slam-grandslam-100k-v1.9.4",
+  "recorded_utc": "2026-09-15T12:00:00Z",
+  "kind": "parity",
+  "status": "complete",
+  "software": [
+    {
+      "repository": "https://github.com/morphic-bio/STAR-suite",
+      "revision": "1c9ddb9a5a2a3e62748e8e4ef28e553582affeed",
+      "version": "1.9.4"
+    }
+  ],
+  "environment": {
+    "hardware_class": "Intel Core i9-13900KF workstation (24 cores)",
+    "memory_gb": 126,
+    "logical_cpu_count": 32,
+    "requested_threads": 32,
+    "storage": "local NVMe for every input, output and scratch file",
+    "star_suite_binary_source_revision": "a095319a7b5442d6b67bc54a6e83619ad10c7877"
+  },
+  "method": "STAR Suite 1.9.4 STAR-SLAM (in-aligner T>C conversion detection, external BED SNP mask and new-to-total RNA ratio estimation) was run on the public GRAND-SLAM 100K-read human fixture and its gene-level new-to-total RNA ratios were compared with the fixture's GRAND-SLAM reference values by Pearson correlation at minimum read-count thresholds.",
+  "evidence": [
+    {
+      "dataset": "GRAND-SLAM 100K human fixture",
+      "elapsed_seconds": 29.95,
+      "ntr_pearson_min_reads_20": 0.9989,
+      "ntr_pearson_min_reads_50": 0.9961,
+      "ntr_pearson_min_reads_100": 0.9944
+    }
+  ],
+  "limitations": [
+    "The fixture is small; its elapsed time reflects genome loading more than conversion processing.",
+    "Parity is against the fixture's reference values, not an independent ground truth."
+  ],
+  "artifacts": [
+    {
+      "logical_uri": "git://STAR-suite/docs/PAPER_BENCHMARK_METHODOLOGY.md",
+      "sha256": "e631f83184653c0ae1c905e40c38641bd283d390f2efe58beca7ddec04c027c6"
+    }
+  ]
+}

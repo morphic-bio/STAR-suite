@@ -66,6 +66,7 @@ echo "Output: ${OUT_DIR}"
 echo "Threads: ${THREADS}"
 echo "GEX lanes: ${#R2_FILES[@]}"
 
+# Strand: the UCSF iPSC2 GEX fixture is a 10x 3' v3 gene-expression library (read 2 sense), so count Forward.
 "${STAR_BIN}" \
   --runThreadN "${THREADS}" \
   --genomeDir "${GENOME_DIR}" \
@@ -88,7 +89,7 @@ echo "GEX lanes: ${#R2_FILES[@]}"
   --soloMultiMappers Unique \
   --soloCellFilter EmptyDrops_CR \
   --soloCbUbRequireTogether no \
-  --soloStrand Unstranded \
+  --soloStrand Forward \
   --soloFeatures GeneFull
 
 Y_COUNT="$(samtools view -c "${RUN_DIR}/Aligned.out_Y.bam")"

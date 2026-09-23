@@ -44,7 +44,7 @@ echo ""
   --soloType CB_UMI_Simple \
   --soloCBlen 16 --soloUMIlen 12 --soloUMIstart 17 --soloCBstart 1 --soloBarcodeReadLength 0 \
   --soloCBwhitelist "$FLEX_WHITELIST" \
-  --flex yes \
+  --flex yes --flexLegacy yes \
   --soloProbeList "$FLEX_PROBE_LIST" \
   --soloFlexExpectedCellsPerTag 3000 \
   --limitIObufferSize 50000000 50000000 \

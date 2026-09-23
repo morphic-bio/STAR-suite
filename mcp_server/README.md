@@ -220,10 +220,10 @@ Current public workflows:
 | `star_genome_generate` | Build a STAR genome index. | `--runMode genomeGenerate` with caller-supplied FASTA and output genomeDir. |
 | `star_bulk_pe_batch` | FASTQ paired-end batch alignment. | `--batchMode 1` with two comma-separated mate lists. |
 | `star_binseq_pe_batch` | Paired CBQ/BINSEQ alignment or batch processing. | `--readFilesType Binseq PE --batchMode 1` with one comma-separated CBQ list or a CBQ manifest. |
-| `star_scrna_solo_droplet` | Droplet STARsolo command. | Caller-supplied FASTQs, genomeDir, and whitelist. |
-| `star_flex_fixed_rna` | STAR-Flex Fixed RNA command. | Caller-supplied Fixed RNA inputs and whitelist layout. |
-| `star_flex_fixed_rna_cbq` | STAR-Flex Fixed RNA command with CBQ input. | `--readFilesType Binseq PE --flex yes` with paired CBQ files in Flex mate order. |
-| `star_perturb_cr_compat` | Perturb-seq CR-compatible STAR command. | CR-compatible threading defaults and feature config inputs. |
+| `star_scrna_solo_droplet` | Droplet STARsolo command with the Cell Ranger-compatible option set used for the 1.9.4 PBMC 10K benchmark (poly-G clipping, multimapper rescue, GeneFull). | Caller-supplied FASTQs, genomeDir and whitelist; `solo_strand` is required (Forward for 10x 3', Reverse for 5' R2-only libraries). |
+| `star_flex_fixed_rna` | STAR-Flex Fixed RNA command on the 1.9.4 half-probe route: count-only, no genome index loaded, tag-aware cell calling. | Caller-supplied Fixed RNA FASTQs (probe read R2 first), whitelist, sample probes and the required half-probe (H1X2) cache; alignment-based routes need `flex_legacy yes`. |
+| `star_flex_fixed_rna_cbq` | STAR-Flex Fixed RNA command with CBQ input on the same half-probe, count-only route. | `--readFilesType Binseq PE --flex yes` with paired CBQ files in Flex mate order and the required half-probe (H1X2) cache. |
+| `star_perturb_cr_compat` | Perturb-seq CR-compatible STAR command with the option set used for the 1.9.4 A375 and MSK benchmarks. | Gene-expression FASTQs and whitelist, `--pfMultiConfig` feature libraries, CR-compatible threading defaults; `solo_strand` is required (Reverse for 5' R2-only libraries such as A375). |
 | `morphic_multiome` | Cross-repo Morphic 10x Multiome recipe from `/mnt/pikachu/morphic-recipes`. | Minimal compose-up floor (`--profile matrices-peaks --dry-run`) with low-memory Chromap and optional `chromap_macs3_frag_qvalue` for MACS3 q-value peak selection. |
 
 Current local/private SLAM workflows:

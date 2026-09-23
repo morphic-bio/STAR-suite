@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <getopt.h>
 
 typedef enum {
@@ -35,6 +36,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "  -m, --min_counts <int>     Minimum UMI count for a feature to be considered (default: 2)\n");
     fprintf(stderr, "  -f, --fraction <float>     Required fraction of total for dominant call (default: 0.8)\n");
     fprintf(stderr, "  -g, --margin <int>         Required margin over second-best feature (default: 1)\n\n");
+    fprintf(stderr, "      --min-ratio <float>    Required top/second UMI ratio (default: disabled)\n\n");
     fprintf(stderr, "GMM mode options:\n");
     fprintf(stderr, "  -u, --min_umi <int>        Minimum UMI threshold for GMM calls (default: 3)\n\n");
     fprintf(stderr, "Ambient-FDR guide options:\n");
@@ -94,6 +96,7 @@ int main(int argc, char *argv[]) {
     /* Long option codes for options without short equivalents */
     enum {
         OPT_GMM = 256,
+        OPT_MIN_RATIO,
         OPT_NBEM,
         OPT_MOI,
         OPT_MOI_MIN_UMI,
@@ -122,6 +125,7 @@ int main(int argc, char *argv[]) {
         {"min_counts", required_argument, 0, 'm'},
         {"fraction", required_argument, 0, 'f'},
         {"margin", required_argument, 0, 'g'},
+        {"min-ratio", required_argument, 0, OPT_MIN_RATIO},
         {"gmm", no_argument, 0, OPT_GMM},
         {"nb-em", no_argument, 0, OPT_NBEM},
         {"guide-caller", required_argument, 0, OPT_GUIDE_CALLER},
@@ -161,6 +165,13 @@ int main(int argc, char *argv[]) {
                 break;
             case 'g':
                 config->dominance_margin = atoi(optarg);
+                break;
+            case OPT_MIN_RATIO:
+                config->dominance_min_ratio = atof(optarg);
+                if (!isfinite(config->dominance_min_ratio) || config->dominance_min_ratio < 1.0) {
+                    fprintf(stderr, "Error: --min-ratio must be >= 1\n");
+                    return 1;
+                }
                 break;
             case 'G':
             case OPT_GMM:

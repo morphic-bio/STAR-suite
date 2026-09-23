@@ -62,7 +62,7 @@ run_star() {
       --soloType CB_UMI_Simple \
       --soloCBlen 16 --soloUMIlen 12 --soloUMIstart 17 --soloCBstart 1 --soloBarcodeReadLength 0 \
       --soloCBwhitelist "${CB_WHITELIST}" \
-      --flex yes \
+      --flex yes --flexLegacy yes \
       --flexPipeline "${FLEX_PIPELINE_MODE}" \
       --soloFlexExpectedCellsPerTag 3000 \
       --soloSampleWhitelist "${SAMPLE_WHITELIST}" \

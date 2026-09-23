@@ -1,10 +1,11 @@
 # STAR Suite
 
-STAR Suite updates the original STAR aligner by integrating four modules — STAR-core (with integrated TranscriptVB quantification), STAR-perturb, STAR-Flex, and STAR-SLAM — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.47–1.60x for scRNA-seq GEX-only Solo vs CellGENI-style STARsolo**, **3.7–6.2x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
+STAR Suite updates the original STAR aligner by integrating four modules — STAR-core (with integrated TranscriptVB quantification), STAR-perturb, STAR-Flex, and STAR-SLAM — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (STAR Suite 1.9.4: **1.6–4.2x for bulk RNA-seq** against an external stepwise pipeline; against Cell Ranger 9.0.1, **3.9x for scRNA-seq**, **4.8–5.8x for Perturb-seq**, and **17–23x for Flex** from the delivered FASTQ, up to **42x** from CBQ input) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
-Current production release: **[STAR Suite v1.9.3](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.9.3)**. The suite release tag and
-source-packaging version are `v1.9.3` / `1.9.3-1`; `STAR --version` reports
-`1.9.3`. GitHub Releases also provides Ubuntu 22.04- and 24.04-built `.deb`
+Current production release: **[STAR Suite v1.9.5](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.9.5)**. The suite release tag and
+source-packaging version are `v1.9.5` / `1.9.5-1`; `STAR --version` reports
+`1.9.5`. The benchmark results below retain their measured 1.9.4 identity.
+GitHub Releases also provides Ubuntu 22.04- and 24.04-built `.deb`
 packages from the same source revision.
 Use `STAR --upstream-version` for the underlying upstream STAR base
 (`2.7.11b`) and `STAR --genome-compat-version` for the genome index
@@ -21,7 +22,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 
 ## Core Additions over STAR 2.7.11b
 
-- **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; scRNA-seq GEX-only Solo **1.47–1.60x faster** than the CellGENI-style STARsolo parameter surface (UCSF 14K cells 1.60x, MSK 30K cells 1.47x on fresh `7a7fb08` reruns); Perturb-seq **3.7–6.2x faster** than Cell Ranger 9; Flex **2.5x faster** than Cell Ranger 9 full-count, **5.7x** in FASTQ no-genome count-only mode, and **8.0x** with indexed CBQ no-genome count-only input (~12.8–28.8x vs Cell Ranger 7 with BAM); PBMC multiome native GEX+ATAC CBQ is **1.10x faster** than the completed FASTQ.gz comparator — all with near-identical parity.
+- **Speedup** (STAR Suite 1.9.4; see [Benchmarks](#benchmarks)): bulk RNA-seq **1.6x** faster than an external Trim Galore + STAR + Salmon pipeline and **4.2x** with Y-chromosome removal; scRNA-seq **3.9x** faster than Cell Ranger 9.0.1 on the public 10x PBMC 10K library; Perturb-seq **4.8x** (A375) and **5.8x** (MSK 30-KO, three feature libraries in one pass against two Cell Ranger runs); Flex **16.8–22.8x** from the delivered FASTQ and **20.2–41.8x** from CBQ input. Gene-level Spearman and Pearson **0.98–1.0** against the reference outputs.
 - **Batch Mode** (`--batchMode 1`): Processes multiple FASTQs in one STAR invocation while reusing the loaded genome. Removes the need for `--genomeLoad` keep-in-memory workflows. Single-pass only (no `--twopassMode`); not supported with Solo (`--soloType`). Use `--outFileNamePrefixAuto 1` for per-sample subdirectories.
 - **TranscriptVB Quantification** (`--quantMode TranscriptVB`): Variational Bayes and EM quantification for transcript-level abundance, with parity-oriented behavior against Salmon alignment-mode. Gene-level summarization via `--quantVBgenesMode Tximport`.
 - **TranscriptVB Scatter/Gather** (`--quantVBSidecarOnly 1`): Writes compact,
@@ -41,7 +42,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 - **Cutadapt-Compatible Trimming** (`--trimCutadapt Yes`): Native cutadapt-style trimming for bulk/PE workflows. Compatibility mode: `--trimCutadaptCompat Cutadapt3`.
 - **Poly-G Trimming** (`--clip3pPolyG yes|no|auto`): Trims poly-G artifacts common on NovaSeq/NextSeq platforms. Default `auto` activates in CellRanger4 mode. Without this, poly-G reads can inflate specific genes (e.g., LINC00486) and degrade gene-level correlations.
 - **Samtools-style BAM Sorting** (`--outBAMsortMethod samtools`): Spill-to-disk sort to reduce peak RAM pressure. Works with all modes including Flex.
-- **Y/NoY Separation** (`--emitNoYBAM yes`, `--emitYNoYFastq yes`): Split BAM and FASTQ outputs by chrY alignment. Works with bulk, single-cell, and Flex.
+- **Y/NoY Separation** (`--emitNoYBAM yes`, `--emitYNoYFastq yes`): Split BAM and FASTQ outputs by chrY alignment. Works with bulk and single-cell runs; for Flex it needs a BAM, which is a legacy route (`--flexLegacy yes`).
 - **EmptyDrops_CR Integration**: CR-compatible EmptyDrops path (including libscrna-backed behavior in scRNA/perturb flows).
 - **Molecule-first Barcode Assignment**: The opt-in
   `molecule_first_resolver` preserves finite read candidates through
@@ -56,17 +57,20 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
   spooling supports complete slides on smaller-memory hosts. The feature is
   opt-in; ordinary bulk, STARsolo, CR-compatible scRNA, and Flex runs keep
   their existing paths and defaults.
-- **Native Visium HD Flex** (`--soloSpatialFlexIntegrated yes`): Resolves H0/H1
-  probe hits and alignment fallback directly into retained spatial candidate
-  families, then emits the same four policies and three spatial scales through
-  the bounded spill/materialization engine. It does not require a BAM, GX/UR
-  bridge, or external resolver/materializer.
+- **Native Visium HD Flex** (`--soloSpatialFlexIntegrated yes`): From 1.9.5,
+  resolves probes with the shared half-probe classifier and retains every
+  spatial candidate coordinate through molecule resolution. The fused FASTQ
+  path loads no genome and emits all four policies at 2, 8, and 16 micrometers
+  through the existing memory or bounded spill engine. Ordinary gzip and
+  native BGZF are supported. The retired spatial alignment route is rejected;
+  see [spatial half-probe processing](docs/SPATIAL_FLEX_HALF_PROBE.md).
 - **Flex gDNA QC** (`--soloFlexGdna auto|yes|no`): Computes the 10x-style gDNA
   diagnostic from final filtered barcode/gene/UMI families and writes
   per-sample JSON plus an audit TSV. The diagnostic is matrix-inert and inert
   outside Flex.
 - **Solo Features**: `sF` BAM tag for feature type, `--soloCBtype String` for arbitrary barcode strings, `--soloCellReadStats Standard` for improved cell filtering.
 - **CR-compat GEX** (`--soloCrGexFeature auto|gene|genefull`): Controls which GEX source is merged in CR-compat mode.
+- **Per-library feature calls** (`star_feature_caller=dominant` in `--pfMultiConfig`): Opt-in in-process calls for a non-GEX library such as LARRY. The default rule is the production top-count rule (`top > runner-up`); optional per-library minimum UMI and top/runner-up ratio columns support stricter policies. See [feature barcode documentation](docs/feature_barcodes.md).
 - **Native Velocyto MEX Packaging**: Current production binaries write raw and
   filtered Velocyto MEX under `outs/` internally. `prepare_velocyto_mex.py` is a
   legacy repair/backfill helper for old STAR outputs, not the normal production
@@ -125,68 +129,79 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 
 ## Benchmarks
 
-All benchmarks run on pikachu (i9-13900KF, 126 GB RAM, 32 threads). The
-table below keeps the README focused on the headline results. Publication-facing
-wrappers live in [publications/benchmarks/README.md](publications/benchmarks/README.md),
-archived benchmark artifacts live in
-[comparisons/paper_benchmarks_20260318/README.md](comparisons/paper_benchmarks_20260318/README.md),
-and detailed Velocyto bridge results live in
-[docs/VELOCYTO_BENCHMARKS.md](docs/VELOCYTO_BENCHMARKS.md).
-For bulk RNA-seq, use the checked paper wrapper for headline speedups. The
-production STAR-suite arm uses internal TranscriptVB only; integrated
-TranscriptomeSAM emission and integrated Salmon QC are opt-in parity artifacts
-via `--parity-qc` and are excluded from production timing. Ad-hoc serial chains
-with different trimming or BAM-output modes are useful sanity checks but are not
-replacements for the wrapper ratios.
+These are the STAR Suite **1.9.4** results reported in the manuscript. The
+protocol, comparator commands and parity definitions are in
+[docs/PAPER_BENCHMARK_METHODOLOGY.md](docs/PAPER_BENCHMARK_METHODOLOGY.md); the
+benchmark entry points are listed in
+[publications/benchmarks/README.md](publications/benchmarks/README.md). Records
+from earlier releases remain under `comparisons/` and `docs/` for history and are
+not the current numbers.
 
-| Workflow | Dataset / surface | Baseline | STAR-suite result | Key parity / note |
-|---|---|---|---|---|
-| Bulk RNA-seq | JAX PE 6.5M | External stepwise wrapper (trimvalidate + STAR + Salmon) | Corrected production-mode wrapper in `scripts/paper/run_pe_bulk_feature_benchmark.sh`; archived parity-QC mode was **37 s** without Y-removal, **61 s** with Y-removal | Transcript Pearson **0.995**, gene Pearson **0.997** vs Salmon in parity-QC mode |
-| Bulk RNA-seq | PPARG PE 35.1M | External stepwise wrapper (decompress + trimvalidate + STAR TranscriptomeSAM + Salmon) | Production-mode no-Y rerun: **8m 55s** STAR-suite vs **16m 10s** external; **1.81x** faster. Integrated arm used trim + align + sorted BAM + internal TranscriptVB, with no integrated transcriptome BAM or Salmon QC; archived parity-QC mode was **9m 35s** without Y-removal, **11m 58s** with Y-removal | Same integrated trim + align + TranscriptVB production path; parity artifacts opt-in via `--parity-qc` |
-| scRNA-seq Solo | UCSF `EBs2_2` GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **13.75 min** optimized `zcat` vs **22.1 min** historical rerun; **1.60x** faster | Fresh historical rerun reproduced **13,847** cells, Jaccard **0.9891**, gene Pearson **0.964305** vs CR9; current `zcat` surface calls **13,723** cells with gene Pearson **0.994885** |
-| scRNA-seq Solo | MSK 30polyKO GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **19.40 min** archived modern wall vs **28.6 min** historical rerun; **1.47x** faster | Fresh historical rerun reproduced **32,304** cells, Jaccard **0.9975**, gene Pearson **0.954925** vs CR9; guarded current surface calls **33,092** cells with Jaccard **0.974**, gene Pearson **0.994554** |
-| Perturb-seq | A375 1k CRISPR 5' GemX | Cell Ranger 9 | **4.0 min**; **3.8x** faster | Jaccard **0.976**, gene Pearson **0.975**, CRISPR match **100%** |
-| Perturb-seq | UCSF `EBs2_2` | Cell Ranger 9 | **16.4 min**; **3.7x** faster | Jaccard **0.976**, gene Pearson **0.995**, CRISPR match **98.9%** |
-| Perturb-seq | MSK 30polyKO (DE sample, post-permits-fix) | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | STAR **26.9 min** vs CR **168 min**; **6.2x** faster (paired 2026-04-03 STAR + 2026-03-06 CR; CR is deterministic) | 33,095 STAR cells / 32,256 CR cells, Jaccard **0.9742**, per-barcode Pearson **0.9999**, gene Pearson **0.994554** (Gene Expression, all common features), CRISPR set-equivalent **98.04%** (23,063/23,525). Full report: [`comparisons/msk_30polyko_full_benchmark_20260306/post_permits_20260403/README.md`](comparisons/msk_30polyko_full_benchmark_20260306/post_permits_20260403/README.md) |
-| Perturb-seq | MSK 30polyKO (ES sample) | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | **30.2 min** vs CR **167.1 min**; **5.5x** faster | 33,226 STAR cells / 32,670 CR cells, Jaccard **0.982**, per-barcode Pearson **0.9999**, gene Pearson **0.9937** (filtered, 16,958 genes), CRISPR set-equivalent **98.97%** (25,894/26,164), CRISPR UMI Pearson **0.9994**. Full report: [`comparisons/msk_30polyko_full_benchmark_ES_20260430/README.md`](comparisons/msk_30polyko_full_benchmark_ES_20260430/README.md) |
-| Flex | JAX SC2300771 4-tag full / no-genome count-only | Cell Ranger 9 / FASTQ.gz internal-gzip | **23m 22s** full (**2.5x** vs CR9); no-genome count-only **10:17.97** from FASTQ.gz internal gzip (**5.7x** vs CR9) and **7:22.46** from indexed level-0 CBQ (**1.40x** faster than FASTQ; **8.0x** vs CR9) | Fresh canonical 4-tag full reruns (`BC004/BC006/BC007/BC008`) reproduce **20,316** cells; mean Jaccard **0.981**, cell Pearson **0.99997**, gene Pearson **0.99993** vs CR9. FASTQ no-genome outputs are byte-identical to whole-lane CBQ; indexed CBQ counters match. |
-| SLAM-seq | NW SLAM R1/R2 PE smoke + NW-5-21 ARID1A compat mode | SE/PE 100K smoke, GEDI / GRAND-SLAM family | Integrated alignment + TranscriptVB quantification with GrandSLAM and cB outputs; no apples-to-apples end-to-end wall-time claim reported | PE smoke treatment NTR Pearson **0.9728** vs R1-only SE; Tximport gene NumReads Pearson **0.9322** treatment / **0.9385** noSU; historical GEDI NTR Pearson **0.967-0.978** |
-| Multiome ATAC | PBMC 3k 10x Multiome benchmark; current production recipe uses one local STAR/Chromap pass for GEX `EmptyDrops_CR`, Velocyto, Y/noY output, concurrent low-memory Chromap ATAC, sorted BAM, and binary sidecar (`--chromapAtacSecondaryFragments star_out/atac_fragments.bin`), followed by native sidecar peak/MEX materialization with `star_multiome_atac_peak_mex` | Cell Ranger ARC v2.2.0 same fixture (`cellranger-arc count --create-bam=true --nosecondary --disable-cell-annotation --localcores=32`); **40:04 (2404 s)**. Completed FASTQ.gz STAR/Chromap comparator on the same PBMC set used external `zcat`: **20:40.05**, **520.89M reads/hr**, RSS **46.3 GB**. | Historical integrated benchmark: **18:17.52 (1097.52 s); 2.19x faster** than ARC. Native GEX+ATAC CBQ run: STAR/Chromap **18:46.41**, **582.23M reads/hr**, RSS **51.0 GB**; **1:53.64 faster** than the completed FASTQ.gz comparator (**9.2%**, **1.10x**) despite also emitting ATAC Y/noY BAMs. Sidecar peak/MEX adds **1:27.53** for a CBQ wrapper total of **20:13.94**. | CBQ run root: `/mnt/pikachu/atac-seq/10xMultiome/pbmc_unsorted_3k/star_libchromap_full_multiome_cbq_smoke_20260531T185430Z`; CBQ inputs: `/mnt/pikachu/atac-seq/10xMultiome/pbmc_unsorted_3k/source/full_cbq_level0_20260531T184230Z`. Required BAMs pass `samtools quickcheck`; noY BAM has `chrY=0`, Y BAM has `nonY=0`; ATAC peaks **50,274**. STAR diagnostics show CBQ input throughput **401.7 MB/s** vs **104.2 MB/s** on the completed FASTQ.gz comparator. |
+**Protocol.** Every run used 32 threads with every input, output and scratch
+file on local NVMe, one run at a time on a quiet machine with the page cache
+dropped first; wall time is the whole process from `/usr/bin/time -v`. All rows
+were measured on one server (Intel i9-13900KF, 24 cores / 32 threads, 126 GiB
+RAM) except the 320k Flex rows, which ran on a rented AWS instance limited to
+the same size (m6id.16xlarge at 32 vCPUs and 126 GiB, local NVMe) because that
+Cell Ranger run needs about 3 TB of scratch. The reference is Cell Ranger 9.0.1
+with BAM output and secondary analysis disabled (`--create-bam=false`,
+`--nosecondary`), timed to completion; the MSK 30-KO reference is the sum of the
+two Cell Ranger runs needed for the same outputs. The bulk RNA-seq reference is
+an external stepwise pipeline: Trim Galore 0.6.10 with FastQC, upstream STAR
+2.7.11b (`--quantMode TranscriptomeSAM`), and Salmon 1.10.3 in alignment mode
+with automatic library-type detection (`-l A --gcBias`); the with-Y-removal
+reference adds an `awk`/`samtools`/`gzip` Y split. CBQ rows read binary input
+converted once from the FASTQ; the conversion is excluded.
 
-Perturb-seq is the main performance result: on A375, UCSF, and MSK surfaces,
-STAR-suite runs **3.7x-6.2x faster** than Cell Ranger 9 while maintaining
-near-identical GEX/cell metrics and **98.0–100%** CRISPR call agreement.
-The MSK 30polyKO comparison has been replicated on two independent samples
-(DE and ES) — see [`docs/PAPER_BENCHMARK_MSK_DE_ES.md`](docs/PAPER_BENCHMARK_MSK_DE_ES.md)
-for the side-by-side paper-grade table.
+| Assay | Benchmark | STAR Suite 1.9.4 | Reference | Speedup |
+|---|---|---:|---:|---:|
+| Bulk RNA-seq | PPARG 35.1M PE, no Y-removal | 8 min 2 s | 12 min 49 s | 1.6x |
+| Bulk RNA-seq | PPARG 35.1M PE, with Y-removal | 9 min 40 s | 40 min 47 s | 4.2x |
+| scRNA-seq | 10x PBMC 10K, 3' v3 (638.9M pairs) | 16 min 8 s | 63 min 0 s | 3.9x |
+| Perturb-seq | A375, gene expression + CRISPR guides | 2 min 21 s | 11 min 25 s | 4.8x |
+| Perturb-seq | MSK 30-KO ES, gene expression + guides + LARRY, one pass | 28 min 39 s | 167 min 2 s | 5.8x |
+| 10x Flex | JAX SC2300771 (2.01B pairs), delivered BGZF FASTQ | 3 min 19 s | 57 min 6 s | 17.2x |
+| 10x Flex | JAX SC2300771, CBQ | 2 min 50 s | 57 min 6 s | 20.2x |
+| 10x Flex | GSE325982 (1.12B pairs), plain gzip via rapidgzip | 4 min 28 s | 74 min 45 s | 16.8x |
+| 10x Flex | GSE325982, CBQ | 1 min 47 s | 74 min 45 s | 41.8x |
+| 10x Flex | 10x 320k scFFPE (7.30B pairs), delivered BGZF FASTQ (cloud) | 17 min 25 s | 6 h 37 min 38 s | 22.8x |
+| 10x Flex | 10x 320k scFFPE, CBQ (cloud) | 10 min 45 s | 6 h 37 min 38 s | 37.0x |
 
-For non-Flex Solo, the README now summarizes only the historical CellGENI-style
-baseline versus the current optimized surface. On this host, external `zcat`
-remains the fastest validated read path for UCSF/MSK GEX-only and perturb runs;
-native `.gz` input is functional but not yet the fastest on those surfaces.
-Fresh `7a7fb08` reruns reproduced the archived CellGENI filtered barcode sets
-exactly for both UCSF and MSK, so the historical Jaccards above are validated
-rather than stale-artifact carryovers.
+| Assay | Benchmark (reference) | Concordance |
+|---|---|---|
+| Bulk RNA-seq | PPARG (Salmon) | gene Spearman 0.9992, Pearson 1.0000; transcript read-count Spearman 0.985, Pearson 0.99998 |
+| scRNA-seq | 10x PBMC 10K (Cell Ranger 9.0.1) | 11,863 cells against 11,806; barcode Jaccard 0.995; cell Pearson 0.99999; mean per-cell Pearson 0.992; gene Spearman 0.990, Pearson 0.9998 |
+| Perturb-seq | A375 (Cell Ranger 9.0.1) | CRISPR calls 100% (1,076 shared cells); feature-UMI Pearson 0.99999; barcode Jaccard 0.992; cell Pearson 0.99995; mean per-cell Pearson 0.992; gene Spearman 0.988, Pearson 0.980 |
+| Perturb-seq | MSK 30-KO ES (Cell Ranger 9.0.1) | CRISPR calls 99.0%; feature-UMI Pearson 0.9994; barcode Jaccard 0.992 (32,898 cells against 32,670); cell Pearson 0.99998; mean per-cell Pearson 0.991; gene Spearman 0.993, Pearson 0.9994 |
+| 10x Flex | JAX SC2300771 (Cell Ranger 9.0.1) | barcode Jaccard 0.988 (20,657 cells against 20,419); cell Pearson 0.99999; mean per-cell Pearson 0.9986; gene Spearman 0.99997, Pearson 0.9999997 |
+| 10x Flex | GSE325982 (submitters' Cell Ranger 9.0.1) | barcode Jaccard 0.994 (38,634 cells against 38,444); cell Pearson 0.99997; mean per-cell Pearson 0.9952; gene Spearman 0.99996, Pearson 0.9999993 |
+| 10x Flex | 10x 320k scFFPE (Cell Ranger 9.0.1) | barcode Jaccard 0.974 (333,411 cells against 325,410); cell Pearson 0.99998; mean per-cell Pearson 0.9990; gene Spearman 0.9999997, Pearson 0.9999997 |
+| SLAM-seq | GRAND-SLAM 100K human fixture (GRAND-SLAM) | NTR Pearson 0.9989 / 0.9961 / 0.9944 at >= 20 / 50 / 100 reads (30 s run) |
 
-All perturb parity metrics above were computed with
-`scripts/report_additional_parity_metrics.py --gene-corr-min-counts 20 --gene-corr-min-cells-pct 0.01`
-per `docs/PAPER_BENCHMARK_METHODOLOGY.md`. CR9 references use
-`refdata-gex-GRCh38-2024-A` unless noted otherwise in the archived benchmark
-artifacts.
+Gene Spearman and Pearson correlate each gene's count, summed over the cells
+both tools called, across every gene in both annotations (bulk: the read counts
+each tool assigns to each gene, against Salmon). Cell Pearson correlates each
+shared cell's total UMI count across cells; mean per-cell Pearson correlates one
+shared cell's log-transformed counts across genes (genes with at least 20
+counts in both outputs, detected in at least 1% of shared cells) and averages
+over cells. Barcode Jaccard is the number of cells both tools call divided by
+the number either calls. The multiplexed Flex libraries are compared with all
+samples pooled, as quoted here; a Flex cell is its 16-base barcode together
+with its sample tag. Per-sample values, averaged over samples, differ from the
+pooled ones by less than 0.0001 for every correlation (JAX Jaccard 0.970-0.997
+across samples, GSE325982 0.994-0.995, 320k 0.958-0.984); they are in the
+manuscript's Supplementary Table S3 and are printed by
+[`scripts/paper/concordance_levels.py`](scripts/paper/concordance_levels.py).
 
-For MSK specifically, the historical raw-matrix EmptyDrops isolation result and
-the real guarded end-to-end benchmark surface are separated in
-[docs/MSK_BENCHMARK_SURFACE_AUDIT_20260403.md](docs/MSK_BENCHMARK_SURFACE_AUDIT_20260403.md).
-The MSK 30polyKO Perturb-seq comparison is now reported on **two independent
-samples** from the same NXT chemistry: DE
-([comparisons/msk_30polyko_full_benchmark_20260306/](comparisons/msk_30polyko_full_benchmark_20260306/))
-and ES
-([comparisons/msk_30polyko_full_benchmark_ES_20260430/](comparisons/msk_30polyko_full_benchmark_ES_20260430/)).
-Both use the same wrappers
-(`scripts/paper/run_msk_30polyko_benchmark.sh` for STAR,
-`scripts/paper/run_msk_30polyko_cr_benchmark.sh` for CellRanger 9), with parity
-computed by `scripts/report_additional_parity_metrics.py` per
-`docs/PAPER_BENCHMARK_METHODOLOGY.md`.
+On the same PBMC 10K data, upstream STAR 2.7.11b with the community-optimized
+CellGENI STARsolo parameters took 30 min 43 s and gave gene Spearman 0.950,
+Pearson 0.993 and barcode Jaccard 0.994 against Cell Ranger 9.0.1; STAR Suite's
+poly-G clipping and Cell Ranger-matched multimapper policy account for the
+difference in gene-level counts. STAR-Flex loads no genome index: peak memory
+was 23 GiB on JAX and 72 GiB on 320k with cell-barcode buckets held in memory.
+On spinning disk (matched cloud instances, reported in the manuscript's
+supplement) STAR-Flex remains 12-18x faster than Cell Ranger from the delivered
+files.
 
 ## Building & Installing
 
@@ -312,18 +327,23 @@ This section documents the key features and flags for each module. For standard 
 
 See [flex/README_flex.md](flex/README_flex.md) for the full pipeline reference.
 
-STAR-Flex uses a pseudo-chromosome alignment approach: probe sequences are embedded as pseudo-chromosomes in a hybrid reference genome, and STAR's native alignment machinery handles gene assignment. Core features (trimming, spill-to-disk sorting, Y-chromosome splitting, TranscriptVB) all work with Flex.
+From STAR Suite 1.9.4, STAR-Flex assigns each read to its probe from a half-probe (H1X2) hash cache and aligns nothing. Exact probe matches, and reads with at most one mismatch in each 25-base half of the probe, are resolved from the cache; halves that point to different probes are rejected as ambiguous. `--flex yes` selects this route by default and requires the cache, which is built once per probe set with `--runMode hashCacheGenerate --hashCacheTiers H0,H1X2` (see `hashCacheTiers` in the parameter reference).
+
+The earlier alignment-based routes are **legacy**: probes embedded as pseudo-chromosomes in a hybrid reference and resolved by STAR's aligner, the alignment-validated H0/H1 cache, and BAM output with CB/UB tags or Y-chromosome splitting. They remain available with `--flexLegacy yes`, only to reproduce results from earlier releases.
 
 Key flags:
-- `--flex yes`: Enable Flex pipeline.
-- `--soloFlexExpectedCellsPerTag`: Expected cells per sample tag.
+- `--flex yes`: Enable Flex pipeline (half-probe route by default).
+- `--soloHashScreenFile`: Half-probe (H1X2) cache; required with `--flex yes`.
+- `--flexLegacy yes`: Permit a legacy alignment-based Flex route (reproducing earlier releases only).
 - `--soloSampleWhitelist`: TSV mapping sample tags to labels.
+- `--soloFlexAllowedTags`: TSV of the sample tags to call (the manuscript runs pass the sample whitelist here too).
+- `--soloFlexCellCaller tag-aware` (default): calls tags that share a sample label as one sample, keeps CB16+TAG8 cell identities, and estimates cell counts itself; it rejects legacy expected-cell options such as `--soloFlexExpectedCellsPerTag`, which only `legacy` uses.
 - `--soloProbeList`: Probe gene list (auto-detected from index if omitted).
 - `--soloSampleProbes`: 10x probe barcode sequences file.
 
 Features:
 - Sample tag detection, 1MM pseudocount correction for CBs, clique-based UMI deduplication, and occupancy filtering.
-- Y-chromosome splitting tested and validated (`tests/TEST_REPORT_Y_SPLIT_FLEX.md`).
+- Y-chromosome splitting was tested on the legacy BAM route (`tests/TEST_REPORT_Y_SPLIT_FLEX.md`); the default 1.9.4 route writes no BAM.
 
 #### Flex Parity: CR9-Projected Leiden UMAP
 
@@ -378,7 +398,8 @@ Key flags:
 - `--dynamicThreadConstMapPermits 32`: Start with full map-side permit budget.
 - `--crAssignConsumerThreads 32`: Provision PF worker pool to full host budget.
 - `--crAssignSearchThreads 1`: Per-consumer search-thread mode.
-- `--crMinUmi`: Minimum UMI threshold for CRISPR feature calling (default `10`; lower to `2-3` for lineage barcodes).
+- `--crMinUmi`: Minimum UMI threshold for CRISPR feature calling (default `3`; `--defaultCrCompat yes` sets `10`; the A375 benchmark used `10` and the MSK LARRY library `2`).
+- `--soloStrand`: Must match the gene-expression library: `Forward` for 10x 3', `Reverse` for 10x 5' libraries sequenced from read 2 only (Cell Ranger chemistry `SC5P-R2*`, e.g. A375).
 - `--soloCrGexFeature`: Control merged GEX source (`auto`, `gene`, `genefull`).
 - `--soloCrMode CR`: Enable CR-compatible single-cell behavior.
 - `--crChemistry`: Barcode chemistry (`auto`, `NXT`, `TRU`). Default `auto` enables per-library auto-detection. Mixed NXT/TRU experiments are handled automatically; per-library overrides via the `star_chemistry` column in `--pfMultiConfig`.
@@ -479,6 +500,7 @@ core/legacy/source/STAR \
   --genomeDir /path/to/flex_index \
   --readFilesIn reads_R2.fq.gz reads_R1.fq.gz \
   --flex yes \
+  --soloHashScreenFile /path/to/flex_h01x2_cache.half.khash \
   --soloType CB_UMI_Simple \
   --soloCBwhitelist /path/to/737K-fixed-rna-profiling.txt \
   --soloSampleWhitelist sample_whitelist.tsv \
@@ -551,18 +573,45 @@ For paired-end, pass **two comma-separated mate lists**:
 
 **STAR-perturb (integrated CR-compat mode):**
 
+The gene-expression FASTQs go in `--readFilesIn` (cDNA read first); the feature
+libraries are listed in `--pfMultiConfig`. The option set below is the one used
+for the manuscript's Perturb-seq benchmarks
+([docs/PAPER_BENCHMARK_METHODOLOGY.md](docs/PAPER_BENCHMARK_METHODOLOGY.md)
+Section 1.6); explicit options take precedence over the `--defaultCrCompat`
+bundle, which on its own would select `Rescue` multimappers and
+`Gene GeneFull` and sets no strand.
+
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
   --runThreadN 32 \
   --genomeDir /path/to/index \
+  --readFilesIn gex_R2.fastq.gz gex_R1.fastq.gz \
+  --readFilesBgzfMode auto \
   --pfMultiConfig /path/to/multi_config.csv \
+  --soloType CB_UMI_Simple \
+  --soloCBstart 1 --soloCBlen 16 --soloUMIstart 17 --soloUMIlen 12 \
+  --soloBarcodeReadLength 0 \
+  --soloCBwhitelist /path/to/gex_whitelist.txt \
+  --soloStrand Forward \
+  --clipAdapterType CellRanger4 --clip3pPolyG yes \
+  --alignEndsType Local --chimSegmentMin 1000000 \
+  --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
+  --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR \
+  --soloMultiMappers Unique --soloCrMultimapRescue yes \
+  --soloCellFilter EmptyDrops_CR --soloCbUbRequireTogether no \
+  --soloFeatures GeneFull --soloCrGexFeature genefull \
+  --crMinUmi 10 \
   --dynamicThreadInterface 1 \
   --dynamicThreadConstMapPermits 32 \
   --crAssignSearchThreads 1 \
-  --defaultCrCompat yes \
+  --outSAMtype None \
   --outFileNamePrefix /path/to/outs/
 ```
+
+Use `--soloStrand Reverse` (and omit `--clip3pPolyG` if the data are not
+two-colour NovaSeq/NextSeq) for 10x 5' libraries sequenced from read 2 only,
+such as the A375 benchmark.
 
 **OCM scRNA-seq (native composite barcode mode):**
 

@@ -1,5 +1,11 @@
 # Publication Appendix: SLAM‑seq Blank + GEDI Parity (2026‑02‑02)
 
+> **Note:** This record predates STAR Suite 1.9.4. The manuscript's SLAM-seq
+> result is the GRAND-SLAM 100K human fixture (NTR Pearson 0.9989 / 0.9961 /
+> 0.9944 at >= 20 / 50 / 100 reads); see the "Benchmarks" section of the
+> top-level `README.md` and
+> [PAPER_BENCHMARK_METHODOLOGY.md](PAPER_BENCHMARK_METHODOLOGY.md).
+
 This appendix captures the **key reproducible commands** and **parity metrics**
 used to compare **STAR‑SLAM** against **GEDI** with **SNP‑masked BAMs**.
 

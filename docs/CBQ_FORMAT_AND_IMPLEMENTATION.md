@@ -3,7 +3,8 @@
 This document describes the CBQ/BINSEQ format subset supported by STAR Suite
 and how the native C++ reader is wired into STAR Suite modules. It is an
 implementation reference for STAR Suite `v1.1.0`, not a complete external ARC
-BINSEQ specification.
+BINSEQ specification. CBQ input is experimental; FASTQ remains the primary
+input.
 
 User-facing command examples live in `docs/EXPERIMENTAL_BINSEQ_INPUT.md`.
 Ordered FASTQ-to-CBQ encoding policy lives in
@@ -172,9 +173,11 @@ CBQINDEX
 ```
 
 The uncompressed index payload stores `(block_offset, cumulative_records)` as
-little-endian `uint64_t` pairs for each block. The STAR Suite reader currently
-streams blocks and stops when it sees `CBQINDEX`; it does not use the index for
-random access.
+little-endian `uint64_t` pairs for each block. In its default streaming mode the
+STAR Suite reader reads blocks in order and stops when it sees `CBQINDEX`. The
+indexed range mode (`--readFilesCbqRangeMode auto|range`) reads this index to
+open record ranges within a lane, so several readers can decode one lane in
+parallel; `range` makes a missing index fatal.
 
 ## Ordered Encoder
 
@@ -372,8 +375,9 @@ harnesses with pre-NTR parity.
 - SLAM per-file skipping is rejected for BINSEQ input.
 - Chromap ATAC CBQ requires Chromap-suite with native CBQ support and uses
   split sources: one paired-read CBQ plus one barcode CBQ per lane.
-- The STAR Suite reader streams blocks and does not use the CBQ index for
-  random access.
+- The CBQ index is used only by the indexed range mode
+  (`--readFilesCbqRangeMode`), which supports order-independent runs; other
+  runs stream blocks in order (see `docs/EXPERIMENTAL_BINSEQ_INPUT.md`).
 - External CBQ encoders may not preserve source order. Use
   `cbq_ordered_encoder` when source-order parity matters.
 - The reader accepts optional flags at the column-validation level, but STAR

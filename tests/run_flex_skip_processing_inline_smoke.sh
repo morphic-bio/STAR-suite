@@ -37,7 +37,7 @@ fi
     --soloBarcodeReadLength 0 \
     --soloFeatures Gene \
     --soloProbeList "${probe_list}" \
-    --flex yes \
+    --flex yes --flexLegacy yes \
     --flexPipeline no \
     --soloSkipProcessing yes \
     --outSAMtype None \

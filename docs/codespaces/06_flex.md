@@ -29,6 +29,6 @@ bash scripts/codespaces/run_flex_public_demo.sh
 
 ## Using your own data
 
-For a real Flex run, you will usually need your own FASTQs, whitelist, barcode settings, probe set, and a new filtered reference and STAR index.
+For a real Flex run, you will usually need your own FASTQs, whitelist, barcode settings, probe set, and a new filtered reference and STAR index. From STAR Suite 1.9.4, Flex runs also need a half-probe cache built once from that index; the demo wrapper builds it for you.
 
 See [Using your own data](./08_using_your_own_data.md).

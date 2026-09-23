@@ -20,6 +20,8 @@ WHITELIST="${CR_MULTI_WHITELIST:-${ROOT}/3M-5pgex-jan-2023.txt}"
 GENOME_DIR="${CR_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 
 STAR_BIN="${STAR_BIN:-/mnt/pikachu/STAR-suite/core/legacy/source/STAR}"
+# A375 is a 10x 5' R2-only library (SC5P-R2), so read 2 is antisense: count Reverse, not Unstranded (1.9.4 methodology).
+SOLO_STRAND="${A375_SOLO_STRAND:-Reverse}"
 OUTPREFIX="${A375_CR_PARITY_OUTPREFIX:-/storage/A375/star_gex_features_cr_parity_$(date +%Y%m%d_%H%M%S)/}"
 THREADS="${A375_THREADS:-24}"
 A375_CR_MIN_UMI="${A375_CR_MIN_UMI:-10}"
@@ -166,7 +168,7 @@ if [[ "${A375_SKIP_STAR}" -eq 0 ]]; then
     --soloMultiMappers Unique \
     --soloCbUbRequireTogether no \
     --soloCellFilter "${SOLO_CELL_FILTER}" \
-    --soloStrand Unstranded \
+    --soloStrand "${SOLO_STRAND}" \
     --soloFeatures Gene \
     --soloCrGexFeature gene \
     --pfMultiConfig "${MULTI_CONFIG}" \

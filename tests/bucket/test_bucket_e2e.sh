@@ -171,7 +171,7 @@ run_jax_case() {
         --runThreadN 32 --genomeDir "${genome_dir}" \
         --soloType CB_UMI_Simple --soloCBstart 1 --soloUMIstart 17 \
         --soloCBlen 16 --soloUMIlen 12 --soloBarcodeReadLength 0 \
-        --soloCBwhitelist "${cb_whitelist}" --flex yes \
+        --soloCBwhitelist "${cb_whitelist}" --flex yes --flexLegacy yes \
         --soloFlexExpectedCellsPerTag 3000 \
         --soloSampleWhitelist "${sample_whitelist}" \
         --soloProbeList "${probe_list}" --soloSampleProbes "${sample_probes}" \

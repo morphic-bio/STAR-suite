@@ -56,6 +56,7 @@ else
   echo "[smoke] MACS3 threshold: default p=1e-5"
 fi
 
+# Strand: 10x Multiome GEX (737K-arc-v1) is a 3' gene-expression library (read 2 sense), so count Forward.
 /usr/bin/time -v "${STAR_BIN}" \
   --runThreadN 8 --genomeDir "${GENOME_DIR}" \
   --readFilesIn "${GEX_R2}" "${GEX_R1}" --readFilesCommand zcat \
@@ -69,7 +70,7 @@ fi
   --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
   --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR \
   --soloMultiMappers Unique --soloCbUbRequireTogether no \
-  --soloCellFilter None --soloStrand Unstranded --soloFeatures Gene GeneFull \
+  --soloCellFilter None --soloStrand Forward --soloFeatures Gene GeneFull \
   --chromapAtacEnable 1 --chromapAtacStartMode concurrent \
   --chromapAtacReferenceFasta "${REF_FA}" --chromapAtacIndex "${CHROMAP_INDEX}" \
   --chromapAtacRead1 "${ATAC_R1}" --chromapAtacRead2 "${ATAC_R2}" --chromapAtacBarcode "${ATAC_BC}" \

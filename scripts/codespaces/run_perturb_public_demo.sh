@@ -97,6 +97,8 @@ python3 "${CR_INPUT_HELPER}" \
 # shellcheck disable=SC1090
 source "${RUN_DIR}/cr_config_inputs.env"
 
+# The GEX fixture is cut from a public 10x 5' v2 library (sc5p_v2_hs_B_1k_multi_5gex_b, R2 cDNA only),
+# so read 2 is antisense to the transcript and counting is Reverse.
 CMD=(
   "${STAR_BIN}"
   --runThreadN "${THREADS}"
@@ -122,7 +124,7 @@ CMD=(
   --soloMultiMappers Unique
   --soloCellFilter EmptyDrops_CR
   --soloCbUbRequireTogether no
-  --soloStrand Unstranded
+  --soloStrand Reverse
   --soloFeatures GeneFull
   --soloCrGexFeature genefull
   --pfMultiConfig "${PF_MULTI_CONFIG}"

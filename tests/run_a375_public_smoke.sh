@@ -92,7 +92,8 @@ if [[ "${MODE}" == "5prime" ]]; then
   WHITELIST="${CR_MULTI_WHITELIST:-/storage/A375/3M-5pgex-jan-2023.txt}"
   TIER_DIR="${A375_5P_DOWNSAMPLE_DIR:-${FIXTURE_ROOT}/downsampled_${DOWNSAMPLE}}"
   CB_START=1; CB_LEN=16; UMI_START=17; UMI_LEN=12
-  SOLO_STRAND="Unstranded"
+  # 10x 5' R2-only library: read 2 is antisense to the transcript.
+  SOLO_STRAND="Reverse"
   SOLO_FEATURE="GeneFull"
 else
   FIXTURE_ROOT="${A375_3P_FIXTURE_ROOT:-/tmp/a375_3prime_fixture}"
@@ -102,6 +103,7 @@ else
   TIER_DIR="${A375_3P_DOWNSAMPLE_DIR:-${FIXTURE_ROOT}/downsampled_${DOWNSAMPLE}}"
   # 3' v3: CB 1-16, UMI 17-28 (12bp)
   CB_START=1; CB_LEN=16; UMI_START=17; UMI_LEN=12
+  # 10x 3' gene-expression library: read 2 is sense to the transcript.
   SOLO_STRAND="Forward"
   SOLO_FEATURE="GeneFull_Ex50pAS"
 fi

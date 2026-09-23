@@ -49,6 +49,19 @@ budget (`--dynamicThreadInterface 1 --crAssignConsumerThreads -1
 --crAssignSearchThreads 1`) for concurrent GEX and feature assignment.
 See [cross-module measurements and limits](benchmarks/CROSS_MODULE_PERFORMANCE_20260910.md).
 
+## Feature matching
+
+When all features in a reference have the same length, `assignBarcodes` builds
+hash tables of the exact feature sequences and of every sequence within 1 and 2
+mismatches (`--feature_prehash_max_hamming`, default 2). Reads are looked up in
+these tables first, up to the mismatch ceiling (`--maxHammingDistance`, or
+`--crAssignMaxHamming` / `star_max_hamming` inside STAR). A table entry equally
+close to two features is marked ambiguous when the table is built, and reads
+that hit it are left unassigned. The vectorized exhaustive Hamming search
+(fast-Hamming) is the fallback: it scans the feature library when the ceiling is
+above 2 or the tables were not built. See
+[`core/features/process_features/README.md`](../core/features/process_features/README.md#search-methodology).
+
 ## Quick Usage (call_features from MEX)
 
 ```bash
@@ -67,7 +80,7 @@ By default, `assignBarcodes` and the `pf_api` library automatically detect the o
 
 2. **Auto-Detection**: At startup, the tool scans all feature offsets:
    - If all features share the same offset → uses it as global offset (fast path)
-   - If multiple offsets detected (>5% heterogeneity) → stops with an error
+   - If multiple offsets detected (>5% heterogeneity) → warns and proceeds with the dominant offset; with `--strict-offset-check` it stops with an error
 
 3. **User Override**: You can explicitly control offset behavior:
    ```bash
@@ -75,35 +88,42 @@ By default, `assignBarcodes` and the `pf_api` library automatically detect the o
    --feature_constant_offset 26
    
    # Force per-feature offsets (slower for large feature sets)
-   --force-individual-offsets
+   --force_individual_offsets
+
+   # Make heterogeneous offsets a fatal error
+   --strict-offset-check
    ```
 
-### Error: Multiple Offsets Detected
+### Warning: Multiple Offsets Detected
 
 If your feature reference has heterogeneous offsets, you'll see:
 
 ```
-ERROR: Multiple feature offsets detected in pattern column.
-       Dominant offset: 26 (used by 9500 features)
-       Other offsets detected (threshold: 5% of dominant):
-         offset 30: 500 features (5.3%)
+WARNING: Multiple feature offsets detected in pattern column.
+         Dominant offset: 26 (used by 9500 features)
+         Other offsets detected:
+           offset 30: 500 features (5.3%)
 
-To proceed, choose one of:
-  1. --force-individual-offsets   Use per-feature offsets (slower for large feature sets)
-  2. --feature_constant_offset 26  Use dominant offset globally (faster)
+         Proceeding with dominant offset 26.
+         Use --force_individual_offsets for per-feature offsets, or
+         --strict-offset-check to make this an error.
 ```
 
+With `--strict-offset-check` the run stops instead and lists the choices
+(`--force_individual_offsets`, `--feature_constant_offset 26`, or removing
+`--strict-offset-check`).
+
 **Resolution:**
-- Use `--force-individual-offsets` if features genuinely have different offsets (e.g., mixed assay types)
+- Use `--force_individual_offsets` if features genuinely have different offsets (e.g., mixed assay types)
 - Use `--feature_constant_offset N` to apply the dominant offset globally (faster for large feature sets)
 
 ### Error: Conflicting Flags
 
-You cannot specify both `--feature_constant_offset` and `--force-individual-offsets`:
+You cannot specify both `--feature_constant_offset` and `--force_individual_offsets`:
 
 ```
-Error: Cannot specify both --force-individual-offsets and --feature_constant_offset.
-       Use --force-individual-offsets for per-feature offsets from pattern column,
+Error: Cannot specify both --force_individual_offsets and --feature_constant_offset.
+       Use --force_individual_offsets for per-feature offsets from pattern column,
        or --feature_constant_offset N for a single global offset.
 ```
 
@@ -175,13 +195,52 @@ matching `assignBarcodes` CLI flags.
 
 ---
 
+## Per-Library Dominance Calling (Custom / LARRY)
+
+`pfMultiConfig` can call an individual non-GEX feature library inside the STAR
+run. Add these columns to the selected `[libraries]` row:
+
+```csv
+star_feature_caller,star_feature_call_min_umi,star_feature_call_min_ratio
+dominant,2,2.0
+```
+
+`star_feature_caller=dominant` is opt-in; an absent value leaves existing
+feature-library behavior unchanged. The thresholds default to 1 UMI and 1:1,
+with a required one-UMI margin, matching the production downstream rule
+`top_count > second_count`. A tie fails. Set `star_feature_call_min_umi=2` and
+`star_feature_call_min_ratio=2.0` explicitly for the stricter 2-UMI/2:1 policy.
+The ratio is against the second feature, not all other features combined.
+There is no additional fraction-of-total threshold on the integrated path.
+
+For a LARRY row with `star_library_id=larry_es`, STAR writes
+`outs/feature_analysis/larry_es/feature_calls.csv` and
+`feature_calls_summary.txt` during pf-multi finalization, using that library's
+filtered feature MEX. The CSV contains `barcode,feature_call,num_features,num_umis`;
+unassigned and ambiguous observed barcodes are marked `Unassigned` and
+`Multiplet`. The per-library `pf_library_provenance.tsv` records the policy
+and output path. `feature_per_cell.csv` remains a count summary, not the
+thresholded call table.
+
+The integrated caller uses the same `process_features` dominance engine as
+`call_features --guide-caller dominant`. Its standalone CLI now also accepts
+`--min-ratio`; use `--fraction 0 --min_counts 1 --min-ratio 1 --margin 1`
+to reproduce the integrated defaults. `--crGuideCaller` and `--crMinUmi`
+continue to control CRISPR GMM/FDR calling only.
+
+Regression checks:
+`tests/multi_feature/test_multi_feature_config.sh`,
+`tests/multi_feature/test_larry_dominant_calling.sh`, and
+`tests/multi_feature/test_larry_dominant_pf_multi.sh`.
+
 ## CRISPR Feature Calling (CR-Compat Mode)
 
 When running STAR with `--pfMultiConfig` and CRISPR Guide Capture features, STAR automatically runs GMM-based feature calling after EmptyDrops filtering.
 
 ### Parameter: `--crMinUmi N`
 
-**Default:** 3 (general STAR Suite default)
+**Default:** 3 (general STAR Suite default). The `--defaultCrCompat yes` and
+`--defaultA375Parity yes` bundles set 10 unless `--crMinUmi` is given.
 
 Controls the minimum UMI threshold for feature calling. Adjust based on assay type:
 
@@ -420,7 +479,7 @@ fastqs,sample,library_type,feature_types,star_chemistry,star_feature_ref,star_li
 ```
 
 In this example:
-- The gRNA library (29 guides, 8 nt) uses Hamming=1, appropriate for short sequences.
+- The gRNA library (30 guides, 8 nt) uses Hamming=1, appropriate for short sequences.
 - The LARRY library (245K barcodes, 40 nt) uses Hamming=5, enabling deeper fuzzy matching.
 - The GEX row has no `star_max_hamming`; GEX does not use feature assignment.
 
@@ -434,8 +493,12 @@ In this example:
 
 Higher Hamming distances on short sequences risk spurious matches (e.g.,
 Hamming=5 on 8-nt sequences allows 62.5% of positions to mismatch). The
-prehash memory budget also scales with Hamming distance and library size,
-so per-library control avoids wasting memory on unnecessary prehash tiers.
+hash tables cover ceilings of 1 and 2 only, and their memory grows with the
+ceiling and library size, so per-library control avoids building tables that a
+library does not need. A ceiling above 2 is served by the slower fast-Hamming
+scan of the whole library. The MSK 30-KO benchmark in the manuscript ran the
+LARRY library at `star_max_hamming` 1, served by its 1-mismatch table
+(`scripts/paper/run_msk_30polyko_benchmark.sh`).
 
 ---
 
@@ -443,13 +506,16 @@ so per-library control avoids wasting memory on unnecessary prehash tiers.
 
 When running STAR benchmarks in CR-compat mode (GEX + features), use these
 parameters for optimal throughput and parity. **Do not hardcode thread
-counts**; use the dynamic interface so threads are auto-sized.
+counts**; use the dynamic interface so threads are auto-sized. The exact
+options of the manuscript's STAR Suite 1.9.4 Perturb-seq runs are listed in
+[`docs/PAPER_BENCHMARK_METHODOLOGY.md`](PAPER_BENCHMARK_METHODOLOGY.md)
+Section 1.6.
 
 ### Required Threading Parameters
 
 ```bash
 --runThreadN 32                    # (or nproc)
---dynamicThreadInterface 1         # parallel phases: pf-preload overlaps Solo
+--dynamicThreadInterface 1         # permit pool shared by alignment and feature assignment
 --crAssignConsumerThreads -1       # AUTO-SIZE from runThreadN (DO NOT hardcode 4)
 --crAssignSearchThreads 1          # 1 search thread per consumer (prevents oversubscription)
 ```
@@ -460,7 +526,7 @@ counts**; use the dynamic interface so threads are auto-sized.
 |-----------|-----------|--------|---------|
 | `crAssignConsumerThreads` | `4` (hardcoded) | Only 5 threads active during feature assignment (~15% CPU) | `-1` (auto) |
 | `crAssignSearchThreads` | `4` | Oversubscription: 31×4=124 threads, thrashing | `1` |
-| `dynamicThreadInterface` | `0` (off) | Solo and pf-preload run sequentially, not overlapped | `1` |
+| `dynamicThreadInterface` | `0` (off) | No permit pool: alignment and feature assignment do not share one thread budget | `1` |
 
 ### Full Reference Command
 
@@ -520,6 +586,10 @@ counts**; use the dynamic interface so threads are auto-sized.
   Each adds a full pass over the read array.
 - **Poly-G trimming**: Always `--clip3pPolyG yes` for NovaSeq/NextSeq data
   (auto-detected in CellRanger4 mode, but explicit is safer).
+- **Strand**: `--soloStrand Forward` is for 3' libraries. 10x 5' libraries
+  sequenced from read 2 only (Cell Ranger chemistry `SC5P-R2*`, e.g. A375)
+  need `--soloStrand Reverse`; `Unstranded` drops reads where opposite-strand
+  genes overlap and counts antisense reads.
 - **Chemistry**: Set `--crChemistry TRU` or `NXT` explicitly when known.
   Auto-detect can misclassify certain samples (see AALG1 autodetect bug).
 - **Per-library Hamming**: Use `star_max_hamming` column when mixing short

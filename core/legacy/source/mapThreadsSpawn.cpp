@@ -648,6 +648,7 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
 
 void runFlexNoGenomeCountOnly(Parameters &P) {
     P.closeReadsFiles();
+    const bool spatial = P.soloSpatialFlexIntegratedEnabled;
 
     g_statsAll.resetN();
     time(&g_statsAll.timeStartMap);
@@ -659,7 +660,7 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
     P.inOut->logMain << "Flex count-only no-genome: hash cache " << P.pSolo.hashScreenFile << "\n"
                      << std::flush;
 
-    if (P.pSolo.inlineCBCorrection && P.pSolo.cbWLyes && !P.pSolo.cbWLstr.empty()) {
+    if (!spatial && P.pSolo.inlineCBCorrection && P.pSolo.cbWLyes && !P.pSolo.cbWLstr.empty()) {
         InlineCBCorrection::initializeWhitelist(P.pSolo);
         P.inOut->logMain << "[INLINE-CB-INIT] size=" << P.pSolo.cbWLstr.size()
                          << " exact_map=" << InlineCBCorrection::exactMapSize()
@@ -734,8 +735,8 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
     // instead of being reconciled field by field afterwards, which was the
     // largest serial block in the Flex tail. Only for this fused path; the
     // staged pipeline keeps per-thread maps and its existing merge.
-    SoloReadFeature::sharedAmbigEnable(P.pSolo.inlineHashMode && P.pSolo.flexMode);
-    P.inOut->logMain << "Flex shared ambiguous store: active for fully fused "
+    SoloReadFeature::sharedAmbigEnable(!spatial && P.pSolo.inlineHashMode && P.pSolo.flexMode);
+    if (!spatial) P.inOut->logMain << "Flex shared ambiguous store: active for fully fused "
                         "no-genome hash records\n" << std::flush;
 
     std::vector<SoloReadFeature *> fusedFeats(nFusedThreads, nullptr);
@@ -745,11 +746,11 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
     std::vector<std::unique_ptr<SoloReadBarcode>> fusedBars;
     fusedBars.reserve(nFusedThreads);
     for (int i = 0; i < nFusedThreads; ++i) {
-        fusedBars.emplace_back(new SoloReadBarcode(P));
+        fusedBars.emplace_back(spatial ? nullptr : new SoloReadBarcode(P));
     }
 
     for (int i = 0; i < nFusedThreads; ++i) {
-        fusedFeats[i] = new SoloReadFeature(SoloFeatureTypes::Gene, P, -(200 + i));
+        if (!spatial) fusedFeats[i] = new SoloReadFeature(SoloFeatureTypes::Gene, P, -(200 + i));
         fusedStats[i] = Stats();
         fusedArgs[i].state = &state;
         fusedArgs[i].P = &P;
@@ -818,6 +819,10 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
     P.inOut->logMain << timeMonthDayTime(g_statsAll.timeFinishMap) << " ..... finished mapping\n"
                      << "RAM after mapping:\n"
                      << linuxProcMemory() << std::flush;
+
+    // Spatial workers retain complete coordinate families and raw UMIs.
+    // The spatial engine finalizes after this join; ordinary Solo stores are absent.
+    if (spatial) return;
 
     SoloReadBarcode readBarSum(P);
     {

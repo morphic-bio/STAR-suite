@@ -1,0 +1,67 @@
+{
+  "schema": "starsuite.provenance_record/v1",
+  "record_id": "paper-2026-perturbseq-v1.9.4",
+  "recorded_utc": "2026-09-15T12:00:00Z",
+  "kind": "correction",
+  "status": "complete",
+  "supersedes": [
+    "paper-2026-perturbseq-full-depth"
+  ],
+  "software": [
+    {
+      "repository": "https://github.com/morphic-bio/STAR-suite",
+      "revision": "1c9ddb9a5a2a3e62748e8e4ef28e553582affeed",
+      "version": "1.9.4"
+    }
+  ],
+  "environment": {
+    "hardware_class": "Intel Core i9-13900KF workstation (24 cores)",
+    "memory_gb": 126,
+    "logical_cpu_count": 32,
+    "requested_threads": 32,
+    "storage": "local NVMe for every input, output and scratch file",
+    "star_suite_binary_source_revision": "a095319a7b5442d6b67bc54a6e83619ad10c7877"
+  },
+  "method": "STAR Suite 1.9.4 processed each Perturb-seq dataset's gene-expression and feature libraries in one run and was compared with Cell Ranger 9.0.1 multi. For MSK 30-KO (ES sample: gene expression, 30 CRISPR guides and a 245,979-barcode LARRY lineage library) the reference time is the sum of the two Cell Ranger runs needed for the same outputs. The A375 gene-expression library is 10x 5' sequenced from read 2 only and is counted with --soloStrand Reverse; MSK is 3' and counted Forward. Runs were made one at a time on a quiet machine with the page cache dropped first; elapsed time is whole-process wall-clock time from /usr/bin/time. Cell Ranger 9.0.1 ran with BAM output and secondary analysis disabled at the same thread count and was timed to completion. CRISPR-call agreement is the fraction of shared cells whose called guide set is identical; feature UMI Pearson is on per-guide UMI sums over shared cells; per-cell Pearson is on per-barcode UMI totals. Gene-level concordance is the Spearman correlation (tied ranks averaged) and the Pearson correlation of raw per-gene count totals over the cells called by both tools, over every gene in both annotations, zero-count genes included.",
+  "evidence": [
+    {
+      "dataset": "A375 1k CRISPR 5' GEM-X",
+      "elapsed_seconds": 141.36,
+      "reference_elapsed_seconds": 684.91,
+      "speedup": 4.85,
+      "called_cells": 1167,
+      "reference_called_cells": 1162,
+      "cell_call_jaccard": 0.992,
+      "cell_count_pearson": 0.99995,
+      "gene_count_spearman": 0.988,
+      "gene_count_pearson": 0.98,
+      "crispr_assignment_match_fraction": 1.0,
+      "crispr_match_shared_cells": 1076,
+      "crispr_umi_pearson": 0.99999
+    },
+    {
+      "dataset": "MSK 30-KO ES",
+      "elapsed_seconds": 1718.72,
+      "reference_elapsed_seconds": 10022.22,
+      "speedup": 5.83,
+      "called_cells": 32898,
+      "cell_count_pearson": 0.99998,
+      "gene_count_spearman": 0.993,
+      "gene_count_pearson": 0.9994,
+      "crispr_assignment_match_fraction": 0.99,
+      "crispr_umi_pearson": 0.9994
+    }
+  ],
+  "limitations": [
+    "Each timing is one completed run rather than a replicated distribution.",
+    "The superseded record reported an earlier 1.7.0 candidate, filtered gene Pearson and a UCSF dataset that is not part of this comparison; its values are not comparable.",
+    "The A375 gene Pearson is set mainly by one intronic locus (LINGO1) that the two tools count differently; an earlier A375 run counted the 5' library unstranded and is not used.",
+    "Cell Ranger outputs are the comparator, not a ground truth."
+  ],
+  "artifacts": [
+    {
+      "logical_uri": "git://STAR-suite/docs/PAPER_BENCHMARK_METHODOLOGY.md",
+      "sha256": "e631f83184653c0ae1c905e40c38641bd283d390f2efe58beca7ddec04c027c6"
+    }
+  ]
+}

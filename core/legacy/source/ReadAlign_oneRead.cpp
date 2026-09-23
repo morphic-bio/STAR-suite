@@ -134,10 +134,7 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
                 EXIT_CODE_INCONSISTENT_DATA, P);
         }
         std::string spatialError;
-        const spatial_gex::FeatureEvidenceClass source =
-            P.soloSpatialFlexIntegratedEnabled
-                ? spatial_gex::FeatureEvidenceClass::FlexAlignment
-                : spatial_gex::FeatureEvidenceClass::Gex;
+        const auto source = spatial_gex::FeatureEvidenceClass::Gex;
         if (!P.spatialGexPipeline->completeCurrentThread(
                 source, false, 0, iReadAll - 1, spatialError)) {
             exitWithError(
@@ -423,7 +420,6 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
     if (P.pSolo.hashScreenEnabled && soloRead != nullptr && soloRead->readBar != nullptr &&
         soloRead->readFeat != nullptr && P.pSolo.featureYes[SoloFeatureTypes::Gene] &&
         P.readNmates > 0) {
-        const bool spatialFlex = P.soloSpatialFlexIntegratedEnabled;
         bool hashScreenSampleOK = true;
         uint16_t hashScreenSampleIdx = 0;
         const auto classifyFlexOffset0 = [&]() {
@@ -442,9 +438,7 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
         // happens later at complementSeqNumbers). The hash screen encodes
         // A/C/G/T characters; moving this call after convertNucleotidesToNumbers
         // would silently break classification.
-        if (spatialFlex) {
-            hashScreenDecision_ = classifyFlexOffset0();
-        } else {
+
             soloRead->readBar->getCBandUMI(
                 Read0, Qual0, readLengthOriginal, readNameExtra[0],
                 readFilesIndex, readName);
@@ -476,7 +470,7 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
                 // for a per-sample matrix. Preserve that routing here too.
                 hashScreenDecision_.action = FlexHashScreenDecision::Deny;
             }
-        }
+
         residualAnchorGeneIdx15_ =
             hashScreenDecision_.residualAnchorGeneIdx15;
         hashScreenDumpWrite(Read0[0], readLengthOriginal[0], hashScreenSampleIdx, hashScreenDecision_);
@@ -509,34 +503,7 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             }
         }
         if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
-            if (spatialFlex) {
-                if (iReadAll == 0 || hashScreenDecision_.geneIdx15 == 0
-                    || (hashScreenDecision_.cacheClass != FlexHashCacheH0
-                        && hashScreenDecision_.cacheClass != FlexHashCacheH1
-                        && hashScreenDecision_.cacheClass != FlexHashCacheH1X2)) {
-                    exitWithError(
-                        "EXITING because native spatial Flex received an invalid "
-                        "H0/H1 cache keep decision\n",
-                        std::cerr, P.inOut->logMain,
-                        EXIT_CODE_INCONSISTENT_DATA, P);
-                }
-                std::string spatialError;
-                const spatial_gex::FeatureEvidenceClass source =
-                    hashScreenDecision_.cacheClass == 0
-                        ? spatial_gex::FeatureEvidenceClass::FlexH0
-                        : spatial_gex::FeatureEvidenceClass::FlexH1;
-                if (!P.spatialGexPipeline->completeCurrentThread(
-                        source, true, hashScreenDecision_.geneIdx15 - 1,
-                        iReadAll - 1, spatialError)) {
-                    exitWithError(
-                        "EXITING because native spatial Flex cache evidence "
-                        "completion failed: " + spatialError + "\n",
-                        std::cerr, P.inOut->logMain,
-                        EXIT_CODE_INCONSISTENT_DATA, P);
-                }
-                ++statsRA.hashScreenKeep;
-                return 0;
-            }
+
             const bool noBarcode = (soloRead->readBar->cbMatch < 0);
             soloRead->readFlagReset();
             SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
@@ -558,26 +525,7 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             } else {
                 statsRA.hashScreenSampleReject++;
             }
-            if (spatialFlex) {
-                if (iReadAll == 0) {
-                    exitWithError(
-                        "EXITING because native spatial Flex lost the hash-deny "
-                        "read ordinal\n",
-                        std::cerr, P.inOut->logMain,
-                        EXIT_CODE_INCONSISTENT_DATA, P);
-                }
-                std::string spatialError;
-                if (!P.spatialGexPipeline->completeCurrentThread(
-                        spatial_gex::FeatureEvidenceClass::FlexHashDeny,
-                        false, 0, iReadAll - 1, spatialError)) {
-                    exitWithError(
-                        "EXITING because native spatial Flex hash-deny completion "
-                        "failed: " + spatialError + "\n",
-                        std::cerr, P.inOut->logMain,
-                        EXIT_CODE_INCONSISTENT_DATA, P);
-                }
-                return 0;
-            }
+
             soloRead->readFlagReset();
             SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
             record_flex_hash_screen_deny(

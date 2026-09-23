@@ -29,7 +29,7 @@ def test_official_snapshot_metadata_matches_vendored_files():
     record_schema = SHARE_ROOT / provenance["record_schema"]
     assert _sha256(catalog) == recipes["catalog_sha256"]
     assert _sha256(record_schema) == provenance["record_schema_sha256"]
-    assert len(list((SHARE_ROOT / "evidence/official/records").rglob("*.json"))) == 4
+    assert len(list((SHARE_ROOT / "evidence/official/records").rglob("*.json"))) == provenance["record_count"]
 
 
 def test_default_config_loads_pinned_official_catalog_and_evidence():

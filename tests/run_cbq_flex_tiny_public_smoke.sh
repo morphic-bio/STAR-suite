@@ -96,6 +96,9 @@ fi
   --readFilesIn "${R2_FASTQ}" "${R1_FASTQ}" \
   --outFile "${CBQ_FILE}"
 
+# STAR Suite 1.9.4: the launcher now defaults to the half-probe route (--out-samtype none),
+# which needs an H1X2 cache. This smoke test exercises the legacy BAM adapter path it has
+# always asserted, so it selects bam-unsorted explicitly (the launcher adds --flexLegacy yes).
 "${REPO_ROOT}/scripts/run_flex_cr_config.sh" \
   --cr-config "${CONFIG}" \
   --genome-dir "${INDEX_DIR}" \
@@ -108,6 +111,7 @@ fi
   --sample-probe-offset 68 \
   --out-base "${OUT_BASE}" \
   --run-id fastq \
+  --out-samtype bam-unsorted \
   --threads "${THREADS}"
 
 "${REPO_ROOT}/scripts/run_flex_cr_config.sh" \
@@ -124,6 +128,7 @@ fi
   --cbq-file "${CBQ_FILE}" \
   --out-base "${OUT_BASE}" \
   --run-id cbq \
+  --out-samtype bam-unsorted \
   --threads "${THREADS}"
 
 FASTQ_RUN="${OUT_BASE}/fastq"

@@ -715,10 +715,147 @@ int main(int argInN, char *argIn[])
         exit(0);
     }
 
+    const auto initializeSpatialPipeline = [&]() {
+        const bool spatialFlex = P.soloSpatialFlexIntegratedEnabled;
+        if (spatialFlex) {
+            ProbeListIndex featureAxis;
+            uint32_t deprecatedCount = 0;
+            if (!featureAxis.load(P.pSolo.probeListPath,
+                                  P.pSolo.removeDeprecated,
+                                  &deprecatedCount)
+                || featureAxis.empty()) {
+                exitWithError(
+                    "EXITING because integrated spatial Flex could not load "
+                    "the probe feature axis: " + P.pSolo.probeListPath + "\n",
+                    std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            if (featureAxis.size() > 0x7FFFu) {
+                exitWithError(
+                    "EXITING because integrated spatial Flex probe feature "
+                    "axis exceeds the 15-bit resolver limit\n",
+                    std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            spatialFlexFeatureIds = featureAxis.orderedGeneIds();
+        }
+        spatial_gex::PipelineConfig spatialConfig;
+        spatialConfig.barcodeContractDirectory = P.soloSpatialBarcodeContract;
+        spatialConfig.bc1OligosPath = P.soloSpatialBc1Oligos;
+        spatialConfig.bc2OligosPath = P.soloSpatialBc2Oligos;
+        spatialConfig.outputDirectory = P.outFileNamePrefix
+            + (spatialFlex ? "SpatialFlex.out" : "SpatialGex.out");
+        spatialConfig.temporaryDirectory = P.outFileTmp;
+        spatialConfig.starSuiteVersion = STAR_SUITE_VERSION;
+        spatialConfig.sourceRevision = STAR_SUITE_SOURCE_REVISION;
+        if (spatialFlex) {
+            std::string digestError;
+            spatialConfig.featureAxisPath = P.pSolo.probeListPath;
+            spatialConfig.featureAxisSha256 =
+                spatial_feature_sidecar::sha256File(
+                    P.pSolo.probeListPath, digestError);
+            if (spatialConfig.featureAxisSha256.empty()) {
+                exitWithError(
+                    "EXITING because integrated spatial Flex could not hash "
+                    "the probe feature axis: " + digestError + "\n",
+                    std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            spatialConfig.featureCachePath = P.pSolo.hashScreenFile;
+            spatialConfig.featureCacheSha256 =
+                spatial_feature_sidecar::sha256File(
+                    P.pSolo.hashScreenFile, digestError);
+            if (spatialConfig.featureCacheSha256.empty()) {
+                exitWithError(
+                    "EXITING because integrated spatial Flex could not hash "
+                    "the half-probe cache: " + digestError + "\n",
+                    std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            spatialConfig.featureCount =
+                static_cast<std::uint32_t>(spatialFlexFeatureIds.size());
+            P.inOut->logMain
+                << "Integrated spatial Flex feature axis: "
+                << spatialConfig.featureAxisPath << " sha256="
+                << spatialConfig.featureAxisSha256 << " features="
+                << spatialConfig.featureCount << "\n"
+                << "Integrated spatial Flex half-probe cache: "
+                << spatialConfig.featureCachePath << " sha256="
+                << spatialConfig.featureCacheSha256 << "\n";
+        }
+        spatialConfig.expectedReads = P.soloSpatialExpectedReads;
+        spatialConfig.expectedCandidates = P.soloSpatialExpectedCandidates;
+        spatialConfig.threads = static_cast<std::uint32_t>(P.runThreadN);
+        spatialConfig.products = P.soloSpatialAssignmentProductMask;
+        spatialConfig.scales = P.soloSpatialBinSizeMask;
+        spatialConfig.memoryFraction = P.soloSpatialMemoryFraction;
+        spatialConfig.overflowPolicy = P.soloSpatialOverflowSpill
+            ? spatial_gex::OverflowPolicy::Spill : spatial_gex::OverflowPolicy::Fail;
+        spatialConfig.spillHighWaterCandidatesPerThread =
+            P.soloSpatialSpillHighWaterCandidates;
+        spatialConfig.requirePairedCompletion = spatialFlex;
+        spatialConfig.flexFeatureMode = spatialFlex;
+        std::string spatialError;
+        spatialGexPipeline = spatial_gex::Pipeline::create(spatialConfig, spatialError);
+        if (!spatialGexPipeline) {
+            exitWithError("EXITING because integrated spatial "
+                              + string(spatialFlex ? "Flex" : "GEX")
+                              + " initialization failed: "
+                              + spatialError + "\n",
+                          std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+        P.spatialGexPipeline = spatialGexPipeline.get();
+        P.inOut->logMain << "Integrated spatial "
+                         << (spatialFlex ? "Flex" : "GEX") << " output: "
+                         << spatialConfig.outputDirectory << "\n"
+                         << "Integrated spatial all-memory peak bytes: "
+                         << spatialGexPipeline->memoryModel().peakBytes
+                         << "; bounded downstream spool bytes: "
+                         << spatialGexPipeline->memoryModel().downstreamSpoolBytes
+                         << "; bounded spool disk bytes: "
+                         << spatialGexPipeline->memoryModel()
+                                .downstreamSpoolDiskBytes
+                         << "; selected estimate bytes: "
+                         << (spatialConfig.overflowPolicy
+                                 == spatial_gex::OverflowPolicy::Spill
+                                 ? spatialGexPipeline->memoryModel()
+                                       .downstreamSpoolBytes
+                                 : spatialGexPipeline->memoryModel().peakBytes)
+                         << "; budget bytes: "
+                         << spatialGexPipeline->memoryBudgetBytes() << "\n" << flush;
+        };
+
+    const auto finalizeSpatialPipeline = [&]() {
+    if (spatialGexPipeline) {
+        const std::vector<std::string> &geneIds =
+            P.soloSpatialFlexIntegratedEnabled
+                ? spatialFlexFeatureIds
+                : (transcriptomeMain->geIDCanonical.empty()
+                    ? transcriptomeMain->geID
+                    : transcriptomeMain->geIDCanonical);
+        std::string spatialError;
+        if (!spatialGexPipeline->finalize(geneIds, spatialError)) {
+            exitWithError("EXITING because integrated spatial "
+                              + string(P.soloSpatialFlexIntegratedEnabled
+                                           ? "Flex" : "GEX")
+                              + " finalization failed: "
+                              + spatialError + "\n",
+                          std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+        const spatial_gex::PipelineSummary &summary = spatialGexPipeline->summary();
+        P.spatialGexPipeline = nullptr;
+        P.inOut->logMain << timeMonthDayTime()
+                         << " ..... finalized integrated spatial "
+                         << (P.soloSpatialFlexIntegratedEnabled ? "Flex" : "GEX")
+                         << " (joined_reads="
+                         << summary.joinedReads << ", cliques=" << summary.readCliques
+                         << ", hard_molecules=" << summary.hardMolecules << ")\n" << flush;
+    }
+    };
+
     std::string flexNoGenomeReason;
     if (flexNoGenomeCountOnlyActivationGuard(P, &flexNoGenomeReason)) {
         P.inOut->logMain << "Flex count-only no-genome: active\n" << flush;
+        if (P.soloSpatialFlexIntegratedEnabled) initializeSpatialPipeline();
         runFlexNoGenomeCountOnly(P);
+        finalizeSpatialPipeline();
+        time(&g_statsAll.timeFinish);
         finalizeFlexDecisionSidecar(g_statsAll.readN);
 
         g_statsAll.progressReport(P.inOut->logProgress);
@@ -737,6 +874,11 @@ int main(int argInN, char *argIn[])
         P.cleanupParInfoForExit();
         delete P.inOut;
         return 0;
+    }
+    if (P.soloSpatialFlexIntegratedEnabled) {
+        exitWithError("EXITING because spatial Flex requires the no-genome route: "
+                          + flexNoGenomeReason + "\n",
+                      std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
     }
     if (flexNoGenomeCountOnlyRequested(P)) {
         P.inOut->logMain << "Flex count-only no-genome: not active ("
@@ -797,112 +939,7 @@ int main(int argInN, char *argIn[])
     { // load transcriptome
         transcriptomeMain = new Transcriptome(P);
 
-        if (P.soloSpatialGexIntegratedEnabled
-            || P.soloSpatialFlexIntegratedEnabled) {
-            const bool spatialFlex = P.soloSpatialFlexIntegratedEnabled;
-            if (spatialFlex) {
-                ProbeListIndex featureAxis;
-                uint32_t deprecatedCount = 0;
-                if (!featureAxis.load(P.pSolo.probeListPath,
-                                      P.pSolo.removeDeprecated,
-                                      &deprecatedCount)
-                    || featureAxis.empty()) {
-                    exitWithError(
-                        "EXITING because integrated spatial Flex could not load "
-                        "the probe feature axis: " + P.pSolo.probeListPath + "\n",
-                        std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
-                }
-                if (featureAxis.size() > 0x7FFFu) {
-                    exitWithError(
-                        "EXITING because integrated spatial Flex probe feature "
-                        "axis exceeds the 15-bit resolver limit\n",
-                        std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
-                }
-                spatialFlexFeatureIds = featureAxis.orderedGeneIds();
-            }
-            spatial_gex::PipelineConfig spatialConfig;
-            spatialConfig.barcodeContractDirectory = P.soloSpatialBarcodeContract;
-            spatialConfig.bc1OligosPath = P.soloSpatialBc1Oligos;
-            spatialConfig.bc2OligosPath = P.soloSpatialBc2Oligos;
-            spatialConfig.outputDirectory = P.outFileNamePrefix
-                + (spatialFlex ? "SpatialFlex.out" : "SpatialGex.out");
-            spatialConfig.temporaryDirectory = P.outFileTmp;
-            spatialConfig.starSuiteVersion = STAR_SUITE_VERSION;
-            spatialConfig.sourceRevision = STAR_SUITE_SOURCE_REVISION;
-            if (spatialFlex) {
-                std::string digestError;
-                spatialConfig.featureAxisPath = P.pSolo.probeListPath;
-                spatialConfig.featureAxisSha256 =
-                    spatial_feature_sidecar::sha256File(
-                        P.pSolo.probeListPath, digestError);
-                if (spatialConfig.featureAxisSha256.empty()) {
-                    exitWithError(
-                        "EXITING because integrated spatial Flex could not hash "
-                        "the probe feature axis: " + digestError + "\n",
-                        std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
-                }
-                spatialConfig.featureCachePath = P.pSolo.hashScreenFile;
-                spatialConfig.featureCacheSha256 =
-                    spatial_feature_sidecar::sha256File(
-                        P.pSolo.hashScreenFile, digestError);
-                if (spatialConfig.featureCacheSha256.empty()) {
-                    exitWithError(
-                        "EXITING because integrated spatial Flex could not hash "
-                        "the H0/H1 cache: " + digestError + "\n",
-                        std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
-                }
-                spatialConfig.featureCount =
-                    static_cast<std::uint32_t>(spatialFlexFeatureIds.size());
-                P.inOut->logMain
-                    << "Integrated spatial Flex feature axis: "
-                    << spatialConfig.featureAxisPath << " sha256="
-                    << spatialConfig.featureAxisSha256 << " features="
-                    << spatialConfig.featureCount << "\n"
-                    << "Integrated spatial Flex H0/H1 cache: "
-                    << spatialConfig.featureCachePath << " sha256="
-                    << spatialConfig.featureCacheSha256 << "\n";
-            }
-            spatialConfig.expectedReads = P.soloSpatialExpectedReads;
-            spatialConfig.expectedCandidates = P.soloSpatialExpectedCandidates;
-            spatialConfig.threads = static_cast<std::uint32_t>(P.runThreadN);
-            spatialConfig.products = P.soloSpatialAssignmentProductMask;
-            spatialConfig.scales = P.soloSpatialBinSizeMask;
-            spatialConfig.memoryFraction = P.soloSpatialMemoryFraction;
-            spatialConfig.overflowPolicy = P.soloSpatialOverflowSpill
-                ? spatial_gex::OverflowPolicy::Spill : spatial_gex::OverflowPolicy::Fail;
-            spatialConfig.spillHighWaterCandidatesPerThread =
-                P.soloSpatialSpillHighWaterCandidates;
-            spatialConfig.requirePairedCompletion = spatialFlex;
-            spatialConfig.flexFeatureMode = spatialFlex;
-            std::string spatialError;
-            spatialGexPipeline = spatial_gex::Pipeline::create(spatialConfig, spatialError);
-            if (!spatialGexPipeline) {
-                exitWithError("EXITING because integrated spatial "
-                                  + string(spatialFlex ? "Flex" : "GEX")
-                                  + " initialization failed: "
-                                  + spatialError + "\n",
-                              std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
-            }
-            P.spatialGexPipeline = spatialGexPipeline.get();
-            P.inOut->logMain << "Integrated spatial "
-                             << (spatialFlex ? "Flex" : "GEX") << " output: "
-                             << spatialConfig.outputDirectory << "\n"
-                             << "Integrated spatial all-memory peak bytes: "
-                             << spatialGexPipeline->memoryModel().peakBytes
-                             << "; bounded downstream spool bytes: "
-                             << spatialGexPipeline->memoryModel().downstreamSpoolBytes
-                             << "; bounded spool disk bytes: "
-                             << spatialGexPipeline->memoryModel()
-                                    .downstreamSpoolDiskBytes
-                             << "; selected estimate bytes: "
-                             << (spatialConfig.overflowPolicy
-                                     == spatial_gex::OverflowPolicy::Spill
-                                     ? spatialGexPipeline->memoryModel()
-                                           .downstreamSpoolBytes
-                                     : spatialGexPipeline->memoryModel().peakBytes)
-                             << "; budget bytes: "
-                             << spatialGexPipeline->memoryBudgetBytes() << "\n" << flush;
-        }
+        if (P.soloSpatialGexIntegratedEnabled) initializeSpatialPipeline();
 
         if (P.soloSpatialFeatureSidecarEnabled) {
             spatial_feature_sidecar::WriterConfig sidecarConfig;
@@ -2379,31 +2416,7 @@ int main(int argInN, char *argIn[])
 
     finalizeFlexDecisionSidecar(g_statsAll.readN);
 
-    if (spatialGexPipeline) {
-        const std::vector<std::string> &geneIds =
-            P.soloSpatialFlexIntegratedEnabled
-                ? spatialFlexFeatureIds
-                : (transcriptomeMain->geIDCanonical.empty()
-                    ? transcriptomeMain->geID
-                    : transcriptomeMain->geIDCanonical);
-        std::string spatialError;
-        if (!spatialGexPipeline->finalize(geneIds, spatialError)) {
-            exitWithError("EXITING because integrated spatial "
-                              + string(P.soloSpatialFlexIntegratedEnabled
-                                           ? "Flex" : "GEX")
-                              + " finalization failed: "
-                              + spatialError + "\n",
-                          std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
-        }
-        const spatial_gex::PipelineSummary &summary = spatialGexPipeline->summary();
-        P.spatialGexPipeline = nullptr;
-        P.inOut->logMain << timeMonthDayTime()
-                         << " ..... finalized integrated spatial "
-                         << (P.soloSpatialFlexIntegratedEnabled ? "Flex" : "GEX")
-                         << " (joined_reads="
-                         << summary.joinedReads << ", cliques=" << summary.readCliques
-                         << ", hard_molecules=" << summary.hardMolecules << ")\n" << flush;
-    }
+    finalizeSpatialPipeline();
 
     // close some BAM files
     if (P.inOut->outBAMfileUnsorted != NULL)

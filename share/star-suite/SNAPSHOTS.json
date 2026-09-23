@@ -1,6 +1,6 @@
 {
   "schema": "starsuite.release_snapshots/v1",
-  "release": "1.7.0",
+  "release": "1.9.5",
   "recipes": {
     "repository": "https://github.com/morphic-bio/STAR-suite-recipes",
     "revision": "1b12325117da1f979f5e0233ae04e168f7dafb13",
@@ -10,9 +10,9 @@
   },
   "provenance": {
     "repository": "https://github.com/morphic-bio/STAR-suite-provenance",
-    "revision": "cda90df649e201a4a337016d3e96b3a7d2bed031",
+    "revision": "3ba48dfbbd73694135625423f4c2bc0cefb3f304",
     "record_schema": "evidence/official/schema/record-v1.schema.json",
     "record_schema_sha256": "b9460a8a2b70dcd21b742773f68b98d0e11117e795d156074ae2b1649243890a",
-    "record_count": 4
+    "record_count": 10
   }
 }

@@ -39,7 +39,7 @@ regression tools, and generic fixtures.
 | Script | Language | Purpose |
 |--------|----------|---------|
 | `paper/resource_usage.py` | Python | Importable benchmark sampler for concurrent process RSS, swap, scratch disk allocation, and device I/O. Writes per-sample JSONL and a peak summary; see [usage and metric definitions](paper/RESOURCE_USAGE.md). |
-| `report_additional_parity_metrics.py` | Python | Computes parity metrics for STAR vs Cell Ranger: gene-level Pearson correlation, cell-level correlation, and CRISPR feature-call set-match rates. This is the primary numeric parity tool referenced in the paper benchmarks. |
+| `report_additional_parity_metrics.py` | Python | Computes parity metrics for STAR vs Cell Ranger: gene-level Spearman and Pearson correlations, cell-level correlation, and CRISPR feature-call set-match rates. This is the primary numeric parity tool for the scRNA-seq and Perturb-seq paper benchmarks; the reported gene-level values are `spearman_all_genes` and `pearson_all_genes` (every gene, raw totals), not the `*_filtered_genes` fields or their `pearson`/`spearman` aliases. See `docs/PAPER_BENCHMARK_METHODOLOGY.md` Section 1.5. |
 | `compare_barcode_sets.py` | Python | Compares two barcode sets (e.g., STAR vs CR filtered barcodes) and reports overlap, Jaccard, and symmetric-difference statistics. Useful for quick cell-list parity checks. |
 | `run_gex_feature_parity_checks.sh` | Bash | End-to-end GEX feature parity: runs STAR and Cell Ranger, then compares gene counts and correlations. |
 | `run_visium_hd_gex_sidecar_100k.py` | Python | Frozen source-only 100K Visium HD 3-prime GEX clean-room driver. `--evidence-mode contracts` retains the independent FASTQ producers/rescan oracle; `--evidence-mode fused --producer-mode concurrent` makes STAR the sole paired-FASTQ reader, streams raw R1 to the decoder, and joins by decode-row/sidecar digests without reopening FASTQs. `--cr-evidence-mode compatibility|annotated` selects the established exon-first policy or score-first retained-GTF evidence. It clean-builds tools, runs GEX `MultiGeneUMI_CR`, repeats integer products for determinism, and accepts `--assignment-policy all|strict|soft_expected|hard|gated_hard` for 2/8/16 micrometer materialization. Writes `RUN_COMPLETE.json` only after all gates pass. See `docs/SPATIAL_FEATURE_SIDECAR.md` and `docs/RUNBOOK_VISIUM_HD_GEX_FUSED_READ_PROCESSING_20260724.md`. |
@@ -88,8 +88,8 @@ regression tools, and generic fixtures.
 | Script | Language | Purpose |
 |--------|----------|---------|
 | `flex_h01_pilot.py` | Python | Flex H0/H1/H2 tooling: probe lists/FASTAs, MEX→sequence-cache post-processing, **H2** subcommands (`h2-make-synth-fastq`, `h2-build-cache-from-mex`, `h2-write-binary-cache`) for two-mismatch variants with `cache_class=3` KEEP rows. |
-| `run_flex_h02_pilot.sh` | Bash | End-to-end H2 pilot: synthetic FASTQ from H0 seeds in an FH01SEQ1 cache → STAR-Flex (BAM+GX) → MEX-derived TSV → optional `h2_keep_only.bin`. See script header for sharding env vars. |
-| `run_flex_cr_config.sh` | Bash | Runs STAR-Flex using a CellRanger-format config, with inputs rendered by `render_flex_inputs_from_cr_config.py`. |
+| `run_flex_h02_pilot.sh` | Bash | LEGACY (`--flexLegacy yes`) end-to-end H2 pilot: synthetic FASTQ from H0 seeds in an FH01SEQ1 cache → STAR-Flex (BAM+GX) → MEX-derived TSV → optional `h2_keep_only.bin`. See script header for sharding env vars. |
+| `run_flex_cr_config.sh` | Bash | Runs STAR-Flex using a CellRanger-format config, with inputs rendered by `render_flex_inputs_from_cr_config.py`. Defaults to the 1.9.4 half-probe route (no BAM); builds the H1X2 cache at `--hash-cache FILE` when that file is absent (or in the run directory when no path is given) and reuses it otherwise. `--out-samtype bam-unsorted|bam-sorted` selects the legacy alignment route. |
 
 ## Fixtures and Utilities
 

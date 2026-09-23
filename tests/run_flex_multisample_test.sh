@@ -33,7 +33,7 @@ echo ""
   --soloType CB_UMI_Simple \
   --soloCBlen 16 --soloUMIlen 12 --soloUMIstart 17 --soloCBstart 1 --soloBarcodeReadLength 0 \
   --soloCBwhitelist /storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt \
-  --flex yes \
+  --flex yes --flexLegacy yes \
   --soloFlexExpectedCellsPerTag 3000 \
   --soloSampleWhitelist /storage/SC2300771_filtered_2M/sample_whitelist.tsv \
   --soloProbeList /storage/flex_filtered_reference/filtered_reference/probe_list.txt \

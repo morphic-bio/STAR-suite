@@ -29,6 +29,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate release notes before building
+        run: |
+          release_tag="${GITHUB_REF_NAME%%-*}"
+          notes_path="docs/RELEASE_NOTES_${release_tag}.md"
+          test -s "${notes_path}"
+          echo "Release notes: ${notes_path}"
+
       - name: Make release scripts executable
         run: |
           chmod +x scripts/release/*.sh scripts/release/docker/*.sh
@@ -260,6 +267,11 @@ jobs:
       - name: Generate checksums
         run: |
           scripts/release/create_checksums.sh "dist/release"
+          (
+            cd dist/release
+            sha256sum SHA256SUMS
+            awk '{gsub(/~/, ".", $2); print $1 "  " $2}' SHA256SUMS
+          ) | LC_ALL=C sort -k2 > dist/release/SHA256SUMS.download
 
       - name: Upload release artifacts (workflow artifact)
         uses: actions/upload-artifact@v4
@@ -335,7 +347,7 @@ jobs:
         run: |
           release_tag="${GITHUB_REF_NAME%%-*}"
           notes_path="docs/RELEASE_NOTES_${release_tag}.md"
-          test -f "${notes_path}"
+          test -s "${notes_path}"
           echo "path=${notes_path}" >> "${GITHUB_OUTPUT}"
 
       - name: Download release artifacts
@@ -344,20 +356,7 @@ jobs:
           name: release-artifacts-${{ github.ref_name }}
           path: dist/release
 
-      - name: Check if release already exists
-        id: check-release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Release ${{ github.ref_name }} already exists — skipping publish."
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Detect prerelease from tag
-        if: steps.check-release.outputs.exists != 'true'
         id: prerelease
         run: |
           if echo "${{ github.ref_name }}" | grep -qiE '^v0([.]|$)|[-](alpha|beta|rc|dev)'; then
@@ -367,11 +366,13 @@ jobs:
           fi
 
       - name: Publish GitHub release
-        if: steps.check-release.outputs.exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/release/**/*
           body_path: ${{ steps.release-notes.outputs.path }}
+          target_commitish: ${{ github.sha }}
           draft: false
           prerelease: ${{ steps.prerelease.outputs.is_prerelease == 'true' }}
+          overwrite_files: true
+          fail_on_unmatched_files: true

@@ -51,7 +51,9 @@ repack after any change. Unsupported H1/H2 or sample-specific non-exact caches
 can use the general packer without `--half`.
 See [the format notes](FLEX_KHASH_CACHE.md).
 
-Use these resources with the existing Flex count-only command:
+Use these resources with the Flex count-only command (in STAR Suite 1.9.4 this
+is the default `--flex yes` route; `--flexNoAlign 1` and `--outSAMtype None` are
+set automatically unless given):
 
 ```text
 --soloHashScreenFile /path/to/new_model_cache/model_h01x2_cache.half.khash
@@ -108,10 +110,16 @@ Within OrdMag, each bootstrap replicate sorts its count array once. All trial
 cell counts reuse that sorted array; the trial grid, floating-point rounding,
 inclusive UMI cutoff, loss comparison, and random samples remain unchanged.
 
+Sample groups are defined by the labels in the `--soloFlexAllowedTags` file
+(`label<TAB>TAG8` per line): tags given the same label, such as the pairs of
+tags pooled into each of the eight 10x 320k scFFPE samples, form one group.
+
 The shared-library floor test, grouped caller fixture, observed-occupancy
 test, and `tests/emptydrops/test_model_probe_cache.py` cover the relevant
-boundaries. Full CBQ/BGZF read validation and concordance artifacts for the
-2026-09-09 integration are in
+boundaries. The measurements below predate release 1.9.4; the current Flex
+numbers (for example, 320k barcode Jaccard 0.974 against Cell Ranger 9.0.1) are in the top-level [README Benchmarks](../README.md#benchmarks). Full
+CBQ/BGZF read validation and concordance artifacts for the 2026-09-09
+integration are in
 `/mnt/pikachu/star_suite_paper/analysis/full320k_star_deprecated_20260909/`;
 consult its completion records and
 [full benchmark report](HANDOFF_FULL320K_STAR_DEPRECATED_20260909.md) for

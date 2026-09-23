@@ -169,7 +169,7 @@ run_case() {
         "${sidecar_args[@]}" \
         --soloInlineHashMode yes \
         --soloBucketMode ram --soloBucketCount 4 \
-        --flex yes \
+        --flex yes --flexLegacy yes \
         --soloFlexExpectedCellsPerTag 1 \
         --flexPipeline yes --flexPipelineNTriage 0 --flexPipelineNSolo 0 \
         --flexNoAlign "${no_align}" \
@@ -293,7 +293,7 @@ run_bam_sidecar_case() {
         --soloHashScreenFile "${TEST_ROOT}/routing_cache.bin" \
         --soloInlineHashMode yes \
         --soloFlexDecisionSidecar "${out_dir}/flex_decisions.bin" \
-        --flex yes --flexPipeline no \
+        --flex yes --flexLegacy yes --flexPipeline no \
         --soloFlexExpectedCellsPerTag 1 \
         --outSAMtype BAM Unsorted \
         --outSAMattributes NH HI AS nM NM CB UB \

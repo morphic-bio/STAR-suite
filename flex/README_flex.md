@@ -2,17 +2,19 @@
 
 This document describes STAR-Flex, the Flex-specific module in STAR Suite.
 
+> **STAR Suite 1.9.4:** `--flex yes` assigns reads to probes from a half-probe (H1X2) hash cache and aligns nothing; no genome index is loaded. The cache is required; build it once per probe set with `--runMode hashCacheGenerate --hashCacheTiers H0,H1X2`. The alignment-based routes described in parts of this document (pseudo-chromosome alignment, the alignment-validated H0/H1 cache, BAM output with CB/UB tags, Y-chromosome splitting) are **legacy** and need `--flexLegacy yes`; use them only to reproduce results from an earlier release. Current speed and concordance numbers are in the top-level [README Benchmarks](../README.md#benchmarks).
+
 ## Overview
 
-STAR-Flex adds a **pseudo-chromosome alignment pipeline for 10x Genomics Flex** (Fixed RNA Profiling) samples using probes for transcript detection and RTL tags for multiplexing. A hybrid reference is generated with the regular genome and synthetic chromosomes for each probe. STAR's native alignment machinery quantifies probe alignment and uses genomic hits to confirm matches and detect off-probe noise. The rest of the workflow diverges from the standard STAR Solo workflow because RTL tags are on the same mate as the probe (not the cell barcode), so STAR's barcode/UMI correction and deduplication routines cannot be used. A fast inline path handles Flex-specific processing after alignment.
+STAR-Flex adds a **probe-cache pipeline for 10x Genomics Flex** (Fixed RNA Profiling) samples using probes for transcript detection and RTL tags for multiplexing. Each read is assigned to a probe from a precomputed half-probe (H1X2) cache. An exact 50-base match is resolved directly. Otherwise each 25-base half of the probe window is looked up in exact and single-mismatch tables, the other half is scored by fast Hamming distance, and the read is accepted when the whole probe has at most 10 mismatches. A read anchored by more than one probe, or otherwise ambiguous, is rejected. No read is aligned. The cache is built once from a Flex reference index (the genome plus one pseudo-chromosome per probe), and cache entries that could come from more than one probe are marked ambiguous when it is built. Aligning reads against that hybrid reference is the legacy route. The rest of the workflow diverges from the standard STAR Solo workflow because RTL tags are on the same mate as the probe (not the cell barcode), so STAR's barcode/UMI correction and deduplication routines cannot be used. A fast inline path handles Flex-specific processing.
 
 The Flex pipeline includes:
-- **Sample tag detection** during alignment identifies multiplexed sample barcodes
-- **Inline hash capture** stores CB/UMI/gene tuples directly in memory
+- **Sample tag detection** identifies multiplexed sample barcodes
+- **Inline hash capture** stores CB/UMI/gene tuples directly in memory, in cell-barcode buckets
 - **Cell Barcode (CB) correction** applies 1MM pseudocount-based correction (Cell Ranger compatible)
 - **UMI correction** uses clique-based 1MM deduplication
-- **Cell filtering** via OrdMag (simple EmptyDrops) or full EmptyDrops per sample
-- **Tag occupancy filtering** via Monte Carlo estimation of the expected distribution of samples per cell barcode
+- **Cell calling** with the tag-aware caller (`--soloFlexCellCaller tag-aware`, the default): OrdMag and EmptyDrops run once per sample, and tags given the same sample label are called together as one group. A Flex cell is its 16-base barcode together with its sample tag (CB16+TAG8)
+- **GEM occupancy filtering** after all samples are called: the number of distinct sample tags seen per 16-base barcode is fitted with a zero-truncated Poisson, and barcodes above the 0.999 quantile are removed
 - **MEX output** produces raw and per-sample filtered matrices
 
 When `--flex no` (default), STAR behavior is identical to upstream.
@@ -26,8 +28,8 @@ main suite `README.md` for full documentation and flags.
 - **Cutadapt-style trimming** (`--trimCutadapt Yes`): See [trimming docs](../core/features/vbem/docs/trimming.md).
 - **TranscriptVB quantification** (`--quantMode TranscriptVB`): VB/EM transcript-level quantification with Salmon parity.
 - **SLAM-seq** (`--slamQuantMode 1`): See [slam/docs/SLAM_seq.md](../slam/docs/SLAM_seq.md).
-- **Spill-to-disk BAM sorting** (`--outBAMsortMethod samtools`): Bounded-RAM coordinate sorting. Works with Flex.
-- **Y-chromosome BAM/FASTQ splitting** (`--emitNoYBAM yes`, `--emitYNoYFastq yes`): Split reads by chrY alignment. Developed for MorPHiC KOLF cell lines. Tested and validated with Flex in both sorted and unsorted modes (see `tests/TEST_REPORT_Y_SPLIT_FLEX.md`). See [Y-chromosome BAM split docs](../core/features/yremove_fastq/docs/Y_CHROMOSOME_BAM_SPLIT.md).
+- **Spill-to-disk BAM sorting** (`--outBAMsortMethod samtools`): Bounded-RAM coordinate sorting. Works with the legacy Flex alignment route (`--flexLegacy yes`); the default Flex route writes no BAM.
+- **Y-chromosome BAM/FASTQ splitting** (`--emitNoYBAM yes`, `--emitYNoYFastq yes`): Split reads by chrY alignment. Developed for MorPHiC KOLF cell lines. Tested and validated with Flex in both sorted and unsorted modes (see `tests/TEST_REPORT_Y_SPLIT_FLEX.md`); for Flex this needs alignment and therefore the legacy route (`--flexLegacy yes`). See [Y-chromosome BAM split docs](../core/features/yremove_fastq/docs/Y_CHROMOSOME_BAM_SPLIT.md).
 
 ## STAR-Flex Extras
 
@@ -47,31 +49,64 @@ For detailed technical documentation of the flex data flow and algorithms, see [
 
 ## Quick Start
 
+Build the half-probe cache once per probe set, from a Flex reference index (see [Building References](#building-references)):
+
 ```bash
-STAR \
-  --genomeDir /path/to/flex_reference \
-  --readFilesIn R2.fastq.gz R1.fastq.gz \
-  --readFilesCommand zcat \
-  --soloType CB_UMI_Simple \
+STAR --runMode hashCacheGenerate \
+  --runThreadN 16 \
+  --genomeDir /path/to/flex_index \
+  --soloType CB_UMI_Simple --soloCBstart 1 --soloCBlen 16 \
+  --soloUMIstart 17 --soloUMIlen 12 --soloBarcodeReadLength 0 \
   --soloCBwhitelist /path/to/737K-fixed-rna-profiling.txt \
-  --flex yes \
-  --soloFlexExpectedCellsPerTag 3000 \
-  --soloSampleWhitelist sample_whitelist.tsv \
+  --flex yes --soloFeatures Gene \
   --soloProbeList probe_list.txt \
+  --soloSampleWhitelist sample_whitelist.tsv \
   --soloSampleProbes probe-barcodes-fixed-rna-profiling-rna.txt \
   --soloSampleProbeOffset 68 \
-  --soloFlexOutputPrefix output/per_sample \
-  --soloMultiMappers Rescue \
-  --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
-  --soloUMIfiltering MultiGeneUMI_CR \
-  --soloUMIdedup 1MM_CR \
-  --soloFeatures Gene \
+  --hashCacheTiers H0,H1X2 \
+  --hashCacheOutput /path/to/flex_h01x2_sequence_cache.bin \
+  --outSAMtype None \
+  --outFileNamePrefix cache_run/
+```
+
+Cache generation is memory-hungry: for the human probe set it peaked at 74.5 GiB with 16 threads (see `docs/RELEASE_NOTES_v1.9.4.md`). The FH01SEQ1 `.bin` it writes is accepted directly; `flex/tools/hash_screen_replay/flex_hash_cache_pack --half` converts it to the compact `.half.khash` form (see [the cache format notes](../docs/FLEX_KHASH_CACHE.md)).
+
+Then run Flex. This is the command used for the STAR Suite 1.9.4 benchmarks (see `docs/PAPER_BENCHMARK_METHODOLOGY.md`, Section 1.6):
+
+```bash
+STAR \
+  --runThreadN 32 --flex yes --flexPipeline yes --flexNoAlign 1 \
+  --readFilesIn R2.fastq.gz R1.fastq.gz \
+  --soloType CB_UMI_Simple --soloCBstart 1 --soloUMIstart 17 --soloCBlen 16 --soloUMIlen 12 \
+  --soloBarcodeReadLength 0 --soloCBwhitelist /path/to/737K-fixed-rna-profiling.txt \
+  --soloSampleWhitelist sample_whitelist.tsv --soloFlexAllowedTags sample_whitelist.tsv \
+  --soloSampleProbes probe-barcodes-fixed-rna-profiling-rna.txt --soloSampleProbeOffset 68 \
+  --soloProbeList probe_list.txt \
+  --soloHashScreenFile /path/to/flex_h01x2_sequence_cache.bin \
+  --soloFeatures Gene --soloCellFilter None --soloMultiMappers Rescue \
+  --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR \
+  --soloStrand Unstranded --clipAdapterType CellRanger4 --alignEndsType Local --chimSegmentMin 0 \
+  --soloKeysCompat cr --soloBucketMode ram --soloBucketCount 256 \
+  --soloRunFlexFilter yes --soloFlexCellCaller tag-aware --soloCellFilterBootstrapThreads 32 \
+  --soloFlexEdFdrThreshold 0.01 --outSAMtype None --outSJtype None --dynamicThreadInterface 1 \
   --outFileNamePrefix output/
 ```
 
-### Example: Y-Chromosome BAM Split
+Choose the input reader to match the files:
 
-To split BAM output into Y and noY files:
+- Sequencer-delivered BGZF FASTQ: `--readFilesBgzfMode range --bgzfReaderThreads 32 --bgzfCrcCheck 1` (parallel in-process reader).
+- Plain single-stream gzip: `--readFilesBgzfMode off --readFilesCommand rapidgzip -d -c -P 8` (rapidgzip is an external program).
+- CBQ (experimental): `--readFilesType Binseq PE --readFilesCbqRangeMode range`.
+
+No genome index is loaded when the command is count-only: `--outSAMtype None`, `--outSJtype None`, `--chimSegmentMin 0`, `--soloFeatures Gene` and no other genome-backed output. Otherwise `Log.out` reports `Flex count-only no-genome: not active` with the reason, and STAR loads the index given by `--genomeDir`.
+
+`--soloBucketMode ram` keeps the cell-barcode buckets in memory; the default `auto` switches to spill files once `--soloBucketMemGB` (32 GiB) is crossed. With buckets in memory, peak memory in the 1.9.4 benchmarks was 23 GiB on JAX SC2300771 and 72 GiB on the 10x 320k scFFPE dataset. EmptyDrops draws are split across bootstrap streams, so keep `--soloCellFilterBootstrapThreads` fixed to reproduce a call set exactly. Legacy expected-cell options such as `--soloFlexExpectedCellsPerTag` are rejected by the tag-aware caller.
+
+The sample whitelist has one `label<TAB>TAG8` line per tag. The cell caller takes its sample labels from the `--soloFlexAllowedTags` file (the same format), so tags pooled into one sample are given the same label and are called together as one group; for example, the 10x 320k scFFPE benchmark pooled its 16 tags in pairs into 8 samples.
+
+### Example: Y-Chromosome BAM Split (legacy route)
+
+Flex BAM output needs genomic alignment, so it runs only on the legacy route (`--flexLegacy yes`) with a Flex reference index. To split BAM output into Y and noY files:
 
 ```bash
 STAR \
@@ -81,7 +116,7 @@ STAR \
   --soloType CB_UMI_Simple \
   --soloCBwhitelist /path/to/737K-fixed-rna-profiling.txt \
   --flex yes \
-  --soloFlexExpectedCellsPerTag 3000 \
+  --flexLegacy yes \
   --soloSampleWhitelist sample_whitelist.tsv \
   --soloProbeList probe_list.txt \
   --soloSampleProbes probe-barcodes-fixed-rna-profiling-rna.txt \
@@ -149,16 +184,17 @@ STAR \
   --outFileNamePrefix output/
 ```
 
-**Note**: The Y/noY split is a general-purpose core feature developed for **MorPHiC requirements for KOLF cell lines**. It works with all modes: Flex, single-cell, and bulk RNA-seq. Validated with Flex in both sorted and unsorted modes (see `tests/TEST_REPORT_Y_SPLIT_FLEX.md`). In single-cell mode, R1/R2 are not traditional paired-end mates, so routing is based on each read's own alignments. In bulk paired-end mode, if either mate has a Y-chromosome alignment, both mates route to `_Y.bam`.
+**Note**: The Y/noY split is a general-purpose core feature developed for **MorPHiC requirements for KOLF cell lines**. It works with all modes: Flex (legacy alignment route only), single-cell, and bulk RNA-seq. Validated with Flex in both sorted and unsorted modes (see `tests/TEST_REPORT_Y_SPLIT_FLEX.md`). In single-cell mode, R1/R2 are not traditional paired-end mates, so routing is based on each read's own alignments. In bulk paired-end mode, if either mate has a Y-chromosome alignment, both mates route to `_Y.bam`.
 
 ## Required Inputs
 
 | Input | Description |
 |-------|-------------|
-| Flex reference genome | Hybrid genome with probe pseudo-chromosomes (see [Building References](#building-references)) |
+| Half-probe cache | H0,H1X2 probe cache passed with `--soloHashScreenFile` (see [Quick Start](#quick-start)); required by `--flex yes` |
+| Flex reference index | Hybrid genome with probe pseudo-chromosomes (see [Building References](#building-references)); needed once to build the cache, and at run time only for the legacy alignment route |
 | CB whitelist | 10x barcode whitelist (e.g., `737K-fixed-rna-profiling.txt`) |
-| Sample whitelist | TSV mapping sample tag sequences to labels |
-| Probe list | Gene list from probe set |
+| Sample whitelist | TSV with one `label<TAB>TAG8` line per sample tag |
+| Probe list | Gene list from probe set; must be the list the cache was built with |
 | Sample probe barcodes | 10x probe barcode sequences file |
 
 ## Parameters
@@ -167,9 +203,13 @@ STAR \
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--flex` | `no` | Enable flex pipeline (`yes`/`no`) |
+| `--flex` | `no` | Enable flex pipeline (`yes`/`no`). `yes` selects the half-probe route: `--flexNoAlign 1`, fully fused pipeline, `--outSAMtype None` unless set explicitly |
+| `--soloHashScreenFile` | - | Half-probe (H1X2) cache. If omitted, STAR uses `STAR_FLEX_HASH_SCREEN_CACHE`, then looks next to the probe list for `flex_h01x2_cache.half.khash` and then `flex_h01x2_sequence_cache.bin` |
+| `--flexLegacy` | `no` | `yes` permits the legacy routes (H0/H1 cache without H1X2, aligning cache misses, `--no-hash-screen yes`, SAM/BAM output, spatial Flex), kept only to reproduce earlier releases |
 
 ### Y-Chromosome BAM Split
+
+For Flex these need alignment and therefore `--flexLegacy yes`.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -203,19 +243,22 @@ lookup order and ambiguity rules.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--soloFlexExpectedCellsPerTag` | 0 | Expected cells per sample tag |
-| `--soloFlexExpectedCellsTotal` | 0 | Total expected cells (alternative to per-tag) |
-| `--soloFlexAllowedTags` | - | Optional: restrict to specific sample tags |
+| `--soloRunFlexFilter` | `no` | Run cell calling after the raw MEX is written; `--flex yes` sets `yes` unless given explicitly |
+| `--soloFlexCellCaller` | `tag-aware` | `tag-aware`: one OrdMag + EmptyDrops model per sample label (pooled tags together), full CB16+TAG8 identities, joint occupancy fit. `legacy`: the earlier per-tag EmptyDrops + partition-occupancy caller |
+| `--soloFlexAllowedTags` | - | Optional `label<TAB>TAG8` (or TAG8-only) file; restricts calling to these tags and supplies the sample labels used for grouping |
 | `--soloFlexOutputPrefix` | - | Output prefix for per-sample MEX |
+| `--soloCellFilterBootstrapThreads` | 0 | Bootstrap streams (0 = `--runThreadN`); the call set depends on this value |
+| `--soloFlexFilteredGeneList` | - | Optional gene-ID allowlist for the per-sample filtered MEX; does not restrict calling |
+| `--soloFlexExpectedCellsPerTag` | 0 | Legacy caller only: expected cells per sample tag (rejected by `tag-aware`) |
+| `--soloFlexExpectedCellsTotal` | 0 | Legacy caller only: total expected cells (rejected by `tag-aware`) |
 
 ### EmptyDrops Parameters (Advanced)
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--soloFlexEdNiters` | 10000 | Monte Carlo simulation iterations |
-| `--soloFlexEdFdrThreshold` | 0 (disabled) | FDR threshold for cell calling; if set (>0), FDR gate is used |
-| `--soloFlexEdPvalueThreshold` | 0.05 | Raw p-value threshold when FDR gate is disabled (default behavior) |
-| `--soloFlexEdLower` | 100 | Lower UMI bound for ambient profile |
+| `--soloFlexEdNiters` | 0 | Monte Carlo simulation iterations; 0 = 100,000 for `tag-aware`, 10,000 for `legacy` |
+| `--soloFlexEdFdrThreshold` | 0 | FDR threshold for cell calling; 0 = 0.01 for `tag-aware`, 0.001 for `legacy` |
+| `--soloFlexEdLower` | 0 | Legacy caller only: start of the ambient rank window (0 = 45,000). The tag-aware caller uses a fixed window of ranks 45,000-90,000 per tag and rejects this option |
 
 ## Output Structure
 
@@ -229,11 +272,13 @@ output/
 │   ├── SampleA/Gene/filtered/
 │   ├── SampleB/Gene/filtered/
 │   └── flexfilter_summary.tsv   # Cell calling statistics
-├── Aligned.sortedByCoord.out_Y.bam      # Y-chromosome reads (if --emitNoYBAM yes)
-└── Aligned.sortedByCoord.out_noY.bam    # Non-Y reads (if --emitNoYBAM yes)
+├── Aligned.sortedByCoord.out_Y.bam      # Y-chromosome reads (legacy route, if --emitNoYBAM yes)
+└── Aligned.sortedByCoord.out_noY.bam    # Non-Y reads (legacy route, if --emitNoYBAM yes)
 ```
 
-When `--emitNoYBAM yes` is enabled:
+With the tag-aware caller, barcodes in the per-sample filtered MEX keep the full CB16+TAG8 identity, so cells from tags pooled into one sample stay distinct.
+
+When `--emitNoYBAM yes` is enabled (legacy route):
 - `_Y.bam`: Contains all reads where any alignment (primary, secondary, or supplementary) touches a Y-chromosome contig
 - `_noY.bam`: Contains all reads with no Y-chromosome alignments
 - Primary BAM (`Aligned.sortedByCoord.out.bam` or `Aligned.out.bam`) is suppressed by default unless `--keepBAM yes` is specified
@@ -241,7 +286,7 @@ When `--emitNoYBAM yes` is enabled:
 
 ## Building References
 
-The flex pipeline requires a hybrid reference genome that includes pseudo-chromosomes for probe sequences. We benchmarked hash-based gene assignment techniques as an alternative, which were faster but resulted in 15–20% sensitivity loss and required blacklisting and downstream QC to achieve parity with Cell Ranger. The pseudo-chromosome approach avoids these trade-offs by leveraging STAR's native alignment machinery.
+The half-probe cache is built from a hybrid reference index that includes a pseudo-chromosome for each probe: `--runMode hashCacheGenerate` reads the probe sequences from it (see [Quick Start](#quick-start)). A default `--flex yes` run does not load the index. Aligning reads to the hybrid reference is the legacy route (`--flexLegacy yes`).
 
 Scripts are provided in `scripts/` to build these references:
 
@@ -318,12 +363,13 @@ The legacy `build_filtered_reference.sh` and `make_filtered_star_index.sh` scrip
 
 ### Using the Flex Index
 
-After building, use the index with the probe gene list:
+After building, use the index with the probe gene list to generate the half-probe cache (see [Quick Start](#quick-start)), or to run a legacy alignment route:
 
 ```bash
 STAR \
   --genomeDir /path/to/flex_index \
   --flex yes \
+  --flexLegacy yes \
   ... # other flex parameters
   # --soloProbeList is auto-detected from probe_gene_list.txt in the index directory
 ```
@@ -422,6 +468,8 @@ This runs:
 ## Standalone FlexFilter Tool
 
 A standalone tool `run_flexfilter_mex` is available for offline MEX processing. This allows re-running the OrdMag/EmptyDrops cell calling pipeline on existing composite MEX files without re-running STAR alignment.
+
+The tool runs the **legacy** per-tag caller (expected-cell allocation, per-tag EmptyDrops, partition-occupancy filter) and by default strips output barcodes to 16 bases. It does not reproduce the tag-aware caller that `--flex yes` uses by default in STAR Suite 1.9.4; to reproduce STAR's calls, run STAR itself.
 
 **Use cases:**
 - Parameter tuning (adjust expected cells, EmptyDrops thresholds)

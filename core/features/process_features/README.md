@@ -18,6 +18,7 @@ This module is part of STAR-suite and uses khash for all hash table operations (
 `assignBarcodes` is a fast, parallelized utility designed for targeted sequencing analysis in single-cell experiments. It efficiently assigns feature barcodes from FASTQ files to a known set of sequence barcodes.
 
 Key features include:
+- **Tiered Hash Lookup:** When all features have the same length, reads are matched against prebuilt exact, 1-mismatch and 2-mismatch hash tables. The exhaustive search below is the fallback for reads the tables cannot serve (see [Search methodology](#search-methodology)).
 - **Exhaustive Search:** Unlike other tools, `assignBarcodes` can perform an exhaustive search, enabling it to identify feature barcodes in both ATAC-seq and RNA-seq data, significantly increasing coverage in targeted sequencing.
 - **Advanced Error Correction:** Implements customizable error correction for sequence barcodes, handling substitutions and indels, inspired by methodologies used in tools like CellRanger.
 - **Fuzzy Matching:** Provides fuzzy matching capabilities for feature sequences to account for sequencing errors.
@@ -68,6 +69,12 @@ The tool can accept input FASTQ files in two ways:
 | `--barcode_fastq_pattern` | `[string]` | Pattern to identify barcode FASTQ files in directories. | `_R1_` |
 | `--forward_fastq_pattern` | `[string]` | Pattern to identify forward read FASTQ files. | `_R2_` |
 | `--reverse_fastq_pattern` | `[string]` | Pattern to identify reverse read FASTQ files. | `_R3_` |
+
+When a FASTQ directory is supplied, read-pattern matches are resolved as mate
+sets rather than as independent filename substrings. If a name contains more
+than one `_R1_` token, each position is tested by replacing that occurrence
+with the configured R2/R3 patterns. The unique position that produces existing
+mates is used. Multiple mate-producing positions are rejected as ambiguous.
 | `-k`, `--keep_existing` | | If output files exist, skip processing for that sample. | `false` |
 
 ### Barcode & Feature Processing
@@ -81,6 +88,9 @@ The tool can accept input FASTQ files in two ways:
 | `--limit_search` | `[int]` | **Hard bound**: restrict feature search to `N` bases around `feature_constant_offset`. No global fallback outside the window is performed. Set to `-1` to search the entire read. | `-1` |
 | `--feature_limited_mode` | `in_window_full` or `in_window_simple` | In-window matcher when `--limit_search >= 0`. Both modes are strictly confined to the search window; no out-of-window rescue occurs. | `in_window_full` |
 | `--feature_limited_fallback` | `full` or `simple` | **Deprecated** alias for `--feature_limited_mode`. Accepts `full`/`simple` (equivalent to `in_window_full`/`in_window_simple`). Emits a deprecation warning. | |
+| `--feature_prehash_max_hamming` | `[int]` | Deepest feature hash table to build (0 = none, 1 = exact + 1-mismatch, 2 = exact + 1- and 2-mismatch). See [Tiered hash lookup](#tiered-hash-lookup). | `2` |
+| `--feature_prehash_max_entries` | `[int]` | Entry budget; a mismatch table whose estimated size exceeds it is not built. | `50000000` |
+| `--feature_prehash_memory_budget` | `[bytes]` | Memory budget for the hash tables (`0` = auto-detect). | `0` |
 | `--force_individual_offsets` | | Use per-feature offsets from pattern column (slower for large feature sets). | `false` |
 | `-r`, `--reverse_complement_whitelist` | | Reverse complement the whitelist barcodes before use. | `false` |
 | `-a`, `--as_named` | | Treat all input files as part of a single sample. | `false` |
@@ -256,15 +266,20 @@ This flag does **not** change feature matching, Hamming distance scoring, or ass
 
 **STAR integration**: Use `--crAssignAllowUnionWhitelist 1` in the STAR parameter file to enable this mode through the STAR pipeline.
 
+#### Tiered hash lookup
+When every feature in the reference has the same length, `assignBarcodes` builds hash tables when it loads the feature list: the exact feature sequences, every sequence within 1 mismatch of a feature, and every sequence within 2 mismatches. `--feature_prehash_max_hamming` (default 2) sets the deepest table, and a mismatch table is not built if its estimated size exceeds `--feature_prehash_max_entries` or `--feature_prehash_memory_budget`. A table entry that is equally close to two different features is marked ambiguous when the table is built, and a read that hits it is left unassigned rather than given to either feature.
+
+At each candidate position a read is looked up in the exact table, then in the 1-mismatch table, then in the 2-mismatch table, up to the mismatch ceiling (`-m`). When the table for the ceiling has been built, a miss there is final for that position and no Hamming scan is run. A ceiling of 1 is therefore served by the 1-mismatch table; the LARRY library (245,979 barcodes) in the MSK 30-KO Perturb-seq benchmark ran this way (`star_max_hamming` 1).
+
 #### Exhaustive search
-The exhaustive search checks the entire read against all the feature barcodes at all possible starting positions in the read. For ATAC-seq the search is done in both orientations. We use a novel method that converts the query and match sequences to bitcodes. We uses bitwise ops and a lookup table for hamming distance evaluation of 4 basepairs chunks with a bitops and lookup and can be vectorized by the compiler for even greater speedup. Additionally, the search is broken down into four independent subsearches which are performed in parallel for a 16x speedup over the simple Hamming search.
+The exhaustive search (fast-Hamming) is the fallback behind the hash tables. It is used when the mismatch ceiling is above 2, when the tables were not built (for example, features of different lengths), and, with `--limit_search -1`, to look through the rest of the read when no feature is found near the expected offset. The exhaustive search checks the entire read against all the feature barcodes at all possible starting positions in the read. For ATAC-seq the search is done in both orientations. We use a novel method that converts the query and match sequences to bitcodes. We uses bitwise ops and a lookup table for hamming distance evaluation of 4 basepairs chunks with a bitops and lookup and can be vectorized by the compiler for even greater speedup. Additionally, the search is broken down into four independent subsearches which are performed in parallel for a 16x speedup over the simple Hamming search.
 
 ## Error correction
 ### Sequence barcodes
 The error correction handles Ns (unknown base pairs) and sequencing errors. To take into account sequencing errors, a barcode can be at most 1 base pair different from a single valid barcode and then it will be assigned to that barcode. If there are multiple barcodes, then we look at the quality scores and the number of barcodes variants observed and find the most likely match for the barcode based on the posterior probability. This is described in the Cell Ranger documentation.
 To handle N's the user specifies a maximum number of Ns (`--barcode_n`) that are tolerated. All the possible base pairs are substituted for an N and then compared to see if a unique barcode is found.
 ### Feature barcodes
-To handle sequencing errors, the user specifies a maximum Hamming distance (`-m`). If a sequence matches a feature barcode within the Hamming distance and uniquely to a sequence with a minimum distance then it is assigned to that feature barcode. For N's up to a maximum specified by the user (`--feature_n`), all possible variations are generated for the N's and checked against the possible sequences. If there is a unique best match (minimum Hamming distance) that is less than or equal to the maximum Hamming distance (inclusive) then it is assigned to that feature barcode. Assignments are tentative, pending the completion of the comprehensive search (unless there is an exact match). If there is no exact match, the comprehensive search attempts to find a better match.
+To handle sequencing errors, the user specifies a maximum Hamming distance (`-m`). If a sequence matches a feature barcode within the Hamming distance and uniquely to a sequence with a minimum distance then it is assigned to that feature barcode. For N's up to a maximum specified by the user (`--feature_n`), all possible variations are generated for the N's and checked against the possible sequences. If there is a unique best match (minimum Hamming distance) that is less than or equal to the maximum Hamming distance (inclusive) then it is assigned to that feature barcode. When the hash tables are in use, a unique hit at the expected position is final and a hit on an ambiguous table entry leaves the read unassigned. Otherwise assignments are tentative, pending the completion of the comprehensive search (unless there is an exact match). If there is no exact match, the comprehensive search attempts to find a better match.
 
 ## Feature Assignment (Simplified)
 
@@ -292,7 +307,7 @@ There are two main levels of parallelization used in `assignBarcodes`:
 1.  **Process-Level Parallelism**: For handling multiple samples, `assignBarcodes` can fork a separate process for each sample. The maximum number of concurrent processes is controlled by `-t`. This is highly efficient for processing large datasets with many samples.
 2.  **Thread-Level Parallelism**: Within each sample's process, a multi-threaded producer-consumer model is used.
     -   **Producer-Consumer Model**: One thread reads the FASTQ files (barcode, forward, and reverse reads) and populates a buffer. Multiple consumer threads pull data from this buffer to perform barcode processing and feature assignment.
-    -   **Parallel Hamming Search**: The exhaustive search for feature sequences is parallelized using OpenMP. The search is broken down into four independent sub-searches that are executed concurrently. The number of threads for this search can be controlled with `-S`.
+    -   **Parallel Hamming Search**: The exhaustive search for feature sequences (the fallback behind the hash tables) is parallelized using OpenMP. The search is broken down into four independent sub-searches that are executed concurrently. The number of threads for this search can be controlled with `-S`.
 
 The number of consumer threads is managed with the `-c` flag. This two-level parallel architecture ensures high performance by maximizing CPU utilization across multiple cores and machines.
 
@@ -696,7 +711,7 @@ The command above scans `<FASTQ_DIR>` for matching R1/R2/R3 files (or accepts ex
 1. **K-mer extraction** – For every read the probe 8-mer is sliced out (offset controlled by `--probe_offset`).  Non-ACGT bases abort the lookup.
 2. **Direct vs hash lookup** – Implemented in `barcode_match.c::feature_lookup_kmer()`.
    * *Direct 64-bit path* – On machines with unaligned-load tolerance the 8 bases are copied into a `uint64_t`, looked up in a lazily-built parallel array of pre-converted probe 8-mers (`uint64_t[]`).  O( #variants ) linear search; fast because the array ≤128 elements and the compare is one CPU instruction.
-   * *Hash path* – Falls back to a GLib `GHashTable` keyed by a `GBytes` wrapper around the packed 2-bit encoding.  Constant-time for large variant sets.
+   * *Hash path* – Falls back to a khash table keyed by the packed 2-bit encoding of the sequence (64- or 128-bit key, `feature_lookup_seq()`).  Constant-time for large variant sets.
 3. **Producer/consumer I/O** –
    * *Producer* thread streams R1/R2/R3 with `zlib` (`gzgets`) and writes **full read blocks** (all 4 FASTQ lines × present reads) into a ring buffer.
    * Multiple *consumer* threads pull blocks, perform probe lookup, resolve the sample, and write to gzipped sinks.
@@ -835,7 +850,7 @@ Each record packs `status_bits + cb_bits + umi_bits` bits, aligned to the next b
 1. **Tag extraction** – pull `CB`, `UB`, and preferred `gene_tag` (fallback `GE`). In CBUB mode the CB/UB values come from the binary stream; otherwise they are read from BAM aux tags. Skip read if any tag missing; optionally skip when `GX == '-'` unless `--count_intergene` is set.
 2. **Filtering** – primary-alignment filter (unless `--no_primary_filter`), duplicate filter via `BAM_FDUP` (unless `--keep_dup`), MAPQ filter (`--min_mapq`)
 3. **Probe lookup** – slice 8-mer at `--probe_offset`; if not found and `--search_nearby` is enabled, retry offsets ±1 / ±2 until located or exhausted.
-4. **Counting** – For every accepted read: convert probe index to 0-based `p` (0 = no match), maintain a `GHashTable<cb_id → uint32_t[n_probes]>`, increment `arr[p-1]` (only if `p>0`).
+4. **Counting** – For every accepted read: convert probe index to 0-based `p` (0 = no match), maintain a khash table `cb_id → uint16_t[n_probes]`, increment `arr[p-1]` (only if `p>0`).
 5. **Output** – Write `features.tsv`, `barcodes.tsv` (alphabetical CB order), `matrix.mtx` (coordinate format, integer field), and summary stats.
 
 This design removes the heavy `(CB,UB,Gene)` dedup hash, relies on the BAM duplicate flag plus `primary_only` for deduplication, cuts memory to O(#active_CB × #probes × 4 bytes), and eliminates ambiguous CB handling. 

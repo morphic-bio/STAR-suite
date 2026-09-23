@@ -85,7 +85,8 @@ common_star_args() {
     echo "--soloCellFilter None"
     echo "--clipAdapterType CellRanger4"
     echo "--soloFeatures Gene"
-    echo "--soloStrand Unstranded"
+    # 10x 5' R2-only library (A375, SC5P-R2): read 2 is antisense to the transcript.
+    echo "--soloStrand Reverse"
     echo "--alignEndsType Local"
     echo "--chimSegmentMin 1000000"
     echo "--outSAMattributes NH HI AS nM NM GX GN CB UB"

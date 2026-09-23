@@ -1,5 +1,12 @@
 # A375 CB-Rescue Parity (1k Read Pair) Handoff
 
+> **Note:** This is a record of an earlier standalone `process_features`
+> experiment and predates STAR Suite 1.9.4; its paths, defaults and numbers are
+> not current. The A375 paper arm now runs the integrated STAR path with
+> `--soloStrand Reverse` (10x 5' R2-only library). For current results see the
+> README section [Benchmarks](../README.md#benchmarks) and
+> [PAPER_BENCHMARK_METHODOLOGY.md](PAPER_BENCHMARK_METHODOLOGY.md) Section 1.
+
 This captures the **correct comparison method** for Cell Ranger vs `process_features` on the **1k-read L001 pair** and documents the key details that were previously missed.
 
 ## Correct comparison setup (apples-to-apples)
