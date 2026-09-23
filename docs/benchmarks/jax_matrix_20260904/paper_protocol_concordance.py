@@ -15,9 +15,10 @@ from pathlib import Path
 
 ap = argparse.ArgumentParser(); ap.add_argument("output_root", type=Path); ap.add_argument("label")
 ap.add_argument("--input-kind", choices=("star", "cyto"), default="star"); ap.add_argument("--cr-root", type=Path, default=cc.DEFAULT_CRROOT)
+ap.add_argument("--cr-config", type=Path, help="Cell Ranger multi CSV ([samples] section) for the sample -> probe-barcode groups"); ap.add_argument("--tag-map", type=Path, default=cc.DEFAULT_TAG_MAP)
 a = ap.parse_args()
-tag_map = cc.read_tag_map(cc.DEFAULT_TAG_MAP)
-groups = cc.DEFAULT_GROUPS
+tag_map = cc.read_tag_map(a.tag_map)
+groups = cc.read_groups(a.cr_config)
 first_cr = a.cr_root / groups[0][0] / "count" / "sample_filtered_feature_bc_matrix"
 with cc.open_maybe_gz(first_cr, "features.tsv") as h: cr_rows = [l.rstrip("\n").split("\t") for l in h]
 sc = Counter(r[1] for r in cr_rows if len(r) > 1); sym2id = {r[1]: r[0] for r in cr_rows if len(r) > 1 and sc[r[1]] == 1}

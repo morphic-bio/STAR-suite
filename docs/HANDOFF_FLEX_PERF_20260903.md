@@ -20,11 +20,19 @@ Same box, same 8 CBQ lanes, same NVMe, cold page cache, 32 threads, hash-only
 | STAR-Flex, plus parallel sumThreads | 4:16.50 | 150 s | 86 s | — |
 | STAR-Flex, plus shared ambiguous store | 4:05.11 | 150 s | 89 s | 2002% |
 | STAR-Flex, plus inlined accessors (pushed) | 3:59.94 | 150 s | 70 s | 2114% |
-| STAR-Flex, plus parallel fan-in (uncommitted) | 3:58.40 | 150 s | 68 s | — |
-| STAR-Flex, target | < 3:46 | | | |
+| STAR-Flex, plus parallel fan-in | 3:58.40 | 150 s | 68 s | — |
+| STAR-Flex, plus ambiguous-resolution fix (6236138) | — | — | — | outputs change, see below |
+| STAR-Flex, plus sorted runs + k-way merge (a27f627) | — | — | — | |
+| **STAR-Flex v1.8.2, plus async merge** | **3:38.28** | | | lower memory too |
+| cyto 0.4.6, for comparison | 3:46.76 | | | |
 
-The gap to cyto went from 1.72x to 1.13x. Every change so far produced
-**byte-identical** per-sample matrices, barcodes and features.
+**STAR-Flex is now faster than cyto and more accurate than it** (per-cell
+Pearson 1.000000 against 0.9962; see the concordance table below). The gap went
+from 1.72x behind to 1.04x ahead.
+
+Every change up to and including the fan-in produced **byte-identical** output.
+The ambiguous-resolution fix deliberately changed output for the better, so the
+identity baseline rebases there — see item 1.
 
 ## Read this before touching anything
 
@@ -197,7 +205,50 @@ reading them as wall-clock shares cost me four wrong diagnoses in a row.
 | Fan-in | 0.85 s | was ~2 s |
 | Post-fan-in setup (triplet loop etc.) | 0.38 s | |
 
-### 1. `resolvePendingAmbiguousToHash` — 17.2 s, and it resolves nothing
+### 1. RESOLVED — it was the correctness bug, not dead work
+
+**Fixed in 6236138.** Of the two possibilities below, the second was true: the
+pass was silently resolving nothing it should have been resolving.
+
+| | Before | After |
+|---|---|---|
+| Ambiguous barcodes resolved | 0 of 2,627,928 | 2,075,927 |
+| Observations recovered into the hash | 0 | 30,443,502 |
+| Time | 17.2 s | 5.24 s |
+
+So 30.4 M observations were being discarded, and recovering them **improved
+accuracy against Cell Ranger** while the pass got three times faster. This is
+the strongest argument in the document for timing a phase before optimising it:
+a "performance" investigation surfaced a data-loss bug that no benchmark, and
+no byte-identity check against the old output, could have caught — the old
+output was self-consistently wrong.
+
+Subsequent work (a27f627, 563bd05, v1.8.2) added producer-sorted runs with a
+k-way merge and async background merging, and extended the shared ambiguous
+store to the fused *alignment* path. Wall on the JAX benchmark: **3:38.28**,
+against cyto at 3:46.76.
+
+**Byte-identity discipline has rebased.** Every optimisation before 6236138 was
+verified against a fixed output manifest. That manifest is now the old, wrong
+answer. Compare against a post-fix baseline; do not resurrect an older one.
+
+### Concordance with Cell Ranger 9.0.1 (JAX, CBQ, both tools SSD-sourced)
+
+Same script logic, same reference, same runs. `docs/benchmarks/jax_matrix_20260904/concordance_vs_cr.py`.
+
+| | STAR-Flex v1.8.2 | cyto |
+|---|---|---|
+| Cell-calling Jaccard (median) | 0.9849 | 0.985 |
+| Per-cell Pearson (median) | **1.000000** | 0.9962 |
+| Per-cell Spearman (median) | **1.000000** | 0.9950 |
+| Gene-level Pearson | 0.999912 | **0.99998** |
+
+Cell calling is a dead heat. STAR-Flex reproduces Cell Ranger's per-cell profile
+exactly (1.000000 to six decimals, all four samples). cyto is marginally ahead
+on gene-level Pearson; both round to 1.0, and that column should not be claimed
+either way.
+
+### Historical: why item 1 above was flagged — `resolvePendingAmbiguousToHash`
 
 The single largest item left, and it sat untimed between two log timestamps all
 session. The log line it prints is the striking part:
