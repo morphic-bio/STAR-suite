@@ -1820,3 +1820,6 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
   Engine source worktrees: `/mnt/pikachu/STAR-suite-atac-sampling-20260916` and
   `/mnt/pikachu/Chromap-suite-atac-sampling-20260916`. Original 1.9.4 binaries
   and campaign outputs remain unchanged.
+
+- `tests/test_ambient_fdr_feature_type.sh` creates and removes
+  `/tmp/celltag_ambient_test.*`, testing CellTag selection alongside real guides.
