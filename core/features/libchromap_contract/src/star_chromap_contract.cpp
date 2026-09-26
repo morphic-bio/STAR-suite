@@ -298,6 +298,7 @@ chromap::MappingParameters toChromapParameters(
     parameters.barcode_file_paths = trimPaths(config.barcode_fastqs);
   }
   parameters.barcode_whitelist_file_path = trimCopy(config.barcode_whitelist);
+  parameters.barcode_sample_limit = config.barcode_sample_limit;
   if (!isUnsetToken(config.barcode_translate_table)) {
     parameters.barcode_translate_table_file_path =
         trimCopy(config.barcode_translate_table);

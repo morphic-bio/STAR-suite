@@ -1815,3 +1815,8 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
   and removes them on exit. No biological data required.
 - Local build, regression and composition validation logs live under
   `/mnt/pikachu/dogmaplex_gse309834/`, outside git.
+- ATAC barcode sampling repair (2026-09-16): isolated build, small tests and
+  full CATATAC/DOGMA reruns under `/mnt/pikachu/multiomics_bench_atac_sampling_20260916`.
+  Engine source worktrees: `/mnt/pikachu/STAR-suite-atac-sampling-20260916` and
+  `/mnt/pikachu/Chromap-suite-atac-sampling-20260916`. Original 1.9.4 binaries
+  and campaign outputs remain unchanged.

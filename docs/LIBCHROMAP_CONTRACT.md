@@ -330,3 +330,19 @@ Concurrent BAM smoke from a clean Chromap-enabled build (100K multiome fixture):
 - GEX record MD5: `9d6bd9242cd27c64978619de550d8edb`
 - Log ordering confirms Chromap starts before STAR mapping and STAR waits for it
   before final success.
+
+## ATAC barcode-frequency learning
+
+`--chromapAtacBarcodeSampleLimit N` sets the ordinary Chromap barcode-learning
+budget (default `20000000` exact whitelist observations). Learning finishes the
+current batch, so the actual total can exceed N by one batch. This reproduces
+the historical stopping rule and does not limit mapped reads. Set `0` to scan
+all barcode inputs, reproducing the full-histogram behavior of the initial
+1.9.4 composition. The library field is `ChromapAtacConfig::barcode_sample_limit`;
+the standalone contract runner accepts `--barcode-sample-limit N`. Rebuild
+Chromap and all contract consumers together after this header change.
+
+The small regression test in Chromap Suite, `tests/test_barcode_sampling.py`,
+accepts `--contract-runner` to verify the STAR adapter with the same two-lane
+fixture. It tests both the learning cutoff and a prior-dependent ambiguous
+barcode correction while requiring that all reads still map.

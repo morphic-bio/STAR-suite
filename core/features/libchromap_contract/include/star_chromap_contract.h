@@ -71,6 +71,9 @@ struct ChromapAtacConfig {
   std::vector<std::string> read_pair_cbqs;
   std::vector<std::string> barcode_cbqs;
   std::string barcode_whitelist;
+  // Exact whitelist observations for learning; 0 scans all, positive limits
+  // finish the current batch. Does not limit mapped reads.
+  uint64_t barcode_sample_limit = 20000000;
   std::string barcode_translate_table;
   // If true, the barcode translate table is read in natural <from_bc>\t<to_bc>
   // order (col1 = source / hash key). Default false preserves the historical
