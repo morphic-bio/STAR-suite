@@ -64,10 +64,13 @@ struct PfPreparedFeatureLibrary {
     string starHashDemux;
     string starHashFeatureSelector;
     string starHashDemuxMethod;
+    string starHashSampleTable;
+    double starHashMinPairRatio = 2.0;
     int starHashMinTotal = -1;
     int starHashMinTop = -1;
     double starHashMinRatio = -1.0;
     string featureCaller;
+    double featureCallFdr = 0.01;
     int featureCallMinUmi = 1;
     double featureCallMinRatio = 1.0;
     string starInputFormat;
@@ -182,11 +185,14 @@ struct PfMultiFeatureRun {
     string starInputFormat;
     string hashFeatureSelector;
     string hashDemuxMethod;
+    string hashSampleTable;
+    double hashMinPairRatio = 2.0;
     int hashDemuxMode = -1;
     int hashMinTotal = 3;
     int hashMinTop = 3;
     double hashMinRatio = 2.0;
     string featureCaller;
+    double featureCallFdr = 0.01;
     int featureCallMinUmi = 1;
     double featureCallMinRatio = 1.0;
     int nHashFeatures = 0;
@@ -302,6 +308,8 @@ static void applyPreparedHashDemuxOptions(const PfPreparedFeatureLibrary& prepar
         }
         runAssignOpts.hashDemuxMode = parseHashDemuxModeToken(preparedLib.starHashDemux);
     }
+    runAssignOpts.hashSampleTable = preparedLib.starHashSampleTable;
+    runAssignOpts.hashMinPairRatio = preparedLib.starHashMinPairRatio;
     runAssignOpts.hashFeatureSelector = preparedLib.starHashFeatureSelector;
     if (!preparedLib.starHashDemuxMethod.empty()) {
         runAssignOpts.hashDemuxMethod = preparedLib.starHashDemuxMethod;
@@ -1534,10 +1542,13 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
             prepared.starHashDemux = lib.starHashDemux;
             prepared.starHashFeatureSelector = lib.starHashFeatureSelector;
             prepared.starHashDemuxMethod = lib.starHashDemuxMethod;
+            prepared.starHashSampleTable = lib.starHashSampleTable;
+            prepared.starHashMinPairRatio = lib.starHashMinPairRatio;
             prepared.starHashMinTotal = lib.starHashMinTotal;
             prepared.starHashMinTop = lib.starHashMinTop;
             prepared.starHashMinRatio = lib.starHashMinRatio;
             prepared.featureCaller = lib.starFeatureCaller;
+            prepared.featureCallFdr = lib.starFeatureCallFdr;
             prepared.featureCallMinUmi = lib.starFeatureCallMinUmi < 0
                 ? 1 : lib.starFeatureCallMinUmi;
             prepared.featureCallMinRatio = lib.starFeatureCallMinRatio < 0.0
@@ -3348,7 +3359,10 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             run.hashMinTotal = runAssignOpts.hashMinTotal;
             run.hashMinTop = runAssignOpts.hashMinTop;
             run.hashMinRatio = runAssignOpts.hashMinRatio;
+            run.hashSampleTable = runAssignOpts.hashSampleTable;
+            run.hashMinPairRatio = runAssignOpts.hashMinPairRatio;
             run.featureCaller = preparedLib.featureCaller;
+            run.featureCallFdr = preparedLib.featureCallFdr;
             run.featureCallMinUmi = preparedLib.featureCallMinUmi;
             run.featureCallMinRatio = preparedLib.featureCallMinRatio;
             if (tableBacked) {
@@ -3490,13 +3504,18 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                 manifest << "hash_min_total\t" << run.hashMinTotal << "\n";
                 manifest << "hash_min_top\t" << run.hashMinTop << "\n";
                 manifest << "hash_min_ratio\t" << run.hashMinRatio << "\n";
+                if (run.hashDemuxMethod == "pair") {
+                    manifest << "hash_sample_table\t" << run.hashSampleTable << "\n";
+                    manifest << "hash_min_pair_ratio\t" << run.hashMinPairRatio << "\n";
+                }
                 manifest << "feature_caller\t"
                          << (run.featureCaller.empty() ? "none" : run.featureCaller) << "\n";
                 if (!run.featureCaller.empty()) {
                     manifest << "feature_call_min_umi\t" << run.featureCallMinUmi << "\n";
+                    if (run.featureCaller == "ambient-fdr") manifest << "feature_call_fdr\t" << run.featureCallFdr << "\n";
                     manifest << "feature_call_min_ratio\t" << run.featureCallMinRatio << "\n";
                     manifest << "feature_calls_path\touts/feature_analysis/"
-                             << run.libraryId << "/feature_calls.csv\n";
+                             << run.libraryId << (run.featureCaller == "ambient-fdr" ? "/ambient_fdr/feature_fdr_calls_per_cell.csv\n" : "/feature_calls.csv\n");
                 }
                 manifest << "n_hash_features\t" << run.nHashFeatures << "\n";
                 manifest << "n_hash_singlet\t" << run.nHashSinglet << "\n";
@@ -3913,6 +3932,70 @@ int finalizePfMultiConfig(Parameters& P,
         P.inOut->logMain << "Filtered MEX written to: " << filteredOutDir << "\n";
 
         for (const auto& run : featureRuns) {
+            if (run.featureCaller == "ambient-fdr") {
+                // Use this library's MEX, not all rows sharing its feature type.
+                // Reindex to the GEX-observed raw universe and the final simple cells,
+                // retaining zero-feature cells in the BH test universe.
+                const vector<PfAssignMexSource> sources = resolveAssignMexSources(run.assignOut);
+                if (sources.size() != 1) throw runtime_error("Per-library ambient-FDR requires one feature MEX: " + run.libraryId);
+                PfMultiMerge::MexData libraryRaw = PfMultiMerge::readMex(sources[0].mexDir);
+                FinalGuideCellBarcodeSet finalCells;
+                string error;
+                const string edPath = resolveOptionalEmptyDropsResultsPath(filteredOut);
+                if (!loadFinalGuideCellBarcodesFromEmptyDrops(edPath, gexNormalizationChem, finalCells, error))
+                    throw runtime_error("Per-library ambient-FDR requires EmptyDrops simple cells: " + error);
+                auto reindexLibrary = [&](bool onlyCells) {
+                    PfMultiMerge::MexData data;
+                    data.features = libraryRaw.features;
+                    data.featureNames = libraryRaw.featureNames;
+                    data.featureTypes = libraryRaw.featureTypes;
+                    std::unordered_map<string, uint32_t> positions;
+                    for (const auto& barcode : observedRawGexBarcodes) {
+                        const string key = normalizeBarcodeToTru(crisprBarcodeRawKey(barcode), gexNormalizationChem);
+                        if (onlyCells && finalCells.truKeys.count(key) == 0) continue;
+                        if (positions.emplace(key, data.barcodes.size()).second) data.barcodes.push_back(key);
+                    }
+                    for (const auto& t : libraryRaw.triplets) {
+                        if (t.cell_idx >= libraryRaw.barcodes.size()) throw runtime_error("Invalid feature MEX index");
+                        const string key = normalizeBarcodeToTru(crisprBarcodeRawKey(libraryRaw.barcodes[t.cell_idx]), run.featureMexOutputNamespace);
+                        const auto found = positions.find(key);
+                        if (found == positions.end()) continue;
+                        auto copy = t; copy.cell_idx = found->second;
+                        data.triplets.push_back(copy);
+                    }
+                    return data;
+                };
+                const string root = outPrefix + "/outs/feature_analysis";
+                if (mkdir(root.c_str(), 0755) != 0 && errno != EEXIST) throw runtime_error("Cannot create " + root);
+                const string callOut = root + "/" + run.libraryId;
+                if (mkdir(callOut.c_str(), 0755) != 0 && errno != EEXIST) throw runtime_error("Cannot create " + callOut);
+                const string rawTmp = callOut + "/raw_mex";
+                const string cellTmp = callOut + "/cell_mex";
+                auto raw = reindexLibrary(false);
+                auto cells = reindexLibrary(true);
+                if (cells.barcodes.empty()) throw runtime_error("No final cells for " + run.libraryId);
+                if (writeCrisprOnlyMex(raw, rawTmp, P.inOut->logMain) != 0 || writeCrisprOnlyMex(cells, cellTmp, P.inOut->logMain) != 0)
+                    throw runtime_error("Failed to prepare ambient-FDR MEX for " + run.libraryId);
+                cf_ambient_fdr_config *cfg = cf_ambient_fdr_config_create();
+                if (!cfg) throw runtime_error("Failed to allocate ambient-FDR configuration");
+                cfg->feature_type = run.featureType.c_str();
+                cfg->fdr_threshold = run.featureCallFdr;
+                cfg->min_umi = run.featureCallMinUmi;
+                const string ambient = callOut + "/ambient_fdr";
+                const int callRet = cf_process_mex_dir_ambient_fdr(rawTmp.c_str(), cellTmp.c_str(), ambient.c_str(), cfg);
+                cf_ambient_fdr_config_destroy(cfg);
+                if (callRet != 0) throw runtime_error("Ambient-FDR calling failed for " + run.libraryId);
+                // Generic library outputs must not describe CellTags as CRISPR guides.
+                const vector<string> suffixes = {"fdr_calls_per_cell.csv", "fdr_summary.json", "fdr_threshold_sweep.tsv", "fdr_qc.json", "ambient_rates.tsv", "qvalues.mtx", "qvalues_barcodes.tsv", "qvalues_features.tsv"};
+                for (const auto& suffix : suffixes) {
+                    const string src = ambient + "/guide_" + suffix;
+                    const string dst = ambient + "/feature_" + suffix;
+                    if (access(src.c_str(), F_OK) == 0 && rename(src.c_str(), dst.c_str()) != 0)
+                        throw runtime_error("Cannot rename feature calling output: " + src);
+                }
+                P.inOut->logMain << "Per-library ambient-FDR calls: " << ambient << "\n";
+                continue;
+            }
             if (run.featureCaller != "dominant") continue;
 
             const string analysisRoot = outPrefix + "/outs/feature_analysis";

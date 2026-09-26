@@ -80,6 +80,8 @@ extern char library_feature_type_cli[128];
 extern int hash_min_total;
 extern int hash_min_top;
 extern double hash_min_ratio;
+extern char hash_sample_table[4096];
+extern double hash_min_pair_ratio;
 
 /* Hash lifecycle helpers for feature matching tables */
 void clear_feature_lookup_hashes(void);

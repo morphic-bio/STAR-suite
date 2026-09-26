@@ -58,6 +58,8 @@ struct AssignOptions {
     int hashDemuxMode = -1;    // PF_HASH_DEMUX_AUTO
     string hashFeatureSelector;
     string hashDemuxMethod;
+    string hashSampleTable;
+    double hashMinPairRatio = 2.0;
     string libraryFeatureType;
     int hashMinTotal = 3;
     int hashMinTop = 3;

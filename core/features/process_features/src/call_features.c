@@ -1423,8 +1423,9 @@ static int cf_has_crispr_feature_type(const cf_feature_table *table) {
     return 0;
 }
 
-static int cf_feature_is_guide(const cf_feature_table *table, int row, int require_crispr_type) {
+static int cf_feature_is_guide(const cf_feature_table *table, int row, int require_crispr_type, const char *feature_type) {
     if (!table || row < 0 || row >= table->count) return 0;
+    if (feature_type) return table->features[row].type && strcmp(table->features[row].type, feature_type) == 0;
     if (!require_crispr_type) return 1;
     return table->features[row].type && strcmp(table->features[row].type, "CRISPR Guide Capture") == 0;
 }
@@ -1802,14 +1803,14 @@ static int cf_write_ambient_qvalues(const char *output_dir,
                                     const cf_sparse_matrix *filtered_matrix,
                                     const char **guide_ids,
                                     const char **guide_names,
-                                    int n_guides) {
+                                    int n_guides, const char *feature_type) {
     char path[MAX_LINE_LENGTH];
 
     snprintf(path, sizeof(path), "%s/guide_qvalues.mtx", output_dir);
     FILE *mtx = fopen(path, "w");
     if (!mtx) return -1;
     fprintf(mtx, "%%%%MatrixMarket matrix coordinate real general\n");
-    fprintf(mtx, "%% rows are filtered cell barcodes; columns are CRISPR guides; missing entries imply qvalue=1\n");
+    fprintf(mtx, "%% rows are filtered cell barcodes; columns are %s; missing entries imply qvalue=1\n", feature_type ? feature_type : "CRISPR guides");
     fprintf(mtx, "%d %d %zu\n", filtered_matrix->num_cols, n_guides, n_entries);
     for (size_t i = 0; i < n_entries; i++) {
         fprintf(mtx, "%d %d %.17g\n",
@@ -1831,9 +1832,9 @@ static int cf_write_ambient_qvalues(const char *output_dir,
     FILE *feat = fopen(path, "w");
     if (!feat) return -1;
     for (int g = 0; g < n_guides; g++) {
-        fprintf(feat, "%s\t%s\tCRISPR Guide Capture\n",
+        fprintf(feat, "%s\t%s\t%s\n",
                 guide_ids[g] ? guide_ids[g] : "",
-                guide_names[g] ? guide_names[g] : "");
+                guide_names[g] ? guide_names[g] : "", feature_type ? feature_type : "CRISPR Guide Capture");
     }
     fclose(feat);
 
@@ -1984,6 +1985,7 @@ int cf_process_mex_dir_ambient_fdr(const char *raw_mex_dir,
 
     cf_ambient_fdr_config default_config;
     if (!config) {
+        default_config.feature_type = NULL;
         default_config.fdr_threshold = 0.01;
         default_config.min_umi = 1;
         default_config.emit_sparse_qvalues = 1;
@@ -2043,7 +2045,7 @@ int cf_process_mex_dir_ambient_fdr(const char *raw_mex_dir,
 
     int n_guides = 0;
     for (int r = 0; r < filtered_features.count && r < filtered_matrix->num_rows; r++) {
-        if (cf_feature_is_guide(&filtered_features, r, filtered_has_crispr_type)) n_guides++;
+        if (cf_feature_is_guide(&filtered_features, r, filtered_has_crispr_type, config->feature_type)) n_guides++;
     }
     if (n_guides == 0 || filtered_matrix->num_cols == 0) {
         cf_free_feature_table(&raw_features);
@@ -2051,7 +2053,7 @@ int cf_process_mex_dir_ambient_fdr(const char *raw_mex_dir,
         cf_free_matrix(raw_matrix);
         cf_free_matrix(filtered_matrix);
         return cf_write_ambient_skip_summary(output_dir, "skipped_no_guides",
-                                             "No CRISPR Guide Capture features or filtered cells were found.");
+                                             config->feature_type ? "No selected features or filtered cells were found." : "No CRISPR Guide Capture features or filtered cells were found.");
     }
 
     const char **guide_ids = calloc(n_guides, sizeof(char *));
@@ -2079,7 +2081,7 @@ int cf_process_mex_dir_ambient_fdr(const char *raw_mex_dir,
 
     int guide_index = 0;
     for (int r = 0; r < filtered_features.count && r < filtered_matrix->num_rows; r++) {
-        if (!cf_feature_is_guide(&filtered_features, r, filtered_has_crispr_type)) continue;
+        if (!cf_feature_is_guide(&filtered_features, r, filtered_has_crispr_type, config->feature_type)) continue;
         filtered_row_to_guide[r] = guide_index;
         guide_ids[guide_index] = filtered_features.features[r].id;
         guide_names[guide_index] = filtered_features.features[r].name;
@@ -2090,7 +2092,7 @@ int cf_process_mex_dir_ambient_fdr(const char *raw_mex_dir,
     qsort(id_map, n_guides, sizeof(cf_id_map_entry), cf_compare_id_map);
 
     for (int r = 0; r < raw_features.count && r < raw_matrix->num_rows; r++) {
-        if (!cf_feature_is_guide(&raw_features, r, raw_has_crispr_type)) continue;
+        if (!cf_feature_is_guide(&raw_features, r, raw_has_crispr_type, config->feature_type)) continue;
         raw_row_to_guide[r] = cf_lookup_guide_id(id_map, n_guides, raw_features.features[r].id);
     }
 
@@ -2220,7 +2222,7 @@ int cf_process_mex_dir_ambient_fdr(const char *raw_mex_dir,
                                cell_min_q, fdr_threshold) != 0) ret = -1;
     if (config->emit_sparse_qvalues) {
         if (cf_write_ambient_qvalues(output_dir, entries, n_entries, filtered_matrix,
-                                     guide_ids, guide_names, n_guides) != 0) ret = -1;
+                                     guide_ids, guide_names, n_guides, config->feature_type) != 0) ret = -1;
     }
     if (cf_write_ambient_summary(output_dir, entries, n_entries,
                                  filtered_matrix->num_cols, n_guides, total_tests,

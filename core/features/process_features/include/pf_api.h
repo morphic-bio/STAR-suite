@@ -229,6 +229,8 @@ void pf_config_set_hash_demux_method(pf_config *config, const char *method);
 void pf_config_set_library_feature_type(pf_config *config, const char *feature_type);
 void pf_config_set_hash_min_total(pf_config *config, int min_total);
 void pf_config_set_hash_min_top(pf_config *config, int min_top);
+void pf_config_set_hash_sample_table(pf_config *config, const char *path);
+void pf_config_set_hash_min_pair_ratio(pf_config *config, double ratio);
 void pf_config_set_hash_min_ratio(pf_config *config, double min_ratio);
 
 /**

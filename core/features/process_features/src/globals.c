@@ -121,6 +121,8 @@ char library_feature_type_cli[128] = "";
 int hash_min_total = 3;
 int hash_min_top = 3;
 double hash_min_ratio = 2.0;
+char hash_sample_table[4096] = "";
+double hash_min_pair_ratio = 2.0;
 
 void clear_feature_lookup_hashes(void) {
     /* Global hash is now a non-owning alias; just null the pointer.

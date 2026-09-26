@@ -272,6 +272,7 @@ int cf_process_mex_dir_gmm(const char *mex_dir, const char *output_dir, const cf
 
 /* Ambient-FDR call configuration */
 typedef struct cf_ambient_fdr_config {
+    const char *feature_type;    /* NULL: legacy guide selection; otherwise exact type. Borrowed. */
     double fdr_threshold;        /* Default FDR threshold for calls (default: 0.01) */
     int min_umi;                 /* Minimum observed UMI count for a call (default: 1) */
     int emit_sparse_qvalues;     /* Write guide_qvalues.mtx and axes (default: 1) */

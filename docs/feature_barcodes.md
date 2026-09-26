@@ -594,3 +594,38 @@ Section 1.6.
   Auto-detect can misclassify certain samples (see AALG1 autodetect bug).
 - **Per-library Hamming**: Use `star_max_hamming` column when mixing short
   guides (h=1) with long barcodes (h=5). See section above.
+
+### DOGMA-plex paired hashes and per-library ambient-FDR (development)
+
+`star_hash_demux_method=pair` uses `star_hash_sample_table`, a tab-delimited
+`sample, hash_a, hash_b` table whose feature IDs must be present in the hash
+mask. Relative paths resolve against the pf-multi config. Pairs are unordered;
+duplicate pairs or sample IDs, missing IDs and self-pairs are rejected.
+`star_hash_min_pair_ratio` defaults to 2.0. A cell is negative when total UMIs
+are below `star_hash_min_total` or the second tag is below `star_hash_min_top`;
+otherwise second/max(third,1) below the pair ratio is a multiplet. A passing
+pair must occur in the sample table to be a singlet; other pairs are
+`unknown_pair`. Ties retain reference-row order. The output records the third
+tag, canonical ID-sorted pair, sample and pair ratio, plus per-sample summary
+counts. The default `ratio` output format is unchanged.
+
+Standalone assignBarcodes uses `--hash-demux-method pair --hash-sample-table
+TABLE --hash-min-pair-ratio 2`. The corresponding C API setters are
+`pf_config_set_hash_sample_table` and `pf_config_set_hash_min_pair_ratio`.
+
+`star_feature_caller=ambient-fdr` now accepts a named non-GEX library with
+`star_feature_call_fdr` (default 0.01) and `star_feature_call_min_umi` (default
+1). Each library is called independently, even when two libraries share a
+feature type. Raw counts are limited to barcodes observed in GEX; the call
+universe is the EmptyDrops `is_simple_cell` set, including zero-feature cells.
+An unavailable simple-cell set is an error for this explicit calling mode.
+BH correction covers cells times features. Output lives in
+`outs/feature_analysis/<library_id>/ambient_fdr/feature_*`, with q-value matrix
+rows = cells, columns = features, and absent entries = 1. Library-level raw and
+cell MEX snapshots are retained alongside the calling output for auditing.
+The existing automatic CRISPR path and `guide_*` output names remain unchanged.
+
+DOGMA-plex CellTag references use `feature_type=CellTag`, the prefix pattern
+`GACGAGCTGTACAAGTAAAT(BC)` and `star_max_hamming=0`; never relabel them as guides.
+All three feature arms use TRU/GEX barcodes. Only ATAC needs ARC translation.
+The Multiomics Suite runbook owns assay decoding and production acceptance.
