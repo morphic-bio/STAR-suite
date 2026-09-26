@@ -1854,3 +1854,6 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
   and removes them on exit. No biological data required.
 - Local build, regression and composition validation logs live under
   `/mnt/pikachu/dogmaplex_gse309834/`, outside git.
+
+- `tests/test_ambient_fdr_feature_type.sh` creates and removes
+  `/tmp/celltag_ambient_test.*`, testing CellTag selection alongside real guides.

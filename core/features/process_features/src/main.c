@@ -100,7 +100,7 @@ static void print_usage(const char *prog){
     fprintf(stderr, "      --adt-mex                     Alias for --output-mode adt_mex\n");
     fprintf(stderr, "      --hash-demux <yes|no|auto>    Hash demux from hash feature counts (default auto)\n");
     fprintf(stderr, "      --hash-feature-selector SPEC  Select hash rows (feature_type:HTO, id_prefix:hashtag)\n");
-    fprintf(stderr, "      --hash-demux-method <ratio>   Hash demux classifier (default ratio)\n");
+    fprintf(stderr, "      --hash-demux-method <ratio|pair>   Hash demux classifier (default ratio)\n");
     fprintf(stderr, "      --hash-min-total N            Min total hash UMIs (default 3)\n");
     fprintf(stderr, "      --hash-min-top N              Min top hash UMI count (default 3)\n");
     fprintf(stderr, "      --hash-min-ratio X            Singlet top/second ratio (default 2.0)\n\n");
