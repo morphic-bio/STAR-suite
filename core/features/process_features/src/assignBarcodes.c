@@ -4527,6 +4527,8 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
         hash_cfg.hash_min_total = sample->hash_min_total;
         hash_cfg.hash_min_top = sample->hash_min_top;
         hash_cfg.hash_min_ratio = sample->hash_min_ratio;
+            hash_cfg.hash_sample_table = sample->hash_sample_table;
+            hash_cfg.hash_min_pair_ratio = sample->hash_min_pair_ratio;
         if (pf_write_adt_mex_outputs(&hash_cfg) != 0) {
             fprintf(stderr, "Error: ADT/hash MEX output failed\n");
             if (error_out) *error_out = 1;

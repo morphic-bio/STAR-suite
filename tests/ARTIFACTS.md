@@ -1846,3 +1846,11 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
   It defaults to a unique `/tmp/star-flex-removal.*` directory.
 - Packed-count unit binary: `core/legacy/test/test_flex_probe_region`;
   generated binaries, matrices, caches and logs are not committed.
+
+## DOGMA-plex pair demux (2026-09-26)
+
+- `tests/multi_feature/test_hash_pair_demux_pf_multi.sh` creates synthetic
+  native count/output and pf-multi config fixtures under `/tmp/hash_pair_test.*`
+  and removes them on exit. No biological data required.
+- Local build, regression and composition validation logs live under
+  `/mnt/pikachu/dogmaplex_gse309834/`, outside git.

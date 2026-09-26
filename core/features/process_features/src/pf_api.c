@@ -97,6 +97,8 @@ struct pf_config {
     int hash_min_total;
     int hash_min_top;
     double hash_min_ratio;
+    char hash_sample_table[4096];
+    double hash_min_pair_ratio;
 
     /* Union whitelist support (legacy compat) */
     int allow_union_whitelist;          /* 0=strict, 1=accept mixed NXT+TRU */
@@ -348,6 +350,8 @@ pf_config* pf_config_create(void) {
     config->hash_min_total = 3;
     config->hash_min_top = 3;
     config->hash_min_ratio = 2.0;
+    config->hash_sample_table[0] = '\0';
+    config->hash_min_pair_ratio = 2.0;
 
     /* Union whitelist: off by default (strict namespace) */
     config->allow_union_whitelist = 0;
@@ -637,6 +641,15 @@ void pf_config_set_hash_min_top(pf_config *config, int min_top) {
     if (config) config->hash_min_top = min_top;
 }
 
+void pf_config_set_hash_sample_table(pf_config *config, const char *path) {
+    if (!config) return;
+    snprintf(config->hash_sample_table, sizeof(config->hash_sample_table), "%s", path ? path : "");
+}
+
+void pf_config_set_hash_min_pair_ratio(pf_config *config, double ratio) {
+    if (config) config->hash_min_pair_ratio = ratio;
+}
+
 void pf_config_set_hash_min_ratio(pf_config *config, double min_ratio) {
     if (config) config->hash_min_ratio = min_ratio;
 }
@@ -650,6 +663,8 @@ static void pf_apply_hash_demux_config(sample_args *args, const pf_config *confi
     args->hash_min_total = config->hash_min_total;
     args->hash_min_top = config->hash_min_top;
     args->hash_min_ratio = config->hash_min_ratio;
+            args->hash_sample_table = config->hash_sample_table;
+            args->hash_min_pair_ratio = config->hash_min_pair_ratio;
 }
 
 void pf_config_set_allow_union_whitelist(pf_config *config, int enable) {

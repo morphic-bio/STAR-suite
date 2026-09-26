@@ -512,6 +512,8 @@ static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
     if (!options.hashFeatureSelector.empty()) {
         pf_config_set_hash_feature_selector(cfg, options.hashFeatureSelector.c_str());
     }
+    pf_config_set_hash_sample_table(cfg, options.hashSampleTable.c_str());
+    pf_config_set_hash_min_pair_ratio(cfg, options.hashMinPairRatio);
     if (!options.hashDemuxMethod.empty()) {
         pf_config_set_hash_demux_method(cfg, options.hashDemuxMethod.c_str());
     }
@@ -1017,6 +1019,10 @@ static void writeApiRunSummary(const string& assignOut,
     out << "output_mode=" << (options.adtMexOutput ? "adt_mex" : "default") << "\n";
     out << "hashDemuxMode=" << options.hashDemuxMode << "\n";
     out << "hashFeatureSelector=" << options.hashFeatureSelector << "\n";
+    if (options.hashDemuxMethod == "pair") {
+        out << "hashSampleTable=" << options.hashSampleTable << "\n";
+        out << "hashMinPairRatio=" << options.hashMinPairRatio << "\n";
+    }
     out << "hashDemuxMethod=" << options.hashDemuxMethod << "\n";
     out << "hashMinTotal=" << options.hashMinTotal << "\n";
     out << "hashMinTop=" << options.hashMinTop << "\n";

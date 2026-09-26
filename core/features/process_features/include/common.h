@@ -338,6 +338,8 @@ typedef struct sample_args {
     int hash_min_total;
     int hash_min_top;
     double hash_min_ratio;
+    const char *hash_sample_table;
+    double hash_min_pair_ratio;
 
     /* Error propagation */
     int *error_out;                  /* Set to non-zero if fatal error occurred */
