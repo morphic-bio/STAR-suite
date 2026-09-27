@@ -72,7 +72,10 @@ run(){ # name binary args...
   echo $? > "$o/rc"; rm -rf "$o/_STARtmp"
 }
 logs(){ cat "$V/$1/stdout.txt" "$V/$1/Log.out" 2>/dev/null; }
-digest(){ (cd "$V/$1" && find . -type f ! -name 'Log.*' ! -name stdout.txt ! -name rc | sort | xargs -r sha256sum) ; }
+# A pre-removal reference may contain withdrawn diagnostic reports; compare
+# all other output bytes, and separately reject those reports in new runs.
+digest(){ (cd "$V/$1" && find . -type f ! -name 'Log.*' ! -name stdout.txt ! -name rc \
+  ! -name gdna_metrics.json ! -name flex_gdna_library.json ! -name flex_gdna_summary.tsv | sort | xargs -r sha256sum) ; }
 
 echo "== positive runs =="
 run A $S194 "${CACHE[@]}" "${EXPLICIT[@]}"
@@ -81,6 +84,11 @@ POS="A B L2"
 if [[ -n "$S193" ]]; then run C $S193 "${CACHE[@]}" "${EXPLICIT[@]}"; POS="A B C L2"; fi
 run L2 $S194 "${CACHE[@]}" "${EXPLICIT[@]}" --flexLegacy yes
 for n in $POS; do [ "$(cat $V/$n/rc)" = 0 ] && ok "$n completed (rc 0)" || bad "$n rc=$(cat $V/$n/rc): $(tail -2 $V/$n/stdout.txt)"; done
+for n in A B L2; do
+  if [[ -z "$(find "$V/$n" -type f \( -name '*gdna*.json' -o -name '*gdna*.tsv' \) -print -quit)" ]]; then
+    ok "$n emitted no withdrawn gDNA reports"
+  else bad "$n emitted withdrawn gDNA reports"; fi
+done
 nfiles=$(digest A | wc -l)
 for n in ${POS#A }; do
   if diff <(digest A) <(digest $n) >/dev/null; then ok "$n byte-identical to A ($nfiles files)"

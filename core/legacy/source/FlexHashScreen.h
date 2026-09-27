@@ -6,7 +6,7 @@
 #include "FlexHashCacheStorage.h"
 #include <vector>
 
-#include "FlexGdna.h"
+#include "FlexProbeRegion.h"
 #include "FlexProbeHalfIndex.h"
 
 class ParametersSolo;
@@ -23,7 +23,7 @@ public:
         uint8_t cacheClass = 0;
         uint8_t negativeCode = 0;
         uint16_t sampleIdx = 0;
-        FlexGdnaRegion probeRegion = FlexGdnaUnknown;
+        FlexProbeRegion probeRegion = FlexProbeRegionUnknown;
     };
 
     static FlexHashScreenCache& instance();

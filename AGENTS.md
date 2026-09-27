@@ -151,6 +151,12 @@ actionable; link to deeper docs rather than copying them.
 
 ## Flex Integration Notes
 
+- The optional Flex gDNA diagnostic was withdrawn from the corrected
+  v1.9.5.a release for source-derived provenance. Do not restore it or use its
+  historical source/fixtures/runbook as an implementation recipe. Retained
+  `FlexProbeRegion.h` helpers only preserve STAR packed-count/cache decoding.
+  See `docs/RUNBOOK_FLEX_GDNA_DIAGNOSTIC_20260727.md`.
+
 - Flex now uses `libscrna` for EmptyDrops/OrdMag/Occupancy (no duplicate
   implementations).
 - Ensure Flex builds link `libscrna` and include `core/features/libscrna/include`.

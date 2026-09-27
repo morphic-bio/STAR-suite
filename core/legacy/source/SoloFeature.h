@@ -23,7 +23,7 @@ using VelocytoUmiMap = PooledTranscriptMap<trTypeStruct>;
 
 #include "libscrna/SampleMatrixData.h"
 #include "MexWriter.h"
-#include "FlexGdna.h"
+#include "FlexProbeRegion.h"
 
 // Forward declaration
 class ProbeListIndex;
@@ -150,13 +150,6 @@ public:
         // Parallel to matrixData.barcodes. Encodes the original corrected
         // barcode index and Flex sample tag as (cbIdx << 8) | tag.
         std::vector<uint64_t> cbTagKeys;
-        // Corrected molecule identity/region metadata used by the gDNA
-        // diagnostic when the global inline hash is absent.
-        std::vector<uint64_t> gdnaMoleculeKeys;
-        std::vector<uint8_t> gdnaMoleculeRegions;
-        bool gdnaCountsReady = false;
-        std::vector<FlexGdnaCellSummary> gdnaCells;
-        std::vector<FlexGdnaGeneCount> gdnaGeneCounts;
     };
 
     // Write MEX directly from inline-hash dedup data (no Solo, no replayer)

@@ -107,6 +107,8 @@ RUN_ROOT="${OUT_BASE}/${RUN_ID}"
 [[ -s "${RUN_ROOT}/Solo.out/Gene/raw/matrix.mtx" ]] || die "missing raw Gene matrix"
 awk 'NR > 3 { n++ } END { exit !(n > 0) }' "${RUN_ROOT}/Solo.out/Gene/raw/matrix.mtx" || die "raw Gene matrix has no entries"
 [[ -f "${RUN_ROOT}/per_sample/flexfilter_summary.tsv" ]] || die "missing per-sample FlexFilter summary"
+[[ -z "$(find "${RUN_ROOT}" -type f \( -name '*gdna*.json' -o -name '*gdna*.tsv' \) -print -quit)" ]] \
+  || die "withdrawn gDNA diagnostic output was emitted"
 
 grep -F "sample_probe_offset=68" "${RUN_ROOT}/RUN_MANIFEST.txt" >/dev/null || die "manifest missing sample_probe_offset"
 grep -F "sample_probe_catalog=${PROBE_CATALOG}" "${RUN_ROOT}/RUN_MANIFEST.txt" >/dev/null || die "manifest missing sample_probe_catalog"

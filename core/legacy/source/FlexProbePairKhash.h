@@ -185,7 +185,7 @@ private:
             out.decision.action = v.negativeCode == FlexHashNegProbeAmbig ? FlexHashScreenDecision::Deny : FlexHashScreenDecision::Keep;
             out.decision.geneIdx15 = out.decision.action == FlexHashScreenDecision::Keep ? v.geneAndRegion & 0x7fff : 0;
             out.decision.cacheClass = 0; out.decision.negativeCode = v.negativeCode == FlexHashNegProbeAmbig ? v.negativeCode : 0;
-            out.decision.probeRegion = static_cast<FlexGdnaRegion>(v.geneAndRegion >> 30); return out;
+            out.decision.probeRegion = static_cast<FlexProbeRegion>(v.geneAndRegion >> 30); return out;
         }
         const Span l = lookup(0, half(key,0)), r = lookup(1,half(key,1));
         uint32_t i = 0, j = 0, count = 0, parent = 0;
@@ -200,7 +200,7 @@ private:
         } else if (count == 1) {
             const auto& p = probesData_[parent]; out.route = DoubleMatch;
             out.decision.action = FlexHashScreenDecision::Keep; out.decision.geneIdx15 = p.value.geneAndRegion & 0x7fff;
-            out.decision.cacheClass = 4; out.decision.probeRegion = static_cast<FlexGdnaRegion>(p.value.geneAndRegion >> 30);
+            out.decision.cacheClass = 4; out.decision.probeRegion = static_cast<FlexProbeRegion>(p.value.geneAndRegion >> 30);
         }
         if (!count && finish) {
             Seed left, right;

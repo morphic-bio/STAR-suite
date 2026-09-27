@@ -3,7 +3,7 @@
 #include "UMICorrector.h"
 #include "ErrorWarning.h"
 #include "hash_shims_cpp_compat.h"
-#include "FlexGdna.h"
+#include "FlexProbeRegion.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -62,7 +62,7 @@ void SoloFeature::applyCliqueCorrectionsToHash() {
             kh_val(readFeatSum->inlineHash_, new_iter) = update.value;
         } else {
             kh_val(readFeatSum->inlineHash_, new_iter) = pSolo.flexMode
-                ? flexGdnaMergeValue(kh_val(readFeatSum->inlineHash_, new_iter),
+                ? flexProbeMergeValue(kh_val(readFeatSum->inlineHash_, new_iter),
                                      update.value)
                 : kh_val(readFeatSum->inlineHash_, new_iter) + update.value;
         }
@@ -109,7 +109,7 @@ void SoloFeature::runCliqueCorrection() {
 
         uint64_t key = kh_key(readFeatSum->inlineHash_, iter);
         uint32_t count = pSolo.flexMode
-            ? flexGdnaValueCount(kh_val(readFeatSum->inlineHash_, iter))
+            ? flexProbeValueCount(kh_val(readFeatSum->inlineHash_, iter))
             : kh_val(readFeatSum->inlineHash_, iter);
 
         uint32_t cbIdx, umi24;

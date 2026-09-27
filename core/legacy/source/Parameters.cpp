@@ -662,8 +662,8 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloProbeList", &pSolo.probeListPath));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloFlexFilteredGeneList", &pSolo.flexFilteredGeneList));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloRemoveDeprecated", &pSolo.removeDeprecatedStr));
-    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloFlexGdna", &pSolo.flexGdnaModeStr));
-    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloFlexGdnaProbeSet", &pSolo.flexGdnaProbeSetPath));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloFlexGdna", &pSolo.retiredFlexGdnaMode));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloFlexGdnaProbeSet", &pSolo.retiredFlexGdnaProbeSet));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleWhitelist", &pSolo.sampleWhitelistPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleProbes", &pSolo.sampleProbesPath));
     parArray.push_back(new ParameterInfoScalar <uint32>   (-1, -1, "soloSampleProbeOffset", &pSolo.sampleProbeOffset));

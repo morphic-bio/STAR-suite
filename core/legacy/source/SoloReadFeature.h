@@ -16,7 +16,7 @@
 #include "SoloBinarySpool.h"
 #include "BridgeReadCounts.h"
 #include "BridgeReadInfo.h"
-#include "FlexGdna.h"
+#include "FlexProbeRegion.h"
 #include "CbBucketStore.h"
 #include <functional>
 
@@ -71,7 +71,7 @@ public:
             uint8_t tagIdx;
             uint32_t umi24;
             uint32_t count;
-            FlexGdnaRegion probeRegion = FlexGdnaUnknown;
+            FlexProbeRegion probeRegion = FlexProbeRegionUnknown;
         };
         std::vector<AmbiguousObservation> observations; // Flex: per-read observations (unchanged)
         // Flex direct-hash resolution signature. candidateIdx is 1-based and
@@ -184,7 +184,7 @@ private:
                                     const FlexGeneInlineResolveResult *preResolved);
     friend bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead,
                                              uint16_t geneIdx15, uint8_t cacheClass,
-                                             FlexGdnaRegion probeRegion);
+                                             FlexProbeRegion probeRegion);
     friend void record_flex_hash_screen_deny(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, const char *reason);
     friend const ProbeListIndex* getGlobalProbeIndex(const SoloReadFeature* rf);
     const int32 featureType;

@@ -1,6 +1,6 @@
 #include "FlexHashCacheGenerate.h"
 #include "FlexHashScreen.h"
-#include "FlexGdna.h"
+#include "FlexProbeRegion.h"
 #include "Genome.h"
 #include "Parameters.h"
 #include "ProbeListIndex.h"
@@ -31,7 +31,7 @@ struct GenomeProbeRow {
     char seq[51];
     uint16_t geneIdx15 = 0;
     uint32_t chrIdx = 0;
-    FlexGdnaRegion probeRegion = FlexGdnaUnknown;
+    FlexProbeRegion probeRegion = FlexProbeRegionUnknown;
 };
 
 struct SeqPairHash {
@@ -57,7 +57,7 @@ struct DedupBucket {
     bool h1x2Seen = false;
     uint16_t gene = 0;
     uint8_t cacheClass = 0;
-    FlexGdnaRegion probeRegion = FlexGdnaUnknown;
+    FlexProbeRegion probeRegion = FlexProbeRegionUnknown;
 };
 
 static inline khint_t dedupKeyHashFn(DedupKey key) {
@@ -166,7 +166,6 @@ static std::vector<GenomeProbeRow> extractGenomeProbes(const Genome& g, const Pr
             continue;
         }
         row.chrIdx = i;
-        row.probeRegion = FlexGdnaProbeMetadata::instance().regionForProbeId(nm);
         out.push_back(row);
     }
     log << "[HASH-CACHE-GEN] extracted " << out.size() << " probe pseudo-chromosomes (ENSG, 50bp, probe-list hit)\n";
@@ -208,7 +207,7 @@ static void buildR1FromParams(char* buf, uint32_t len, const ParametersSolo& ps,
 // At runtime, only a sequence absent from this tested set may fall through to
 // residual genome alignment.
 static void appendVariantRecord(std::vector<FlexHashScreenCache::Record>& out, const char* var50, uint16_t gene15,
-                                uint8_t cacheClass, FlexGdnaRegion probeRegion, int verdict) {
+                                uint8_t cacheClass, FlexProbeRegion probeRegion, int verdict) {
     FlexHashScreenCache::Record r;
     if (!FlexHashScreenCache::encodeProbeWindow(var50, 0, r.seqLo, r.seqHi)) {
         return;
@@ -261,7 +260,7 @@ static void mergeDedupRecord(khash_t(flexdedup)* buckets, const FlexHashScreenCa
             b.conflict = true;
         }
         b.cacheClass = std::min<uint8_t>(b.cacheClass, rec.cacheClass);
-        b.probeRegion = flexGdnaMergeRegion(b.probeRegion, rec.probeRegion);
+        b.probeRegion = flexProbeMergeRegion(b.probeRegion, rec.probeRegion);
     }
 }
 
@@ -310,24 +309,6 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
     if (!probeIdx.load(P.pSolo.probeListPath, P.pSolo.removeDeprecated, &deprecatedCount)) {
         exitWithError("EXITING: hashCacheGenerate could not load --soloProbeList\n", std::cerr, P.inOut->logMain,
                       EXIT_CODE_PARAMETER, P);
-    }
-
-    FlexGdnaProbeMetadata& gdnaMetadata = FlexGdnaProbeMetadata::instance();
-    if (!gdnaMetadata.ready()) {
-        const std::string probeCsv = FlexGdnaProbeMetadata::discoverProbeCsv(
-            P.pSolo.flexGdnaProbeSetPath, P.pSolo.probeListPath, P.pGe.gDir);
-        std::string gdnaError;
-        if (!probeCsv.empty()) {
-            P.pSolo.flexGdnaReady =
-                gdnaMetadata.load(probeCsv, P.pSolo.probeListPath, &gdnaError);
-        }
-        if (!P.pSolo.flexGdnaReady) {
-            P.inOut->logMain
-                << "[HASH-CACHE-GEN] probe-region metadata unavailable; writing backward-compatible v2 cache"
-                << (gdnaError.empty() ? "" : ": " + gdnaError) << "\n";
-        }
-    } else {
-        P.pSolo.flexGdnaReady = true;
     }
 
     std::vector<GenomeProbeRow> probes = extractGenomeProbes(genome, probeIdx, P.inOut->logMain);
@@ -746,7 +727,7 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
 
     std::string err;
     if (!FlexHashScreenCache::writeHashCacheFile(
-            P.pSolo.hashCacheOutput, finalRecs, &err, P.pSolo.flexGdnaReady)) {
+            P.pSolo.hashCacheOutput, finalRecs, &err, false)) {
         ostringstream e;
         e << "EXITING: hash cache write failed: " << err << "\n";
         exitWithError(e.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
