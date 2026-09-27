@@ -52,6 +52,7 @@ Tag policy:
 `ci-pr.yml`, `ci-dev-release.yml`, and `ci-master.yml` are path-scoped and trigger only when at least one of these changes:
 
 - `.github/workflows/ci-pr.yml`
+- `.github/workflows/ci-partial-builds.yml`
 - `.github/workflows/ci-dev-release.yml`
 - `.github/workflows/ci-master.yml`
 - `.github/workflows/release.yml`
@@ -64,6 +65,7 @@ Tag policy:
 - `tests/**`
 - `debian/**`
 - `Makefile`
+- `build/**`
 - `README.md`
 - `docs/Github-actions.md`
 - `docs/Star-binary-distribution.md`
@@ -72,10 +74,54 @@ Tag policy:
 
 ## Test Tiers
 
+### Clean Partial Builds
+
+PR, dev-release, master, and release workflows call `ci-partial-builds.yml`.
+Publishing waits for this gate. Each matrix job starts from a fresh source
+export and runs **one** target without first building `core` or `all`:
+`core-portable`, `core-static`, `core-htslib`, `release-companion-tools`,
+`star-feature-call`, `feature-barcodes-tools`, `process-features-lib`, and
+`yremove-tools`. Only the standalone feature-tools job installs system HTSlib
+headers; the portable jobs must use the bundled copy. Logs are retained as
+workflow artifacts.
+
+`tests/test_htslib_build_discovery.py` also checks custom HTSlib prefixes,
+include overrides, missing dependencies, portable includes, cached scans, and
+atomic failure. It compiles and links the HTSlib preflight probe, and compiles
+an object with Carl's indirect `ParametersSolo.h` -> `htslib/khash.h` include
+using a nonstandard HTSlib prefix. The full Chromap build is a local acceptance case with its
+external checkout explicitly supplied; it is not silently substituted with a
+portable build in CI.
+
+The independently built core binaries also run `tests/test_scrna_gex_counts.py`:
+exact synthetic counts for default Solo and every UMI deduplication method,
+Gene/GeneFull intron behavior, poly-G-tailed gzip reads, and filtered-cell
+identity. The same check runs in Tier A against the packaged binary.
+The original Solo smoke also requires exactly two molecules from three known
+reads, in addition to BAM validity; a header-only matrix no longer passes.
+
+Run the same regression matrix locally (compiler prerequisites required):
+
+```bash
+bash tests/run_partial_make_regression.sh
+# Or select cases; each still gets its own fresh tree:
+bash tests/run_partial_make_regression.sh release-companion-tools yremove-tools
+CHROMAP_SUITE_DIR=/path/to/Chromap-suite \
+  bash tests/run_partial_make_regression.sh chromap-core
+```
+
+The runner uses working-tree versions of tracked files and keeps artifacts
+under a fresh `/tmp/star-partial-make.*` (or a fresh `OUT_ROOT`). It never cleans
+the caller's checkout. Source archives without Git should use the individual
+documented Make commands instead.
+
+### Runtime Tests
+
 - Tier A:
   - self-contained smoke tests
   - public-data-only or synthetic surfaces
   - current Docker set: `tests/run_solo_smoke.sh`,
+    `tests/test_scrna_gex_counts.py`,
     `tests/run_scrna_sidecar_off_golden.sh`,
     `tests/run_spatial_r1_tap_guard.sh`,
     `tests/test_visium_hd_gex_sidecar_concurrency.py`,

@@ -128,6 +128,7 @@ run_core() {
     export STAR_BIN
     export TRANSCRIPTVB_FINALIZE_BIN TRIM_QC_FASTQ_BIN TRIM_QC_MERGE_BIN
     bash tests/run_solo_smoke.sh
+    python3 tests/test_scrna_gex_counts.py
     bash tests/slam/test_snp_mask_build_smoke.sh
     bash tests/run_flex_tiny_public_smoke.sh
     bash tests/run_adapter_clip_synthetic_test.sh

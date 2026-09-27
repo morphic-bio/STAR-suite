@@ -9,6 +9,9 @@ permissions:
   contents: write
 
 jobs:
+  partial-builds:
+    uses: ./.github/workflows/ci-partial-builds.yml
+
   check-secrets:
     runs-on: ubuntu-24.04
     outputs:
@@ -23,6 +26,7 @@ jobs:
           fi
 
   build-release-artifacts:
+    needs: partial-builds
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
