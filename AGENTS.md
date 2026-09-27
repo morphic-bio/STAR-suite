@@ -3,6 +3,22 @@
 This document is for coding agents working in this repo. Keep it short and
 actionable; link to deeper docs rather than copying them.
 
+## Clean-room rule for 10x Genomics software (read first; settled 2026-09-27)
+
+**We never look at 10x code.** This is settled; do not re-check or re-argue it unless the licences change.
+
+- Never read, fetch, grep, quote, paraphrase or summarise 10x Genomics source code: Cell Ranger, Space Ranger or any other 10x repository or package. This includes code files inside installed tarballs (`lib/python/...`, `.mro`, Rust sources) and commit history.
+- Never port, follow or "match" vendor code. The Flex gDNA diagnostic was removed from STAR Suite on 2026-09-27 because it had been written from Cell Ranger source.
+- Never cite vendor source files or line numbers in code, docs, notes or papers. Cite published documentation.
+- Allowed: published 10x documentation, licence and EULA texts, repository READMEs, and outputs of running the binaries. The Visium HD barcode contract uses reference data shipped with Space Ranger (barcode whitelists, the Visium HD slide-design file, the chemistry definition), disclosed in the Visium paper's Methods. Ask before opening any other file inside a vendor package.
+- If a question can only be answered from vendor source, stop and ask.
+
+Licence facts, verified 2026-09-27 against Wayback Machine copies (the live 10x pages return 403/429 to scripted requests):
+- The `LICENSE` file in the Cell Ranger and Space Ranger binary packages says use is governed by support.10xgenomics.com/license, the 10x End User Software License. The Space Ranger and Cell Ranger EULA texts are identical.
+- EULA §3.4 "No Source Code": "Licensee is granted no rights to, and Licensee agrees that it will not, and will not authorize or permit any third party to decompile, disassemble, or reverse engineer, or attempt to derive the source code for the Licensed Software, in whole or in part." EULA §4.1(c) bars modifying the software and derivative software based on it.
+- The source on GitHub (`10XGenomics/spaceranger`, `10XGenomics/cellranger`) has a separate licence: use, copying and modification solely for internal use with 10x products; no redistribution; derivative works bound by the same terms. It has no reverse-engineering clause.
+- In writing: describe vendor output neutrally (what it does; never "bug" or imputed intent), and never call the software "closed".
+
 ## Scope and Goals
 
 - STAR-suite reorganizes STAR into modules while keeping `core/legacy` as the
