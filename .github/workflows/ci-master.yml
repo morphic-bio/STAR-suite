@@ -6,6 +6,7 @@ on:
       - master
     paths:
       - ".github/workflows/ci-pr.yml"
+      - ".github/workflows/ci-partial-builds.yml"
       - ".github/workflows/ci-dev-release.yml"
       - ".github/workflows/ci-master.yml"
       - ".github/workflows/release.yml"
@@ -20,6 +21,7 @@ on:
       - "tests/**"
       - "debian/**"
       - "Makefile"
+      - "build/**"
       - "README.md"
       - "docs/Github-actions.md"
       - "docs/Star-binary-distribution.md"
@@ -28,6 +30,9 @@ permissions:
   contents: read
 
 jobs:
+  partial-builds:
+    uses: ./.github/workflows/ci-partial-builds.yml
+
   check-secrets:
     runs-on: ubuntu-24.04
     outputs:
@@ -67,7 +72,7 @@ jobs:
             scripts/docker/run_smokes_tier_a.sh
 
   publish-master-images:
-    needs: [build-and-tier-a, check-secrets]
+    needs: [build-and-tier-a, check-secrets, partial-builds]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     if: needs.check-secrets.outputs.has-docker-creds == 'true'

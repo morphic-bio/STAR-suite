@@ -160,15 +160,20 @@ make core WITH_CHROMAP=0               # same no-Chromap compatibility mode
 With the default Chromap-enabled build, the legacy Makefile builds
 `libchromap.a` in `Chromap-suite` if needed. Override paths:
 
-- `CHROMAP_SUITE_DIR` — default `/mnt/pikachu/Chromap-suite`
+- `CHROMAP_SUITE_DIR` — default sibling `../Chromap-suite` of the STAR-suite root
 - `CHROMAP_RAPIDMACS_LIB` — default
   `$(CHROMAP_SUITE_DIR)/third_party/rapidmacs/lib/librapidmacs.a`; the build
   invokes Chromap Suite's `librapidmacs` target when the archive is absent or
   stale.
-- `CHROMAP_SYS_HTS` — shared `libhts` passed **after** `libchromap.a` on the link
-  line (path to `.so`, e.g. `/lib/x86_64-linux-gnu/libhts.so`). Required because
+- `CHROMAP_HTSLIB_CFLAGS` — external HTSlib header flags, discovered with
+  `pkg-config --cflags htslib` by default.
+- `CHROMAP_SYS_HTS` — external `libhts` passed **after** `libchromap.a` on the link
+  line; defaults to `pkg-config --libs htslib`, or `-lhts` if unavailable. An
+  explicit path to `.so` is still supported. Required because
   Chromap may need a newer hts ABI than STAR’s vendored static archive. Override
-  on non-Debian layouts.
+  both header and library settings together for custom installations. Missing
+  headers/libraries fail a compile/link prerequisite check before dependency
+  scanning. The full build never falls back to STAR's bundled HTSlib.
 
 Chromap-enabled builds are currently supported only for `STAR`, `STARstatic`, and
 `gdb` targets. Top-level `make core-long` forces `WITH_CHROMAP=0`; direct

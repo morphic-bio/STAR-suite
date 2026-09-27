@@ -4,6 +4,27 @@ This file tracks where **test outputs and artifacts** should live and what is
 expected to be **untracked** in git. If you add a new smoke/regression test,
 update this file with its output location.
 
+## Source Build Regressions (2026-09-27)
+
+- `tests/test_htslib_build_discovery.py`: temporary `star-htslib-build-test-*`
+  fixtures, removed automatically.
+- `tests/test_scrna_gex_counts.py`: synthetic reference, gzip pairs, MEX outputs,
+  and logs in `/tmp/star-scrna-gex-counts-*` or explicit `--outdir`.
+- `tests/run_solo_smoke.sh`: synthetic reference, three-read/two-molecule MEX,
+  sorted BAM, and logs in `tests/solo_smoke/` or fresh `SOLO_SMOKE_OUTDIR`.
+- `tests/run_partial_make_regression.sh`: fresh `/tmp/star-partial-make.*` (or
+  explicit `OUT_ROOT`), with source exports, per-target build logs/binaries, and
+  `summary.tsv`. Keep all generated files untracked. CI uploads logs only.
+- Local missing-header reproduction, clean build checks, and v1.9.5 binary/
+  `.deb` installation checks: `/tmp/star-htslib-build-20260927/`.
+- Plain scRNA-seq 100K paired PBMC fixture:
+  `/storage/downsampled_100K/pbmc10k_gex/` (FASTQs and source/checksum manifest).
+  `tests/run_scrna_gex_100k_regression.sh` writes to a fresh
+  `/tmp/star-scrna-gex-100k-*` or `OUT_ROOT`; raw/filtered MEX, BAM, commands, and
+  `report.json` stay untracked. Only the small reviewed golden summaries belong
+  in `tests/fixtures/`. Initial validation is under the build-regression root
+  above, in `gex100k-*` directories.
+
 ## Canonical locations
 
 1) **Run logs + reports (parameter smoke suite)**
