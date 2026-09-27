@@ -39,7 +39,7 @@ void SoloFeature::materializeRGUFromHash() {
         
         uint64_t key = kh_key(readFeatSum->inlineHash_, iter);
         uint32_t count = pSolo.flexMode
-            ? flexGdnaValueCount(kh_val(readFeatSum->inlineHash_, iter))
+            ? flexProbeValueCount(kh_val(readFeatSum->inlineHash_, iter))
             : kh_val(readFeatSum->inlineHash_, iter);
         
         HashEntry entry;

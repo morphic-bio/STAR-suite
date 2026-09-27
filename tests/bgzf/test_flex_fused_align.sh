@@ -209,14 +209,14 @@ run_case() {
 run_case 2 range
 run_case 1 range
 run_case 2 off
+[[ -z "$(find "${WORKDIR}/runs" -type f \( -name '*gdna*.json' -o -name '*gdna*.tsv' \) -print -quit)" ]] \
+    || die "withdrawn gDNA diagnostic output was emitted"
 for run_id in fused_align_range_1t fused_align_off_2t; do
     for relative in \
         Solo.out/Barcodes.stats \
         Solo.out/Gene/raw/barcodes.tsv \
         Solo.out/Gene/raw/features.tsv \
         Solo.out/Gene/raw/matrix.mtx \
-        per_sample/flex_gdna_library.json \
-        per_sample/flex_gdna_summary.tsv \
         per_sample/flexfilter_summary.tsv; do
         cmp "${WORKDIR}/runs/fused_align_range_2t/${relative}" \
             "${WORKDIR}/runs/${run_id}/${relative}" \

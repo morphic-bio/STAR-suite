@@ -1034,6 +1034,10 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
 
 ## Flex gDNA diagnostic 100K acceptance (2026-07-27)
 
+Historical only: the estimator and its source-derived fixtures were withdrawn
+from the corrected v1.9.5.a release on 2026-09-27. These results must not be used
+as implementation guidance or as evidence of a currently supported feature.
+
 - Runbook: `docs/RUNBOOK_FLEX_GDNA_DIAGNOSTIC_20260727.md`
 - Fresh authorized fixture root:
   `/storage/downsampled_100K/SC2300771/results/flex_gdna_100k_20260727_v1/`
@@ -1828,3 +1832,17 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
   in the paper workspace. It creates and removes its own `star_compact_bucket_*`
   temporary directories; legacy compatibility fixtures are retained with the
   experiment. These unit checks are separate from the real full-set benchmarks.
+
+## Flex Diagnostic Removal Acceptance (2026-09-27)
+
+- Clean Chromap-enabled build log: `/tmp/star-gdna-removal-build-20260927.log`.
+- Serial focused suite, cache compatibility, exact-count scRNA tests, public
+  Flex smoke, unit checks and partial-build logs:
+  `/tmp/star-flex-removal-20260927/`.
+- JAX eight-lane x 100K-pair comparison: `jax-parity/` under that root.
+  Compares all non-diagnostic outputs with the pre-removal candidate and
+  asserts no withdrawn gDNA reports in the corrected runs.
+- New focused runner: `tests/run_flex_diagnostic_removal_acceptance.sh`.
+  It defaults to a unique `/tmp/star-flex-removal.*` directory.
+- Packed-count unit binary: `core/legacy/test/test_flex_probe_region`;
+  generated binaries, matrices, caches and logs are not committed.

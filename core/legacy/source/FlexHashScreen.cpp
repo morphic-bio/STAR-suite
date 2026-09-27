@@ -95,7 +95,7 @@ FlexHashScreenCache::Record FlexHashScreenCache::decodeStorageRecord(const FlexP
     rec.seqLo = raw.key.lo; rec.seqHi = raw.key.hi;
     rec.resolvedGeneIdx15 = raw.value.geneAndRegion & 0x7fffu;
     rec.probeRegion = regionMetadataComplete_
-        ? static_cast<FlexGdnaRegion>((raw.value.geneAndRegion >> 30) & 3u) : FlexGdnaUnknown;
+        ? static_cast<FlexProbeRegion>((raw.value.geneAndRegion >> 30) & 3u) : FlexProbeRegionUnknown;
     rec.cacheClass = raw.value.cacheClass; rec.negativeCode = raw.value.negativeCode;
     rec.sampleIdx = cacheVersion_ >= kCacheVersionSampleAware ? raw.value.sample : 0;
     return rec;
@@ -155,7 +155,7 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
     uint16_t nonExactGene = 0;
     uint16_t nonExactSample = 0;
     uint8_t nonExactClass = 0;
-    FlexGdnaRegion nonExactRegion = FlexGdnaUnknown;
+    FlexProbeRegion nonExactRegion = FlexProbeRegionUnknown;
     int8_t nonExactOffset = 0;
     bool sawGeneConflict = false;
     int8_t geneConflictOffset = 0;
@@ -211,7 +211,7 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
                 sawGeneConflict = true;
                 geneConflictOffset = relativeOffsets[idx];
             } else {
-                nonExactRegion = flexGdnaMergeRegion(nonExactRegion, rec->probeRegion);
+                nonExactRegion = flexProbeMergeRegion(nonExactRegion, rec->probeRegion);
             }
         }
     }

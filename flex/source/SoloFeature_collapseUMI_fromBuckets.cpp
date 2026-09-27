@@ -2,7 +2,7 @@
 #include "SoloReadFeature.h"
 #include "CbBucketStore.h"
 #include "ErrorWarning.h"
-#include "FlexGdna.h"
+#include "FlexProbeRegion.h"
 #include "MexWriter.h"
 #include "SampleDetector.h"
 #include "TimeFunctions.h"
@@ -41,8 +41,6 @@ struct BucketResult {
     std::vector<MexWriter::Triplet> triplets;
     std::vector<uint32_t> cellUmis;
     std::vector<uint32_t> cellGenes;
-    std::vector<FlexGdnaCellSummary> gdnaCells;
-    std::vector<FlexGdnaGeneCount> gdnaGeneCounts;
     uint64_t finalMolecules = 0;
     BucketMetrics metrics;
     uint64_t inputRecords = 0;
@@ -164,9 +162,6 @@ void SoloFeature::collapseUMIall_fromBuckets()
                      << " s, geneIds+allowed " << tGeneIdsAndAllowed << " s"
                      << endl << std::flush;
 
-    const bool collectGdna = pSolo.runFlexFilter && pSolo.flexMode
-        && pSolo.flexGdnaMode != ParametersSolo::FlexGdnaOff;
-    const size_t gdnaGeneSlots = FlexGdnaProbeMetadata::instance().geneProbeCounts().size();
     const uint32_t bucketCount = pSolo.cbBucketStore->bucket_count();
     std::vector<BucketResult> results(bucketCount);
     pSolo.cbBucketStore->reset_bucket_claims();
@@ -258,14 +253,14 @@ void SoloFeature::collapseUMIall_fromBuckets()
                     && cb < cbAllowed.size() && cbAllowed[cb] != 0;
                 uint64_t groupReads = 0;
                 for (const auto &record : group)
-                    groupReads += flexGdnaValueCount(record.value);
+                    groupReads += flexProbeValueCount(record.value);
                 out.inputCounts += groupReads;
                 if (correctGroup) {
                     counts.clear();
                     counts.reserve(group.size());
                     for (const auto &record : group)
                         counts.emplace_back(record.umi24(),
-                                            flexGdnaValueCount(record.value));
+                                            flexProbeValueCount(record.value));
                     auto umiMark = std::chrono::steady_clock::now();
                     const auto correction = UMICorrector::correctClique(
                         counts, correctionParams);
@@ -289,7 +284,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
                 for (size_t i = 0; i < group.size();) {
                     auto merged = group[i++];
                     while (i < group.size() && group[i].key == merged.key)
-                        merged.value = flexGdnaMergeValue(merged.value,
+                        merged.value = flexProbeMergeValue(merged.value,
                                                           group[i++].value);
                     group[write++] = merged;
                 }
@@ -309,16 +304,8 @@ void SoloFeature::collapseUMIall_fromBuckets()
                         out.cbTagKeys.push_back(cbTag);
                         out.cellUmis.push_back(0);
                         out.cellGenes.push_back(0);
-                        if (collectGdna) out.gdnaCells.emplace_back();
                         cell = static_cast<uint32_t>(out.barcodes.size() - 1);
                         previousCbTag = cbTag;
-                    }
-                    if (collectGdna) {
-                        uint32_t regionCounts[4] = {0, 0, 0, 0};
-                        for (const auto& record : group)
-                            ++regionCounts[flexGdnaValueRegion(record.value)];
-                        flexGdnaAccumulateGroup(out.gdnaCells.back(), out.gdnaGeneCounts,
-                                                gene, gdnaGeneSlots, regionCounts);
                     }
                     if (gene > 0 && gene <= geneIds.size()) {
                         const uint32_t moleculeCount = static_cast<uint32_t>(group.size());
@@ -340,7 +327,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
                 // Equal packed keys are adjacent in the global merge. Fold
                 // them with exactly the same saturated-count/region operator.
                 if (!group.empty() && group.back().key == record.key)
-                    group.back().value = flexGdnaMergeValue(group.back().value,
+                    group.back().value = flexProbeMergeValue(group.back().value,
                                                            record.value);
                 else
                     group.push_back(record);
@@ -380,7 +367,6 @@ void SoloFeature::collapseUMIall_fromBuckets()
     const auto fanInStart = std::chrono::steady_clock::now();
     std::vector<size_t> offCells(bucketCount + 1, 0);
     std::vector<size_t> offTriplets(bucketCount + 1, 0);
-    std::vector<size_t> offGdnaCounts(bucketCount + 1, 0);
     std::vector<size_t> offCbIndices(bucketCount + 1, 0);
     for (uint32_t bucket = 0; bucket < bucketCount; ++bucket) {
         BucketResult &part = results[bucket];
@@ -401,7 +387,6 @@ void SoloFeature::collapseUMIall_fromBuckets()
 
         offCells[bucket + 1] = offCells[bucket] + part.barcodes.size();
         offTriplets[bucket + 1] = offTriplets[bucket] + part.triplets.size();
-        offGdnaCounts[bucket + 1] = offGdnaCounts[bucket] + part.gdnaGeneCounts.size();
         offCbIndices[bucket + 1] = offCbIndices[bucket] + part.cbIndices.size();
 
         umisBeforeTotal += part.metrics.umisBefore;
@@ -433,9 +418,6 @@ void SoloFeature::collapseUMIall_fromBuckets()
     inlineMatrix.cbTagKeys.resize(offCells[bucketCount]);
     inlineMatrix.matrixData.nUMIperCB.resize(offCells[bucketCount]);
     inlineMatrix.matrixData.nGenePerCB.resize(offCells[bucketCount]);
-    inlineMatrix.gdnaCountsReady = collectGdna;
-    if (collectGdna) inlineMatrix.gdnaCells.resize(offCells[bucketCount]);
-    inlineMatrix.gdnaGeneCounts.resize(offGdnaCounts[bucketCount]);
     indCB.resize(offCbIndices[bucketCount]);
 
 #pragma omp parallel for schedule(dynamic, 1) num_threads(tailThreads)
@@ -461,15 +443,6 @@ void SoloFeature::collapseUMIall_fromBuckets()
                 matrix.countCellGeneUMI[at++] = triplet.gene_idx;
                 matrix.countCellGeneUMI[at++] = triplet.count;
             }
-        }
-        if (collectGdna) {
-            for (size_t cell = 0; cell < part.gdnaCells.size(); ++cell) {
-                auto summary = part.gdnaCells[cell];
-                summary.begin += offGdnaCounts[bucket];
-                inlineMatrix.gdnaCells[cellBase + cell] = summary;
-            }
-            std::copy(part.gdnaGeneCounts.begin(), part.gdnaGeneCounts.end(),
-                      inlineMatrix.gdnaGeneCounts.begin() + offGdnaCounts[bucket]);
         }
         std::copy(part.cbIndices.begin(), part.cbIndices.end(),
                   indCB.begin() + offCbIndices[bucket]);
