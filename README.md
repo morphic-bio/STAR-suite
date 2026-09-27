@@ -2,9 +2,12 @@
 
 STAR Suite updates the original STAR aligner by integrating four modules — STAR-core (with integrated TranscriptVB quantification), STAR-perturb, STAR-Flex, and STAR-SLAM — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (STAR Suite 1.9.4: **1.6–4.2x for bulk RNA-seq** against an external stepwise pipeline; against Cell Ranger 9.0.1, **3.9x for scRNA-seq**, **4.8–5.8x for Perturb-seq**, and **17–23x for Flex** from the delivered FASTQ, up to **42x** from CBQ input) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
-Current production release: **[STAR Suite v1.9.5](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.9.5)**. The suite release tag and
-source-packaging version are `v1.9.5` / `1.9.5-1`; `STAR --version` reports
-`1.9.5`. The benchmark results below were measured on 1.9.5.
+Current production release: **[STAR Suite v1.9.5.a](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.9.5.a)**. The suite release tag and
+source-packaging version are `v1.9.5.a` / `1.9.5.a-1`; `STAR --version` reports
+`1.9.5.a`. This maintenance release fixes source-build dependency discovery and
+conventional Solo UMI counts; see the [release notes](docs/RELEASE_NOTES_v1.9.5.a.md).
+The benchmark results below retain their measured 1.9.5 identity, and the
+original `v1.9.5` tag is unchanged.
 GitHub Releases also provides Ubuntu 22.04- and 24.04-built `.deb`
 packages from the same source revision.
 Use `STAR --upstream-version` for the underlying upstream STAR base
@@ -211,8 +214,11 @@ files.
 ### From source
 
 ```bash
-# Core STAR binary
+# Core STAR binary, including Chromap (requires Chromap-suite and external HTSlib)
 make core
+
+# Explicit standalone RNA/Flex/SLAM build; retains STARsolo and poly-G trimming
+make core-portable
 
 # Module-focused builds
 make flex           # core + Flex tools
@@ -241,6 +247,14 @@ make default EXCLUDE="flex-tools"
 
 Run `make help` to see the full target list and descriptions.
 
+The default core build requires a sibling `../Chromap-suite` checkout (including
+its submodules) and HTSlib development headers/library. Set `CHROMAP_SUITE_DIR`
+for another checkout location; `PKG_CONFIG_PATH` selects a non-system HTSlib
+installation. See [source prerequisites](docs/compile_instructions.md).
+Do not copy or symlink the bundled HTSlib headers into another directory.
+When changing between Chromap-enabled and portable builds, run `make core-clean`
+first.
+
 ### From release artifacts
 
 ```bash
@@ -248,15 +262,17 @@ Run `make help` to see the full target list and descriptions.
 sudo apt install ./star-suite_<version>_<arch>.deb
 
 # Installer tarball (auto-detects host glibc level)
-tar -xzf STAR-suite-<version>-linux-<arch>-installer.tar.gz
-cd STAR-suite-<version>-linux-<arch>-installer
-./install.sh
+mkdir star-suite-installer
+tar -xzf STAR-suite-<version>-linux-<arch>-installer.tar.gz -C star-suite-installer
+./star-suite-installer/install.sh --prefix "$HOME/.local"
 
 # Manual compatibility tarball
-tar -xzf STAR-suite-<version>-linux-<arch>-glibc234.tar.gz
-cd STAR-suite-<version>-linux-<arch>-glibc234
-./install.sh
+mkdir star-suite-glibc234
+tar -xzf STAR-suite-<version>-linux-<arch>-glibc234.tar.gz -C star-suite-glibc234
+./star-suite-glibc234/install.sh --prefix "$HOME/.local"
 ```
+
+These are prebuilt binary packages: do not run `make` after extracting them.
 
 Release tarballs are validated in clean Ubuntu 22.04 and 24.04 Docker containers before publication. The installer bundle auto-detects the host glibc level and chooses the right bundled binary.
 

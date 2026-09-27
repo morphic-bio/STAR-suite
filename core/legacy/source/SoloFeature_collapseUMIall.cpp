@@ -619,14 +619,27 @@ void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<
 
         if (nU0>0) {
             // Run dedup corrections but write matrices only if not minimal
-            if (pSolo.umiDedup.yes.CR)
-                umiArrayCorrect_CR(nU0, umiArray.data(), pSolo.umiDedup.typeMain==UMIdedup::typeI::CR, !minimalMode, umiCorrected[iG]);
-            if (pSolo.umiDedup.yes.Directional)
-                umiArrayCorrect_Directional(nU0, umiArray.data(), pSolo.umiDedup.typeMain==UMIdedup::typeI::Directional, !minimalMode, umiCorrected[iG], 0);
-            if (pSolo.umiDedup.yes.Directional_UMItools)
-                umiArrayCorrect_Directional(nU0, umiArray.data(), pSolo.umiDedup.typeMain==UMIdedup::typeI::Directional_UMItools, !minimalMode, umiCorrected[iG], -1);
-            if (pSolo.umiDedup.yes.All)
-                umiArrayCorrect_Graph(nU0, umiArray.data(), pSolo.umiDedup.typeMain==UMIdedup::typeI::All, !minimalMode, umiCorrected[iG]);
+            // Correction helpers return counts; they do not populate the matrix.
+            if (pSolo.umiDedup.yes.CR) {
+                const uint32 count = umiArrayCorrect_CR(nU0, umiArray.data(), pSolo.umiDedup.typeMain==UMIdedup::typeI::CR, !minimalMode, umiCorrected[iG]);
+                if (!minimalMode)
+                    countCellGeneUMI[countCellGeneUMIindex[iCB+1] + pSolo.umiDedup.countInd.CR] = count;
+            }
+            if (pSolo.umiDedup.yes.Directional) {
+                const uint32 count = umiArrayCorrect_Directional(nU0, umiArray.data(), pSolo.umiDedup.typeMain==UMIdedup::typeI::Directional, !minimalMode, umiCorrected[iG], 0);
+                if (!minimalMode)
+                    countCellGeneUMI[countCellGeneUMIindex[iCB+1] + pSolo.umiDedup.countInd.Directional] = count;
+            }
+            if (pSolo.umiDedup.yes.Directional_UMItools) {
+                const uint32 count = umiArrayCorrect_Directional(nU0, umiArray.data(), pSolo.umiDedup.typeMain==UMIdedup::typeI::Directional_UMItools, !minimalMode, umiCorrected[iG], -1);
+                if (!minimalMode)
+                    countCellGeneUMI[countCellGeneUMIindex[iCB+1] + pSolo.umiDedup.countInd.Directional_UMItools] = count;
+            }
+            if (pSolo.umiDedup.yes.All) {
+                const uint32 count = umiArrayCorrect_Graph(nU0, umiArray.data(), pSolo.umiDedup.typeMain==UMIdedup::typeI::All, !minimalMode, umiCorrected[iG]);
+                if (!minimalMode)
+                    countCellGeneUMI[countCellGeneUMIindex[iCB+1] + pSolo.umiDedup.countInd.All] = count;
+            }
             if (!minimalMode) {
                 if (pSolo.umiDedup.yes.Exact)
                     countCellGeneUMI[countCellGeneUMIindex[iCB+1] + pSolo.umiDedup.countInd.Exact] = nU0;

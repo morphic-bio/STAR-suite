@@ -75,6 +75,7 @@ Production-file cases use stable local fixtures and are not part of routine
 developer smoke unless requested:
 
 - `cr-compat / ucsf-corrected-100k`
+- `scrna-solo / gex-only-pbmc-100k` (plain 10x GEX; no Flex or guide libraries)
 - `feature-tools / pf-dynamic-permit-100k`
 - `flex / flex-hash-screen-100k`
 - `slam / slam-pe-100k`
@@ -83,6 +84,13 @@ developer smoke unless requested:
 The manifest is the source of truth for required fixture paths, tools, and
 per-case environment fallbacks. If a path moves, update the manifest rather than
 embedding host assumptions in the runner.
+
+Plain scRNA and perturb-seq are separate gates. The former compares pinned
+raw/filtered Gene and GeneFull counts and cell sets for default Solo, modern
+scRNA defaults, and sorted BAM output on a public 100K paired PBMC fixture.
+See `docs/RUNBOOK_SCRNA_GEX_100K_REGRESSION.md`. The existing UCSF perturb gate
+continues to cover the GEX+guide production wrapper and downstream artifacts;
+it does not replace the plain scRNA gate.
 
 ## BINSEQ Note
 

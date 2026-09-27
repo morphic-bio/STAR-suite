@@ -1,0 +1,197 @@
+{
+  "schema": "scrna-gex-100k-regression-v1",
+  "inputs": {
+    "lanes": [
+      {
+        "read_pairs": 50000,
+        "r1": "L001_R1.fastq.gz",
+        "r2": "L001_R2.fastq.gz",
+        "r1_sha256": "a1fe91bd94f600e272a8806a3f696f4b7d9e6678366a6530cb2d9d6f00e674b7",
+        "r2_sha256": "85f9bcfafba360825414d7699f4cdbf2c49e0bf4e751e6767424c866a80fd0d0"
+      },
+      {
+        "read_pairs": 50000,
+        "r1": "L002_R1.fastq.gz",
+        "r2": "L002_R2.fastq.gz",
+        "r1_sha256": "7057e1661880a16b84ef7933331c82056d37912b563d16d38d0a9859c8308e04",
+        "r2_sha256": "dabc83ff9a8be54769b499a6a0c81943cc15c77f1df9ec96f872c346bf6cba7c"
+      }
+    ],
+    "whitelist_sha256": "5e3969f11d28615ca47efd409205c6a17972edd7d1b2a756aaaccf36e6fd5c84",
+    "reference_metadata": {
+      "genomeParameters.txt": "8b4b8c2255f2e8eab40cdd87dcae2dec3937309ec5d76b0ceeff96e6311d213a",
+      "chrNameLength.txt": "d525ee20551f34768f4017c7a779a3f3c7b947dacdea27838a5776508834b306",
+      "geneInfo.tab": "40f6ac3112cdb0c36ccef1543eb40c075904f02efc2aae33644f1d90424a6e08",
+      "exonInfo.tab": "2d4e2260991cd97219776fe89130a262dac70e87a6b61ea428e21d13223289bd"
+    }
+  },
+  "binary_sha256": "b48d2d30dcd0498cb56b7db8805ae1b0eade77052dc37fecce32996ec7881210",
+  "version": "1.9.5",
+  "source_revision": "unversioned-source",
+  "profiles": {
+    "vanilla": {
+      "qc": {
+        "Number of input reads": 100000,
+        "Uniquely mapped reads number": 89527,
+        "Number of reads mapped to multiple loci": 7182,
+        "Number of reads mapped to too many loci": 202
+      },
+      "matrices": {
+        "Gene": {
+          "raw": {
+            "genes": 38606,
+            "barcodes": 3686400,
+            "nnz": 46689,
+            "umis": 47358,
+            "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+            "barcodes_sha256": "d5556ac97cf6c77012c47cbd79786e83669c3120ddb8973ef3bc60233f31b580",
+            "counts_sha256": "e11ab1f39c87201c0b21fdfb6cee5c7375fd18e7cebc705a2b84d47075d8333c"
+          },
+          "filtered": {
+            "genes": 38606,
+            "barcodes": 9170,
+            "nnz": 42944,
+            "umis": 43613,
+            "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+            "barcodes_sha256": "d79a36be600df0615b7658e74fd4a9a56b6a5dd450fd6d01c252effe9ebe041c",
+            "counts_sha256": "2bd9083cb38f5cdca2ea0853b344622309f707b2f4c8e61e2f45dbf61554fc61"
+          }
+        },
+        "GeneFull": {
+          "raw": {
+            "genes": 38606,
+            "barcodes": 3686400,
+            "nnz": 69821,
+            "umis": 70527,
+            "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+            "barcodes_sha256": "d5556ac97cf6c77012c47cbd79786e83669c3120ddb8973ef3bc60233f31b580",
+            "counts_sha256": "a54f29c49d3563eddf2c2376c3cc8342ea8ceebf29cd98b0032de3733f6f58e0"
+          },
+          "filtered": {
+            "genes": 38606,
+            "barcodes": 10549,
+            "nnz": 66237,
+            "umis": 66943,
+            "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+            "barcodes_sha256": "fbd58de0cb3bd669d0d77fbcc79b425e2a044ee0492af0c7c502876dfe53b543",
+            "counts_sha256": "0b8e9f764038f1e3753b41427686ca47bf36b9a832f8164211fa34f73ef0a652"
+          }
+        }
+      }
+    },
+    "modern": {
+      "qc": {
+        "Number of input reads": 100000,
+        "Uniquely mapped reads number": 89527,
+        "Number of reads mapped to multiple loci": 7182,
+        "Number of reads mapped to too many loci": 202
+      },
+      "matrices": {
+        "Gene": {
+          "raw": {
+            "genes": 38606,
+            "barcodes": 3686400,
+            "nnz": 46538,
+            "umis": 47203,
+            "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+            "barcodes_sha256": "d5556ac97cf6c77012c47cbd79786e83669c3120ddb8973ef3bc60233f31b580",
+            "counts_sha256": "40410dfba45fb09f6ebbc3f0f3f7e046b8af8d036409e5a47fc276d888a7a1a1"
+          },
+          "filtered": {
+            "genes": 38606,
+            "barcodes": 13009,
+            "nnz": 46538,
+            "umis": 47203,
+            "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+            "barcodes_sha256": "0bc9d7f0540f0bb4fb5b954667c845781c8c5ef3fcfff0228f2797c629229324",
+            "counts_sha256": "40410dfba45fb09f6ebbc3f0f3f7e046b8af8d036409e5a47fc276d888a7a1a1"
+          }
+        },
+        "GeneFull": {
+          "raw": {
+            "genes": 38606,
+            "barcodes": 3686400,
+            "nnz": 69570,
+            "umis": 70270,
+            "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+            "barcodes_sha256": "d5556ac97cf6c77012c47cbd79786e83669c3120ddb8973ef3bc60233f31b580",
+            "counts_sha256": "47e0b68b04f3bb485a023ca65e67f4fcc07efb27b9d46c98239efc796477e8c3"
+          },
+          "filtered": {
+            "genes": 38606,
+            "barcodes": 10540,
+            "nnz": 65840,
+            "umis": 66540,
+            "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+            "barcodes_sha256": "7cb24c616f9300ef91cf72ca5ee06003b338c52e67c01ba4546f8f0e885df80f",
+            "counts_sha256": "1cb446dc944c381ae1c3fec502ff45837127f91dee0758152646b2b907ef4bbb"
+          }
+        }
+      }
+    },
+    "modern_bam": {
+      "qc": {
+        "Number of input reads": 100000,
+        "Uniquely mapped reads number": 89527,
+        "Number of reads mapped to multiple loci": 7182,
+        "Number of reads mapped to too many loci": 202
+      },
+      "matrices": {
+        "Gene": {
+          "raw": {
+            "genes": 38606,
+            "barcodes": 3686400,
+            "nnz": 46538,
+            "umis": 47203,
+            "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+            "barcodes_sha256": "d5556ac97cf6c77012c47cbd79786e83669c3120ddb8973ef3bc60233f31b580",
+            "counts_sha256": "40410dfba45fb09f6ebbc3f0f3f7e046b8af8d036409e5a47fc276d888a7a1a1"
+          },
+          "filtered": {
+            "genes": 38606,
+            "barcodes": 13009,
+            "nnz": 46538,
+            "umis": 47203,
+            "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+            "barcodes_sha256": "0bc9d7f0540f0bb4fb5b954667c845781c8c5ef3fcfff0228f2797c629229324",
+            "counts_sha256": "40410dfba45fb09f6ebbc3f0f3f7e046b8af8d036409e5a47fc276d888a7a1a1"
+          }
+        },
+        "GeneFull": {
+          "raw": {
+            "genes": 38606,
+            "barcodes": 3686400,
+            "nnz": 69570,
+            "umis": 70270,
+            "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+            "barcodes_sha256": "d5556ac97cf6c77012c47cbd79786e83669c3120ddb8973ef3bc60233f31b580",
+            "counts_sha256": "47e0b68b04f3bb485a023ca65e67f4fcc07efb27b9d46c98239efc796477e8c3"
+          },
+          "filtered": {
+            "genes": 38606,
+            "barcodes": 10540,
+            "nnz": 65840,
+            "umis": 66540,
+            "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+            "barcodes_sha256": "7cb24c616f9300ef91cf72ca5ee06003b338c52e67c01ba4546f8f0e885df80f",
+            "counts_sha256": "1cb446dc944c381ae1c3fec502ff45837127f91dee0758152646b2b907ef4bbb"
+          }
+        }
+      }
+    }
+  },
+  "baseline_provenance": {
+    "vanilla": {
+      "basis": "Analytical UMI-count regression validated correction; released v1.9.5 vanilla raw matrices were empty and were rejected.",
+      "base_commit": "82ff2a3",
+      "modified_source": "core/legacy/source/SoloFeature_collapseUMIall.cpp",
+      "binary_sha256": "b48d2d30dcd0498cb56b7db8805ae1b0eade77052dc37fecce32996ec7881210"
+    },
+    "modern": {
+      "basis": "Exactly matches released v1.9.5, including modern_bam",
+      "version": "1.9.5",
+      "source_revision": "fb9f1f4e0c380d8301041cb16ff3fd9856b62ce5",
+      "binary_sha256": "c9d8acaab53e69e1734065dd80e64a7be8ab0516a462101b3f4e4a50c6e002fa"
+    }
+  }
+}

@@ -1,3 +1,16 @@
+star-suite (1.9.5.a-1) unstable; urgency=medium
+
+  * Fix external HTSlib header/library discovery for Chromap-enabled make core,
+    honor include overrides during dependency scanning, and fail clearly when
+    prerequisites are missing. Preserve portable builds with bundled HTSlib.
+  * Restore molecule counts returned by conventional Solo UMI deduplication.
+    The MultiGeneUMI_CR production counting path is unchanged.
+  * Require analytical default-Solo counts in smoke tests, add a plain PBMC
+    100K regression fixture, and gate releases on clean partial Make builds.
+  * Keep the original v1.9.5 tag and paper benchmark identities unchanged.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sun, 27 Sep 2026 08:23:26 +0000
+
 star-suite (1.9.5-1) unstable; urgency=medium
 
   * Migrate Visium HD Flex to the fused half-probe path without a genome

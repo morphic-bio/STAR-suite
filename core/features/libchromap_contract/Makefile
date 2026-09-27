@@ -1,7 +1,7 @@
 CXX ?= g++
 AR ?= ar
 
-CHROMAP_DIR ?= /mnt/pikachu/Chromap-suite
+CHROMAP_DIR ?= $(abspath $(CURDIR)/../../../../Chromap-suite)
 CHROMAP_LIB ?= $(CHROMAP_DIR)/libchromap.a
 CHROMAP_SRC_DIR := $(CHROMAP_DIR)/src
 CHROMAP_HTSLIB_DIR := $(CHROMAP_DIR)/third_party/htslib

@@ -55,10 +55,14 @@ CHROMAP_ORCH_CPP_STUB := star_chromap_orchestration_stub.cpp
 LIBCHROMAP_CONTRACT_DIR := $(ROOT_DIR)/core/features/libchromap_contract
 LIBCHROMAP_CONTRACT_INC := $(LIBCHROMAP_CONTRACT_DIR)/include
 LIBCHROMAP_CONTRACT_LIB := $(LIBCHROMAP_CONTRACT_DIR)/libstar_chromap_contract.a
-CHROMAP_SUITE_DIR ?= /mnt/pikachu/Chromap-suite
+CHROMAP_SUITE_DIR ?= $(abspath $(ROOT_DIR)/../Chromap-suite)
 CHROMAP_LIB := $(CHROMAP_SUITE_DIR)/libchromap.a
 CHROMAP_RAPIDMACS_LIB ?= $(CHROMAP_SUITE_DIR)/third_party/rapidmacs/lib/librapidmacs.a
-CHROMAP_SYS_HTS ?= /lib/x86_64-linux-gnu/libhts.so
+PKG_CONFIG ?= pkg-config
+# Keep external HTSlib headers and linking paired; do not fall back to STAR's
+# older bundled headers when linking Chromap/system HTSlib.
+CHROMAP_HTSLIB_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags htslib 2>/dev/null)
+CHROMAP_SYS_HTS ?= $(shell $(PKG_CONFIG) --libs htslib 2>/dev/null || printf '%s' '-lhts')
 CHROMAP_EXTRA_LIBS := -lbz2 -llzma -lcurl -ldeflate -lm
 CHROMAP_DEP_STAMP := .depend.with_chromap_$(WITH_CHROMAP)
 
@@ -67,8 +71,11 @@ CHROMAP_CXXFLAGS := -I$(LIBCHROMAP_CONTRACT_INC) -DWITH_CHROMAP=1
 CHROMAP_ORCH_OBJ := star_chromap_orchestration.o
 CHROMAP_LINK_LINE := $(LIBCHROMAP_CONTRACT_LIB) $(CHROMAP_LIB) $(CHROMAP_RAPIDMACS_LIB) $(LIBSCRNA_LIB) $(CHROMAP_SYS_HTS) $(CHROMAP_EXTRA_LIBS)
 CHROMAP_STAR_DEPS := $(LIBCHROMAP_CONTRACT_LIB) $(CHROMAP_LIB) $(CHROMAP_RAPIDMACS_LIB)
-STAR_HTSLIB_INC :=
+STAR_HTSLIB_INC := $(CHROMAP_HTSLIB_CFLAGS)
 STAR_HTSLIB_LINK :=
+STAR_HTSLIB_DEPS :=
+STAR_BUILD_CHECK := check-core-dependencies
+CHROMAP_SOURCE_REQUIRED := $(filter STAR$(SFX) STARstatic$(SFX) gdb check-core-dependencies,$(MAKECMDGOALS))
 else
 CHROMAP_CXXFLAGS := -DWITH_CHROMAP=0
 CHROMAP_ORCH_OBJ := star_chromap_orchestration_stub.o
@@ -76,6 +83,8 @@ CHROMAP_LINK_LINE :=
 CHROMAP_STAR_DEPS :=
 STAR_HTSLIB_INC := -Ihtslib
 STAR_HTSLIB_LINK := -Lhtslib -Bstatic -lhts -Bdynamic
+STAR_HTSLIB_DEPS := htslib/libhts.a
+STAR_BUILD_CHECK :=
 endif
 
 ifeq ($(WITH_CHROMAP),1)
@@ -107,7 +116,7 @@ LDFLAGS_static_gomp := $(LIBGOMP_STATIC)
 else
 LDFLAGS_static_gomp := -lgomp
 endif
-LDFLAGS_static := -static-libgcc -static-libstdc++ -pthread -Lhtslib -Bstatic -lhts $(LDFLAGS_static_gomp) -Bdynamic -lz -lbz2 -llzma -lcurl -lssl -lcrypto -ldl
+LDFLAGS_static := -static-libgcc -static-libstdc++ -pthread $(STAR_HTSLIB_LINK) $(LDFLAGS_static_gomp) -Bdynamic -lz -lbz2 -llzma -lcurl -lssl -lcrypto -ldl
 LDFLAGS_Mac :=-pthread -lz htslib/libhts.a
 LDFLAGS_Mac_static :=-pthread -lz -static-libgcc htslib/libhts.a
 LDFLAGS_gdb := $(LDFLAGS_shared)
@@ -803,13 +812,36 @@ $(CHROMAP_DEP_STAMP):
 	@'rm' -f .depend.with_chromap_*
 	@touch $@
 
-Depend.list: $(SOURCES) parametersDefault.xxd htslib $(CHROMAP_DEP_STAMP)
-	echo $(SOURCES)
-	'rm' -f ./Depend.list
-	# parametersDefault.xxd is generated input, not a compilation unit.
-	# Ensure it exists before dep-scan and only scan real source files.
-	test -f parametersDefault.xxd
-	$(CXX) $(CXXFLAGS_common) -MM $(SOURCES) >> Depend.list
+# Check before regenerating the included makefile. An order-only check does
+# not invalidate cached dependencies.
+.PHONY: check-core-dependencies
+check-core-dependencies:
+	@set -eu; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
+	if ! printf '%s\n' '#include <htslib/khash.h>' '#include <htslib/sam.h>' \
+	    'int main() { return hts_version() ? 0 : 1; }' | \
+	    $(CXX) $(CPPFLAGS) $(CXXFLAGSextra) $(CXXFLAGS_common) -x c++ - \
+	    -o "$$tmp/htslib-check" -x none $(LDFLAGSextra) $(LDFLAGS) $(CHROMAP_SYS_HTS) \
+	    >"$$tmp/htslib.log" 2>&1; then \
+	    cat "$$tmp/htslib.log" >&2; \
+	    echo 'ERROR: Chromap-enabled STAR requires external HTSlib headers and library.' >&2; \
+	    echo 'Install libhts-dev (Debian/Ubuntu), or set PKG_CONFIG_PATH for your HTSlib installation.' >&2; \
+	    echo 'Without pkg-config, set CHROMAP_HTSLIB_CFLAGS and CHROMAP_SYS_HTS to matching headers/library.' >&2; \
+	    echo 'For an explicit no-Chromap build, use make core-portable (WITH_CHROMAP=0).' >&2; \
+	    exit 2; \
+	fi; \
+	if [ -n "$(CHROMAP_SOURCE_REQUIRED)" ] && \
+	    { [ ! -f "$(CHROMAP_SUITE_DIR)/Makefile" ] || [ ! -f "$(CHROMAP_SUITE_DIR)/src/libchromap.h" ]; }; then \
+	    echo 'ERROR: Chromap-suite source not found at $(CHROMAP_SUITE_DIR).' >&2; \
+	    echo 'Set CHROMAP_SUITE_DIR to a Chromap-suite checkout with initialized submodules; see docs/compile_instructions.md.' >&2; \
+	    echo 'For an explicit no-Chromap build, use make core-portable (WITH_CHROMAP=0).' >&2; \
+	    exit 2; \
+	fi
+
+Depend.list: $(SOURCES) parametersDefault.xxd $(STAR_HTSLIB_DEPS) $(CHROMAP_DEP_STAMP) | $(STAR_BUILD_CHECK)
+	@set -eu; tmp=$$(mktemp Depend.list.XXXXXX); \
+	trap 'rm -f "$$tmp"' EXIT HUP INT TERM; \
+	$(CXX) $(CPPFLAGS) $(CXXFLAGSextra) $(CXXFLAGS_common) -MM $(SOURCES) > "$$tmp"; \
+	mv -f "$$tmp" "$@"
 include Depend.list
 endif
 endif
