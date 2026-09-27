@@ -163,7 +163,7 @@ void SoloReadFeature::appendInlineObservation(uint64_t key, uint32_t value)
         kh_val(inlineHash_, iter) = value;
     } else {
         kh_val(inlineHash_, iter) = pSolo.flexMode
-            ? flexGdnaMergeValue(kh_val(inlineHash_, iter), value)
+            ? flexProbeMergeValue(kh_val(inlineHash_, iter), value)
             : kh_val(inlineHash_, iter) + value;
     }
 }
@@ -252,7 +252,7 @@ void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
                 kh_val(inlineHash_, dest_iter) = count;
             } else {
                 kh_val(inlineHash_, dest_iter) = pSolo.flexMode
-                    ? flexGdnaMergeValue(kh_val(inlineHash_, dest_iter), count)
+                    ? flexProbeMergeValue(kh_val(inlineHash_, dest_iter), count)
                     : kh_val(inlineHash_, dest_iter) + count;
             }
         }

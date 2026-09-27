@@ -185,6 +185,8 @@ log "Running Flex pipeline..."
   --threads "${THREADS}"
 
 RUN_ROOT="${OUT_BASE}/${RUN_ID}"
+[[ -z "$(find "${RUN_ROOT}" -type f \( -name '*gdna*.json' -o -name '*gdna*.tsv' \) -print -quit)" ]] \
+  || die "withdrawn gDNA diagnostic output was emitted"
 
 # ── Validate outputs ────────────────────────────────────────────────
 PASS=0

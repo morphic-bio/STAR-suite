@@ -60,6 +60,7 @@ failed=0
 
 run_test "run_solo_smoke" "tests/run_solo_smoke.sh" || failed=1
 run_test "plain_scrna_exact_counts" "python3 tests/test_scrna_gex_counts.py" || failed=1
+run_test "flex_gdna_removed" "python3 tests/test_flex_gdna_removed.py" || failed=1
 run_test "run_scrna_sidecar_off_golden" "tests/run_scrna_sidecar_off_golden.sh" || failed=1
 run_test "run_spatial_r1_tap_guard" "tests/run_spatial_r1_tap_guard.sh" || failed=1
 run_test "test_visium_hd_gex_sidecar_concurrency" "python3 tests/test_visium_hd_gex_sidecar_concurrency.py" || failed=1

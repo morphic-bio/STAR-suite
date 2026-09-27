@@ -5,7 +5,8 @@ STAR Suite updates the original STAR aligner by integrating four modules — STA
 Current production release: **[STAR Suite v1.9.5.a](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.9.5.a)**. The suite release tag and
 source-packaging version are `v1.9.5.a` / `1.9.5.a-1`; `STAR --version` reports
 `1.9.5.a`. This maintenance release fixes source-build dependency discovery and
-conventional Solo UMI counts; see the [release notes](docs/RELEASE_NOTES_v1.9.5.a.md).
+conventional Solo UMI counts, and removes the optional source-derived Flex
+gDNA diagnostic; see the [release notes](docs/RELEASE_NOTES_v1.9.5.a.md).
 The benchmark results below retain their measured 1.9.5 identity, and the
 original `v1.9.5` tag is unchanged.
 GitHub Releases also provides Ubuntu 22.04- and 24.04-built `.deb`
@@ -67,10 +68,6 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
   through the existing memory or bounded spill engine. Ordinary gzip and
   native BGZF are supported. The retired spatial alignment route is rejected;
   see [spatial half-probe processing](docs/SPATIAL_FLEX_HALF_PROBE.md).
-- **Flex gDNA QC** (`--soloFlexGdna auto|yes|no`): Computes the 10x-style gDNA
-  diagnostic from final filtered barcode/gene/UMI families and writes
-  per-sample JSON plus an audit TSV. The diagnostic is matrix-inert and inert
-  outside Flex.
 - **Solo Features**: `sF` BAM tag for feature type, `--soloCBtype String` for arbitrary barcode strings, `--soloCellReadStats Standard` for improved cell filtering.
 - **CR-compat GEX** (`--soloCrGexFeature auto|gene|genefull`): Controls which GEX source is merged in CR-compat mode.
 - **Per-library feature calls** (`star_feature_caller=dominant` in `--pfMultiConfig`): Opt-in in-process calls for a non-GEX library such as LARRY. The default rule is the production top-count rule (`top > runner-up`); optional per-library minimum UMI and top/runner-up ratio columns support stricter policies. See [feature barcode documentation](docs/feature_barcodes.md).

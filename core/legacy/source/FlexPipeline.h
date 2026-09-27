@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 #include <zlib.h>
-#include "FlexGdna.h"
+#include "FlexProbeRegion.h"
 #include "input/BgzfStarAdapter.h"
 
 static constexpr uint32_t kFlexPipeNameMax = 512;
@@ -47,7 +47,7 @@ struct DecisionPacket {
     Verdict  verdict;
     uint16_t geneIdx15;
     uint8_t  cacheClass;
-    FlexGdnaRegion probeRegion;
+    FlexProbeRegion probeRegion;
     const char *denyReason;
     bool     eof;
 
@@ -62,7 +62,7 @@ struct DecisionPacket {
     uint32_t sampleTagLen;
 
     DecisionPacket() : iReadAll(0), readFilesIndex(0),
-                       verdict(DENY), geneIdx15(0), cacheClass(0), probeRegion(FlexGdnaUnknown),
+                       verdict(DENY), geneIdx15(0), cacheClass(0), probeRegion(FlexProbeRegionUnknown),
                        denyReason(nullptr), eof(false),
                        barcodeLen(0), sampleTagLen(0) {
         barcodeSeq[0] = '\0'; barcodeQual[0] = '\0';

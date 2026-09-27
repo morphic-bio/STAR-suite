@@ -527,7 +527,7 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
                 const uint64_t newKey = packCgAggKey(resolvedCbIdx, obs.umi24, static_cast<uint16_t>(obs.geneIdx),
                                                      obs.tagIdx);
                 const uint32_t encoded =
-                    flexGdnaPackValue(obs.count, obs.probeRegion);
+                    flexProbePackValue(obs.count, obs.probeRegion);
                 readFeatSum->appendInlineObservation(newKey, encoded);
                 addedToHash++;
             }

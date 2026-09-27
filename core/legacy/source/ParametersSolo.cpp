@@ -6,7 +6,6 @@
 #include "serviceFuns.cpp"
 #include "solo/CbCorrector.h"  // Include after ParametersSolo.h (which has IncludeDefine.h)
 #include "FlexHashScreen.h"
-#include "FlexGdna.h"
 #include "OcmMultiMaterialize.h"
 #include "CbBucketStore.h"
 
@@ -703,72 +702,22 @@ void ParametersSolo::initialize(Parameters *pPin)
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////
-    /////////////////////////////// Flex gDNA diagnostic metadata (strictly Flex-gated)
+    // Retired options remain parseable so old auto/no recipes still run.
     {
-        const string gdnaMode = lowerStringLocal(flexGdnaModeStr);
-        if (gdnaMode == "no") {
-            flexGdnaMode = FlexGdnaOff;
-        } else if (gdnaMode == "auto" || gdnaMode.empty()) {
-            flexGdnaMode = FlexGdnaAuto;
-        } else if (gdnaMode == "yes") {
-            flexGdnaMode = FlexGdnaRequired;
-        } else {
+        const string mode = lowerStringLocal(retiredFlexGdnaMode);
+        if (mode != "auto" && mode != "no" && !mode.empty()) {
             ostringstream errOut;
-            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloFlexGdna="
-                   << flexGdnaModeStr << "\n";
-            errOut << "SOLUTION: use allowed option: auto OR yes OR no\n";
-            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
-        }
-
-        flexGdnaReady = false;
-        FlexGdnaProbeMetadata::instance().reset();
-        const bool flexFilterEnabled =
-            lowerStringLocal(runFlexFilterStr) != "no";
-        if (flexMode && flexGdnaMode == FlexGdnaRequired
-            && !flexFilterEnabled) {
-            ostringstream errOut;
-            errOut
-                << "EXITING because --soloFlexGdna yes requires final FlexFilter "
-                   "cell calls, but --soloRunFlexFilter no was selected.\n";
-            errOut
-                << "SOLUTION: enable --soloRunFlexFilter or select "
-                   "--soloFlexGdna auto/no.\n";
+            errOut << "EXITING: the Flex gDNA diagnostic has been removed.\n"
+                   << "SOLUTION: remove --soloFlexGdna or use auto/no (no-op).\n";
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
                           EXIT_CODE_PARAMETER, *pP);
-        } else if (flexMode && flexGdnaMode == FlexGdnaAuto
-                   && !flexFilterEnabled) {
-            pP->inOut->logMain
-                << "Flex gDNA diagnostic: unavailable in auto mode "
-                   "(FlexFilter is disabled)\n";
-        } else if (flexMode && flexGdnaMode != FlexGdnaOff) {
-            const string discovered = FlexGdnaProbeMetadata::discoverProbeCsv(
-                flexGdnaProbeSetPath, probeListPath, pP->pGe.gDir);
-            string gdnaError;
-            if (!discovered.empty()) {
-                flexGdnaReady = FlexGdnaProbeMetadata::instance().load(
-                    discovered, probeListPath, &gdnaError);
-            } else {
-                gdnaError = "filtered probe CSV was not found";
-            }
-
-            if (flexGdnaReady) {
-                pP->inOut->logMain
-                    << "Flex gDNA diagnostic: probe metadata loaded from "
-                    << FlexGdnaProbeMetadata::instance().probeCsvPath()
-                    << " (probes=" << FlexGdnaProbeMetadata::instance().totalProbes()
-                    << ", control_genes=" << FlexGdnaProbeMetadata::instance().controlGeneCount()
-                    << ")\n";
-            } else if (flexGdnaMode == FlexGdnaRequired) {
-                ostringstream errOut;
-                errOut << "EXITING because --soloFlexGdna yes requires complete probe-region metadata: "
-                       << gdnaError << "\n";
-                errOut << "SOLUTION: provide --soloFlexGdnaProbeSet <filtered_probe_set.csv> or use "
-                          "--soloFlexGdna auto/no.\n";
-                exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
-            } else {
-                pP->inOut->logMain
-                    << "Flex gDNA diagnostic: unavailable in auto mode (" << gdnaError << ")\n";
-            }
+        }
+        if (retiredFlexGdnaProbeSet != "auto" && !retiredFlexGdnaProbeSet.empty()) {
+            ostringstream errOut;
+            errOut << "EXITING: --soloFlexGdnaProbeSet is retired; the Flex gDNA diagnostic has been removed.\n"
+                   << "SOLUTION: remove --soloFlexGdnaProbeSet.\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
+                          EXIT_CODE_PARAMETER, *pP);
         }
     }
 
@@ -911,26 +860,6 @@ void ParametersSolo::initialize(Parameters *pPin)
                             << " half-Hamming-1 keys="
                             << FlexHashScreenCache::instance().h1x2ProbeKeyCount()
                             << "\n";
-                    }
-                    if (flexGdnaMode != FlexGdnaOff
-                        && !FlexHashScreenCache::instance().hasRegionMetadata()) {
-                        if (flexGdnaMode == FlexGdnaRequired) {
-                            ostringstream errOut;
-                            errOut
-                                << "EXITING because --soloFlexGdna yes requires a v3 H0/H1 cache "
-                                   "with probe-region metadata, but the active cache is format v"
-                                << FlexHashScreenCache::instance().cacheVersion() << ": "
-                                << hashScreenFile << "\n";
-                            errOut
-                                << "SOLUTION: regenerate the cache with this STAR version, use "
-                                   "--no-hash-screen yes, or select --soloFlexGdna auto/no.\n";
-                            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
-                                          EXIT_CODE_PARAMETER, *pP);
-                        }
-                        pP->inOut->logMain
-                            << "Flex gDNA diagnostic: active H0/H1 cache lacks probe-region "
-                               "metadata; mapping remains enabled but the diagnostic will be "
-                               "reported unavailable\n";
                     }
                 } else {
                     if (enforceHalfProbe) {

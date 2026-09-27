@@ -46,7 +46,6 @@ help_text="$($BINARY --help 2>&1)"
 for parameter in \
   soloSpatialFlexIntegrated \
   soloSpatialGexIntegrated \
-  soloFlexGdna \
   soloCrMultimapRescueEvidence \
   soloSpatialOverflowPolicy; do
   grep -q "$parameter" <<< "$help_text" || {
@@ -63,12 +62,16 @@ symbols="$(nm -C "$BINARY")"
 for symbol in \
   'spatial_gex::Pipeline::completeCurrentThread' \
   'spatial_gex::Pipeline::finalize' \
-  'flexResolveGeneIdx15_inlineResolver' \
-  'FlexGdnaProbeMetadata'; do
+  'flexResolveGeneIdx15_inlineResolver'; do
   grep -q "$symbol" <<< "$symbols" || {
     echo "ERROR: release binary is missing symbol $symbol" >&2
     exit 1
   }
 done
+
+if grep -Eq 'FlexGdnaProbeMetadata|flexGdnaEstimate|writeGdnaJson' <<< "$symbols"; then
+  echo "ERROR: release binary contains the withdrawn Flex gDNA estimator" >&2
+  exit 1
+fi
 
 echo "PASS: STAR spatial release identity and feature inventory"

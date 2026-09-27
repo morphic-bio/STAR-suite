@@ -1946,17 +1946,11 @@ soloProbeList               -
                             Probe sets are not downloaded - must be user-supplied via --flexGeneProbeSet during index build
 
 soloFlexGdna                auto
-    string:                 Flex probe-region gDNA diagnostic mode.
-                            auto ... compute after final Flex cell/UMI filtering when complete probe/cache metadata are available;
-                                     otherwise emit an explicit skipped status
-                            yes  ... require complete metadata and fail if the diagnostic cannot be computed
-                            no   ... disable the diagnostic and do not load probe-region metadata
-                            This option is inert unless --flex yes and does not change molecule matrices.
+    string:                 retired option; auto/no are compatibility no-ops.
+                            The Flex gDNA diagnostic has been removed. yes is rejected.
 
 soloFlexGdnaProbeSet        auto
-    string:                 filtered probe CSV containing gene_id, probe_id, included, and region.
-                            auto searches next to --soloProbeList and under
-                            <genomeDir>/flex_probe_artifacts/filtered_probe_set.csv.
+    string:                 retired option; only auto is accepted. No metadata is loaded.
 
 soloRemoveDeprecated        -
     string:                 Yes|No|auto (default auto, inherits from --removeDeprecated)

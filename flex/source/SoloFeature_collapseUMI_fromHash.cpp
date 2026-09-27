@@ -11,7 +11,7 @@
 #include "ErrorWarning.h"
 #include "MexWriter.h"
 #include "SampleDetector.h"
-#include "FlexGdna.h"
+#include "FlexProbeRegion.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -137,7 +137,7 @@ void SoloFeature::collapseUMIall_fromHash()
         uint32_t cbIdx = static_cast<uint32_t>((kh_key(hash, iter) >> 44) & 0xFFFFF);
         if (cbIdx < wlSize)
             ++cbCounts[cbIdx];
-        totalCountsPre += flexGdnaValueCount(kh_val(hash, iter));
+        totalCountsPre += flexProbeValueCount(kh_val(hash, iter));
     }
     P.inOut->logMain << "[INLINE-HASH] pre_dedup entries=" << hashSize
                      << " total_counts=" << totalCountsPre << endl;

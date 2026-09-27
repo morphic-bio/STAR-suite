@@ -1,7 +1,7 @@
 #ifndef FLEX_HASH_SCREEN_DECISION_H
 #define FLEX_HASH_SCREEN_DECISION_H
 #include <cstdint>
-#include "FlexGdna.h"
+#include "FlexProbeRegion.h"
 
 struct FlexHashScreenDecision {
     enum Action : uint8_t {
@@ -16,7 +16,7 @@ struct FlexHashScreenDecision {
     uint8_t cacheClass = 0;
     uint8_t negativeCode = 0;
     int8_t offset = 0;
-    FlexGdnaRegion probeRegion = FlexGdnaUnknown;
+    FlexProbeRegion probeRegion = FlexProbeRegionUnknown;
     // Diagnostic provenance for the conservative exactly-one-N retry. The
     // runtime cacheClass remains H1 for compatibility; singleNCacheClass
     // identifies the underlying cache tier that supplied the unique gene.

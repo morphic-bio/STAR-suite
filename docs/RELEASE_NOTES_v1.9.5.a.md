@@ -36,7 +36,30 @@ If an affected conventional configuration produced empty matrices, regenerate
 its counts with the fixed release; this fix cannot recover discarded counts
 from those matrices alone.
 
+## Withdrawn Flex Diagnostic
+
+The optional Flex gDNA estimator, its metadata collection, QC reports and
+source-derived numerical tests have been removed. Its recorded implementation
+provenance did not meet this project's documentation-only clean-room boundary.
+There is no replacement estimator in this release.
+
+Expression counting and cell-calling logic are unchanged by this removal.
+Existing cache formats remain readable; the retained packed-region utilities
+only preserve STAR cache/count compatibility. No gDNA JSON/TSV is emitted.
+Legacy `--soloFlexGdna auto/no` values are compatibility no-ops; `yes` and
+explicit `--soloFlexGdnaProbeSet` paths now fail with a removal message.
+
+The original, unfinished `v1.9.5.a` tag was repointed with the repository
+owner's explicit approval after its publication was canceled. Users who
+fetched the earlier tag must refresh it; verify `STAR --source-revision`
+against the final release commit. The original `v1.9.5` tag is unchanged.
+
 ## Regression Coverage
+
+- Removal guards run in Tier A and release-artifact smokes. Cache-format and
+  packed-count tests preserve legacy decoding. On the eight-lane JAX 100K
+  fixture, all 121 non-diagnostic outputs are byte-identical to the pre-removal
+  candidate; new runs emit no gDNA reports.
 
 - The existing Solo smoke requires three primary alignments and exactly two
   molecules at a known gene/barcode coordinate. It rejects the released
