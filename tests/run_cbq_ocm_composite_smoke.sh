@@ -30,6 +30,30 @@ die() {
     exit 1
 }
 
+validate_yremove_plan() {
+    local plan="$1"
+    [[ -f "${plan}" ]] || die "missing prepared STAR script: ${plan}"
+    grep -F -- '--readFilesType Binseq PE' "${plan}" >/dev/null \
+        || die "Y-removal plan must use native paired CBQ input"
+    grep -Fx '  --outSAMtype None' "${plan}" >/dev/null \
+        || die "Y-removal plan must keep BAM output disabled"
+    grep -Fx '  --emitYNoY yes' "${plan}" >/dev/null \
+        || die "Y-removal plan must enable Y/noY output"
+    grep -Fx '  --emitYNoYFormat cbq' "${plan}" >/dev/null \
+        || die "Y-removal plan must emit native CBQ"
+    if grep -E -- '--readFilesCommand|--emitYNoYFastq|--emitNoYBAM' "${plan}" >/dev/null; then
+        die "no-BAM CBQ plan unexpectedly requests FASTQ decoding/output or a BAM"
+    fi
+}
+
+if [[ $# -gt 0 ]]; then
+    [[ $# -eq 2 && "$1" == "--validate-yremove-plan" ]] \
+        || die "Usage: $0 [--validate-yremove-plan RUN_STAR_COMPOSITE.sh]"
+    validate_yremove_plan "$2"
+    echo "PASS: existing CBQ/Y-removal plan validated (STAR not executed)"
+    exit 0
+fi
+
 [[ -f "${RECIPE}" ]] || skip "missing Morphic OCM recipe: ${RECIPE}"
 [[ -d "${RAW_DIR}" ]] || skip "missing JAX OCM raw dir: ${RAW_DIR}"
 [[ -f "${CONFIG}" ]] || skip "missing JAX OCM config: ${CONFIG}"
@@ -103,9 +127,11 @@ if [[ "${RUN_FASTQ_PARITY}" == "1" ]]; then
 
     diff -qr "${FASTQ_ROOT}/star_composite/run/Solo.out" "${CBQ_ROOT}/star_composite/run/Solo.out"
     diff -qr "${FASTQ_ROOT}/star_composite/outs" "${CBQ_ROOT}/star_composite/outs"
+    diff -qr "${FASTQ_ROOT}/star_composite/samples" "${CBQ_ROOT}/star_composite/samples"
 fi
 
-set +e
+# Native CBQ Y/noY output is supported. This is a preparation contract check;
+# actual Y-read partitioning is covered by the dedicated CBQ Y-removal tests.
 GATE_ROOT="${OUT_ROOT}/cbq_yremove_gate"
 STAR_SUITE_ROOT="${STAR_SUITE_ROOT}" \
 RAW_DIR="${RAW_DIR}" \
@@ -123,12 +149,6 @@ bash "${RECIPE}" \
   --star-input-format cbq \
   --star-yremove yes \
   --star-out-samtype None >"${OUT_ROOT}/cbq_yremove_gate.stdout" 2>"${OUT_ROOT}/cbq_yremove_gate.stderr"
-gate_status=$?
-set -e
-if [[ "${gate_status}" -eq 0 ]]; then
-    die "CBQ/Y-removal gate unexpectedly passed"
-fi
-grep -F 'STAR_YREMOVE=yes is FASTQ-only' "${OUT_ROOT}/cbq_yremove_gate.stderr" >/dev/null \
-    || die "CBQ/Y-removal gate did not emit the expected error"
+validate_yremove_plan "${GATE_ROOT}/RUN_STAR_COMPOSITE.sh"
 
 echo "PASS: OCM CBQ smoke completed at ${OUT_ROOT}"

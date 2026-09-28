@@ -17,9 +17,134 @@ Updated: 2026-09-28, after both G-S1 batches completed. Runbook:
   - `a321d99` initial runbook, handoff and draft release notes
   - `c943825` partial-build checkpoint
   - `c762817` fail-closed execution audit, 12 unit tests and gate warnings
+  - `35d3650` completed gate-batch results and comparison limitations
 - Continuation changes: execution-coverage auditor and its unit tests,
   updated runbook warnings, and explicit unreleased status in the release
-  notes. STAR's C++ implementation has not changed during this continuation.
+  notes. The initial gate continuation did not change STAR C++; the subsequent
+  OCM storage fix described below does and requires new-binary validation.
+
+### Owner-Requested Failure Follow-Up
+
+Evidence root: `$D/followup_20260928/`; reproduction command:
+`flock /mnt/pikachu/e2e_bench_20260926/pikachu_timed.lock nice -n 10 bash
+$D/tools/run_followup_20260928.sh`. This script was run once; do not restart it.
+
+- **Permit assertions updated.** Acquisitions count batches rather than
+  records; GEX and feature assignment can overlap, so MAP activity in a PF
+  snapshot is valid. The old equality and MAP-zero assertions were retired.
+  Nonnegative integer counters, positive feature work/acquisitions, hook
+  activation and the feature-wait ceiling remain checked. Do not add an
+  exact cross-domain sum assertion: the legacy snapshot counters are sampled
+  atomically but are not one coherent cross-domain snapshot.
+  Nine new validator tests pass; saved baseline/candidate off/on records all
+  pass via `--validate-api-run FILE 0|1`. No unchanged PF alignments were rerun.
+  The original batch's unexecuted stress modes remain missing coverage.
+- **Flex replay cause isolated, original truth retained.** The same
+  checksum-pinned cache and 800,000-read March dump were replayed with fresh
+  standalone builds immediately before (`ff8d53d`) and at (`da1b81d`) the
+  2026-09-04 change. Before: zero mismatches. After: 2,024, with the diff TSV
+  byte-identical to the current gate's. That commit makes unresolved/negative
+  cache hits DENY instead of PASS-to-alignment. It is not a different cache or
+  duplicate-handling change in this test. KEEP stays 670,450; DENY changes
+  5,396 -> 7,420 and PASS changes 124,154 -> 122,130. A versioned current-policy
+  oracle is still needed; no golden file or threshold was silently updated.
+- **Legacy Flex invocation corrected.** The smoke now explicitly selects
+  `--soloFlexCellCaller legacy`. Both old failed invocations are preserved.
+  Both binaries complete mapping/counting, but their hash-on vs legacy
+  comparator still fails: 13,178 pooled coordinates differ (1.92991%, limit
+  0.2%), 250 barcodes differ (0.48096%, limit 0.1%), and maximum coordinate
+  delta is 3 (limit 1). Baseline and candidate have the same discrepancies.
+  Cross-version hash-on comparison is exact for both pooled counts (682,831
+  coordinates; 689,934 UMIs) and the only emitted sample, BC006 (618
+  coordinates; 672 UMIs). Cross-version legacy comparison is also exact
+  (pooled: 682,742 coordinates / 689,861 UMIs; BC006: 620 / 674).
+  This is a pre-existing within-version parity issue,
+  not a passing smoke. No tolerances were relaxed.
+- **OCM allocation fix.** `resetPackedStorage()` suppressed required
+  storage for inline CB correction without BAM tags or the hash bridge.
+  A narrow change honors `readInfoYes[featureType]`. A synthetic no-BAM
+  control produces exact GeneFull and velocity counts, then reproduces exit
+  111 when inline correction is enabled on the original clean binary.
+  After a clean rebuild, plain, inline-corrected and native OCM modes pass
+  exact GeneFull/spliced/unspliced/ambiguous checks, both normally and with
+  `STAR_VELOCYTO_LOW_MEM=1` (six cases). Each barcode has 2 GeneFull molecules,
+  1 spliced and 1 unspliced, and 0 ambiguous. The real CBQ arm also completes:
+  the three raw GeneFull MEX files are byte-identical to the original 1.10
+  candidate's pre-failure output; Velocyto gene/barcode axes match GeneFull.
+  Pooled velocity UMIs are 367 spliced, 106 unspliced, 55 ambiguous. Per-sample
+  splits (same order) are GCM1 103/25/11, GRHL1 84/25/17, OVOL1 104/30/13,
+  WT-PrS-20pct 76/26/14, preserving all 528 molecules. CBQ completed at
+  20:38:55 UTC and FASTQ at 20:49:06 UTC. Both have `STAR_COMPLETED.txt`.
+  Their `Solo.out`, `outs`, and `samples` trees are byte-identical, including
+  routed velocity matrices. The separate ordinary-GEX analytical regression
+  also passes all eight UMI/counting configurations on the rebuilt binary.
+  This 1,000-read fixture calls zero filtered cells; it validates raw counting
+  and materialization, not production-scale cell-calling sensitivity.
+  This is a no-BAM allocation correction, not a change to velocity counting
+  rules or cell calling. The guard against missing readInfo stays in place.
+  The new regression and permit-validator tests are added to Tier A (now
+  15 cases). The original 13-case G-S1 capture audit remains frozen historical
+  evidence, not the expanded CI list.
+- **OCM wrapper follow-up, not an alignment failure.** After both OCM runs and
+  the first two byte comparisons passed, the wrapper exited 1 on its final
+  expectation that CBQ/Y-removal preparation must be rejected. The canonical
+  recipe now supports this and correctly renders `--emitYNoY yes` plus
+  `--emitYNoYFormat cbq`, without a BAM or FASTQ sidecar. Update the wrapper
+  to validate that preparation contract and add per-sample output parity.
+  Read-only `--validate-yremove-plan` passes the saved Y-removal script and
+  rejects the saved no-Y-output script as expected. Native CBQ partitioning
+  has its own `tests/run_cbq_ynoy_smoke.sh`; it was not run in this follow-up.
+  The original wrapper failure/log is retained, and the driver's
+  `finished_utc` is intentionally absent. No identical OCM alignments were
+  repeated just to obtain a green wrapper exit. This is component validation,
+  not a retrospectively passing full smoke or completed release gate.
+
+Follow-up commands and provenance:
+
+```bash
+D=/mnt/pikachu/star_suite_v1100_gates_20260928
+python3 -m unittest discover -s tests -p 'test_pf_dynamic_permit_validation.py' -v
+flock /mnt/pikachu/e2e_bench_20260926/pikachu_timed.lock nice -n 10 \
+  bash "$D/tools/run_followup_20260928.sh"
+flock /mnt/pikachu/e2e_bench_20260926/pikachu_timed.lock nice -n 10 \
+  bash "$D/tools/run_ocm_storage_fix_validation.sh" --resume-build
+python3 tests/compare_flex_hash_screen_mex.py \
+  "$D/followup_20260928/flex_195/hash_on" \
+  "$D/followup_20260928/flex_110/hash_on" --samples BC006 \
+  --max-mismatch-fraction 0 --max-count-delta-fraction 0 \
+  --max-barcode-difference-fraction 0 --max-coordinate-delta 0
+python3 tests/compare_flex_hash_screen_mex.py \
+  "$D/followup_20260928/flex_195/legacy" \
+  "$D/followup_20260928/flex_110/legacy" --samples BC006 \
+  --max-mismatch-fraction 0 --max-count-delta-fraction 0 \
+  --max-barcode-difference-fraction 0 --max-coordinate-delta 0
+bash tests/run_cbq_ocm_composite_smoke.sh --validate-yremove-plan \
+  "$D/ocm_storage_fix_validation/host_ocm/cbq_yremove_gate/RUN_STAR_COMPOSITE.sh"
+# Negative control: expected exit 1, because Y/noY output is not enabled.
+bash tests/run_cbq_ocm_composite_smoke.sh --validate-yremove-plan \
+  "$D/ocm_storage_fix_validation/host_ocm/cbq/RUN_STAR_COMPOSITE.sh"
+diff -qr "$D/ocm_storage_fix_validation/host_ocm/cbq/star_composite/samples" \
+  "$D/ocm_storage_fix_validation/host_ocm/fastq/star_composite/samples"
+# Executed from $D/ocm_storage_fix_validation/gex_control_work (isolated logs).
+flock /mnt/pikachu/e2e_bench_20260926/pikachu_timed.lock nice -n 10 \
+  python3 /mnt/pikachu/STAR-suite-v1100-20260928/tests/test_scrna_gex_counts.py \
+  --star /mnt/pikachu/STAR-suite-v1100-20260928/core/legacy/source/STAR \
+  --outdir "$D/ocm_storage_fix_validation/gex_control"
+```
+
+These commands record completed executions, not permission to
+repeat them. The OCM driver first cleaned and built with a mistyped encoder
+target (`cbq_ordered_encoder` instead of `cbq-ordered-encoder`); no STAR test
+started in that failed build attempt. Its explicit resume verified unchanged
+source and continued the same clean objects with the corrected target. Both
+logs are preserved. The resulting host-built STAR SHA256 is
+`c74e9019a46216080a61bb836e1d6ff7c24856cede56b7aa983d991edeb03ab0`;
+source is `35d3650` plus the saved patch in
+`$D/ocm_storage_fix_validation/source.patch`. This binary is distinct from the
+initial container-built G-S1 candidate. The complete rebuild commands, fixture
+commands, logs and binary checksum are under `ocm_storage_fix_validation/`.
+An independent copy of the checked executable is preserved as `STAR.tested`
+in that directory, with the same SHA256.
 
 ### Done
 
@@ -113,7 +238,8 @@ verification. Scratch sources were not removed.
 
 ## Next
 
-1. Disposition the four reproduced failures below; retain existing outputs.
+1. Finish disposition of the four original failures using the follow-up above;
+   retain existing outputs and validate any changed code against a clean build.
    The execution auditor's 12 unit tests pass. Correct the affected test
    contracts with explicit coverage, not by accepting all baseline failures.
 2. Resolve the canonical downstream recipe's seed gap in its own repository
@@ -121,7 +247,8 @@ verification. Scratch sources were not removed.
    downstream settings against the already-produced MEX. Complete capture
    pairing and Step 0 comparison normalization without relaxing biological
    comparisons. Do not silently ignore doublet differences.
-3. G-S3 is on hold. Resolve the invalid Flex recipe below and obtain explicit
+3. G-S3 is on hold. The Flex caller flag is fixed, but its within-version
+   hash-on/legacy matrix parity is still failing. Resolve that and obtain explicit
    owner approval for identical timing repeats. The question has been asked;
    no approval has been received. Do not run the existing driver unchanged:
    it overwrites runs and continues after failures. The 100K GEX workload has
@@ -141,10 +268,10 @@ this refactor, not prove the affected workflow works.
 
 | Row | Observed baseline failure | Required follow-up |
 |---|---|---|
-| `cbq-ocm-composite-local` | STAR exits 111: Velocyto's gene-like source did not populate per-read CB/UMI storage | Already reproduced on 1.10; investigate OCM/Velocyto coverage separately |
-| `pf-dynamic-permit-100k` | Validator requires acquires == workUnits: baseline 7,264 vs 369,546; candidate 5,692 vs 369,546. Consumer permit acquisition is batched, not per record | Derive the correct telemetry invariant from all accounting paths with unit coverage; do not assume a simple 64-record aggregate bound or change batching to satisfy an obsolete assertion. Later stress modes did not execute |
-| `flex-hash-screen-replay` | Flat and tiered agree, but both differ from pinned truth on 2,024/800,000 reads, all Pass -> Deny (negative codes 6: 1,873; 4: 136; 8: 15) | Establish the intended negative-cache contract before updating a golden fixture; do not overwrite the pinned truth |
-| `flex-hash-screen-100k` | Exits 102 before mapping: legacy expected-cell tuning with default tag-aware caller | Explicit legacy caller is missing from the legacy test recipe; this also invalidates the planned G-S3 Flex timing command |
+| `cbq-ocm-composite-local` | STAR exits 111: Velocyto's gene-like source did not populate per-read CB/UMI storage | Allocation guard fixed; follow-up validation above supersedes the initial diagnosis |
+| `pf-dynamic-permit-100k` | Validator requires acquires == workUnits: baseline 7,264 vs 369,546; candidate 5,692 vs 369,546. Consumer permit acquisition is batched, not per record | Obsolete assertions replaced, nine validator tests and all four saved records pass. Later stress modes still lack execution coverage |
+| `flex-hash-screen-replay` | Flat and tiered agree, but both differ from pinned truth on 2,024/800,000 reads, all Pass -> Deny (negative codes 6: 1,873; 4: 136; 8: 15) | Isolated to negative-cache policy change at da1b81d, not duplicate handling. Version the oracle without overwriting historical truth |
+| `flex-hash-screen-100k` | Exits 102 before mapping: legacy expected-cell tuning with default tag-aware caller | Caller flag fixed; follow-up reveals the same hash-on/legacy matrix-parity failure in both versions |
 | `slam-cbq-divergence` | Baseline only: FASTQ vs CBQ SAM body order differs; candidate held | Exact multiset is identical (113,516 records), and staged sorted-SAM, diagnostics and pre-NTR checks pass; decide whether record-order parity is required |
 | `slam-cbq-divergence-pe` | Baseline only: same exact-order failure; candidate held | Staged sorted-SAM, junctions, diagnostics, transitions and pre-NTR checks pass |
 

@@ -153,10 +153,15 @@ for precise failures, comparison limits and remaining actions.
 **Do not launch the current G-S3 driver unchanged.** The baseline batch exposed
 an invalid legacy Flex invocation: `run_flex_hash_screen_internal_100k.sh`
 sets `--flexLegacy yes` and legacy expected-cell tuning without selecting
-`--soloFlexCellCaller legacy`. It exits 102 before mapping. Timing that failure
-would not measure the intended workload. Resolve the recipe and the remaining
-G-S1 failures, obtain repeat approval, and make the timing driver preserve
-existing output directories and propagate failures before proceeding.
+`--soloFlexCellCaller legacy`. That flag is now fixed. Follow-up runs complete
+STAR but still fail hash-on vs legacy matrix parity in both versions, with
+identical discrepancies; cross-version hash-on counts match exactly. Resolve
+this test contract and the remaining G-S1 failures, obtain repeat approval,
+and make the timing driver preserve existing output directories and propagate
+failures before proceeding. The follow-up also repairs the OCM/Velocyto
+allocation guard, updates obsolete permit assertions, and isolates Flex replay
+drift to a negative-cache policy change. See the handoff for individual
+validation results; the historical batch totals above are not overwritten.
 
 The official snapshot validator checks digest/count integrity, not whether
 the six pinned multiome recipes have migrated to the Multiomics executable.

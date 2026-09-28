@@ -564,9 +564,10 @@ void SoloFeature::resetPackedStorage(uint32_t nReads)
     if (pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode && !pSolo.trackReadIdsForTags && !bridgeReadInfo) {
         return;
     }
-    // Skip allocation when inline CB correction is active (Solo structures not used)
-    // UNLESS trackReadIdsForTags is enabled
-    if (pSolo.inlineCBCorrection && !pSolo.trackReadIdsForTags && !bridgeReadInfo) {
+    // Inline correction can still feed legacy counting and Velocyto without
+    // BAM tags. Honor the selected feature's per-read storage requirement.
+    if (pSolo.inlineCBCorrection && !pSolo.trackReadIdsForTags && !bridgeReadInfo
+        && !pSolo.readInfoYes[featureType]) {
         // Assert that packedReadInfo stays empty
         assert(packedReadInfo.data.empty());
         return;

@@ -15,6 +15,23 @@ update this file with its output location.
   of output parity or passing performance gates.
 - `tests/host_api/test_audit_gate_batch.py` uses temporary
   `/tmp/star-host-gate-audit-*` fixtures, removed automatically.
+- The follow-up tools and outputs remain under the same artifact root:
+  `followup_20260928/` preserves saved-telemetry validation, historical Flex
+  replay builds, and the explicit-legacy-caller E2E runs. Original gate
+  results are not overwritten or retrospectively relabeled as passing.
+- `tests/test_pf_dynamic_permit_validation.py` uses temporary
+  `/tmp/pf_permit_validation_*` fixtures, removed automatically, without STAR.
+- `tests/test_inline_cb_velocyto.py` writes its synthetic reference, FASTQs,
+  commands, and counts to `--outdir` or `/tmp/star-inline-velo-*`. For the
+  storage-fix investigation, see `ocm_storage_before*` and
+  `ocm_storage_fix_validation/` under the gate artifact root. The initial
+  control fixture needed CR multimapper rescue for transcript annotations
+  and a filtered-barcode source; that failed setup is preserved separately.
+- `ocm_storage_fix_validation/` also retains `STAR.tested`, the completed CBQ
+  and FASTQ outputs, the ordinary-GEX control and the original wrapper's
+  stale Y-removal rejection failure. Read-only `--validate-yremove-plan`
+  checks the saved preparation scripts without overwriting or running STAR.
+  Individual validation outcomes are recorded in the 1.10 host-API handoff.
 
 ## Source Build Regressions (2026-09-27)
 

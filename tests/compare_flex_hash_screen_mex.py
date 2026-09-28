@@ -10,7 +10,7 @@ def read_lines(path):
         return [line.rstrip("\n") for line in handle]
 
 
-def read_mex(directory):
+def read_mex(directory, matrix_name="matrix.mtx"):
     directory = Path(directory)
     features = read_lines(directory / "features.tsv")
     barcodes = read_lines(directory / "barcodes.tsv")
@@ -22,7 +22,7 @@ def read_mex(directory):
 
     counts = {}
     dimensions = None
-    with open(directory / "matrix.mtx", "r", encoding="utf-8") as handle:
+    with open(directory / matrix_name, "r", encoding="utf-8") as handle:
         for line in handle:
             if line.startswith("%"):
                 continue

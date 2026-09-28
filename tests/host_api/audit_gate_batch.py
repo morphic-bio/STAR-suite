@@ -13,6 +13,8 @@ from pathlib import Path
 import re
 
 
+# Frozen run_gs1.sh capture batch from 2026-09-28, not the evolving CI list.
+# Later tests have separate evidence and cannot retroactively pass this batch.
 TIER_A = (
     "run_solo_smoke", "plain_scrna_exact_counts", "flex_gdna_removed",
     "run_scrna_sidecar_off_golden", "run_spatial_r1_tap_guard",

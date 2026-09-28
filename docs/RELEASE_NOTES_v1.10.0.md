@@ -104,6 +104,20 @@ STAR in the same process, sharing STAR's thread permits. See the
   selected by `feature_type=CellTag` and are not mixed with guides. The
   automatic CRISPR path and its `guide_*` outputs are unchanged.
 
+## Correctness and regression coverage
+
+- **Inline CB correction with Velocyto, without BAM.** A memory-saving
+  allocation guard incorrectly skipped the per-read CB/UMI storage requested
+  by Velocyto's gene-like source. Honor that existing requirement, including
+  native OCM composite barcodes. No cell-calling or velocity-counting rule is
+  changed. A new synthetic regression checks exact GeneFull and velocity
+  layers in plain, inline-corrected and OCM modes.
+- Update the feature-permit smoke to validate batched acquisitions and
+  concurrent GEX work instead of expecting one permit per record. Add nine
+  validator unit tests, including invalid and missing telemetry.
+- Explicitly select the legacy caller in the legacy Flex smoke. Its remaining
+  hash-on/legacy parity failure is not waived by this parameter correction.
+
 ## Validation
 
 The release gates are not complete. Do not interpret a completed regression
@@ -121,8 +135,22 @@ batch as approval to tag or publish this candidate.
   set the seed used in STAR's local R script. Output parity remains open.
 - Both UCSF rows continued after CellBender failed during prior estimation;
   the successful smoke wrapper exits validate fallback, not GPU denoising.
-- G-S3 is on hold: the legacy Flex recipe fails before mapping, and the
-  repeated timing runs require explicit owner approval.
+- Follow-up: the clean-built OCM allocation fix passes six synthetic cases
+  (three modes, normal and low-memory). Both real 1,000-read OCM executions
+  complete with byte-identical CBQ/FASTQ pooled and per-sample outputs; all
+  eight ordinary-GEX count configurations pass. The OCM wrapper's subsequent
+  stale CBQ/Y-removal rejection check was corrected and validated on the
+  saved plans, not by repeating alignment. Its original exit 1 is retained.
+  Permit-validator units pass, and all
+  four saved off/on telemetry records pass the corrected assertions; the
+  previously unexecuted stress modes still require coverage. The expanded
+  Tier A suite has 15 cases; the initial batch's 13/13 is historical evidence.
+- Flex replay differences are reproduced by the September 4 negative-cache
+  policy change using exactly the same cache and March dump, not a change of
+  reference or duplicate handling. The historical oracle is retained.
+- G-S3 is on hold: the corrected legacy Flex recipe runs, but hash-on/legacy
+  matrix parity fails identically in both versions. Repeated timing runs also
+  require explicit owner approval.
 - Official snapshot digest/count validation passed (11 recipes, 10 evidence
   records). Migration of the pinned multiome recipes is still a separate
   dependency.
