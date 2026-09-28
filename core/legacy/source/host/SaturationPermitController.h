@@ -1,5 +1,5 @@
-#ifndef SATURATION_PERMIT_CONTROLLER_H
-#define SATURATION_PERMIT_CONTROLLER_H
+#ifndef STAR_HOST_SATURATION_PERMIT_CONTROLLER_H
+#define STAR_HOST_SATURATION_PERMIT_CONTROLLER_H
 
 #include <algorithm>
 #include <array>
@@ -7,16 +7,19 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <vector>
 
 namespace star {
-namespace multiome {
+namespace permits {
 
-// Deterministic saturation policy for the shared MAP/FEATURE/ATAC permit pool.
+// Deterministic saturation policy for the shared MAP/FEATURE/EXTERNAL permit pool.
 // Input transport and work decomposition are deliberately outside this class.
+// Public part of the STAR Suite host interface (docs/HOST_API.md): STAR uses
+// it for MAP/FEATURE balancing, and a host may use it for all three domains.
 //
 // Active domains are probed from the largest supplied work estimate to the
-// smallest. If estimates are absent, the historical ATAC -> MAP -> FEATURE
+// smallest. If estimates are absent, the historical EXTERNAL -> MAP -> FEATURE
 // order is retained. Every unprobed live domain keeps one permit while the
 // current domain receives all remaining capacity. Observed sustained occupancy
 // becomes a borrowable floor. ETA is consulted only when at least one probe was
@@ -24,10 +27,10 @@ namespace multiome {
 // saturation point.
 class SaturationPermitController {
  public:
-  enum class Domain : uint8_t { MAP = 0, FEATURE = 1, ATAC = 2 };
+  enum class Domain : uint8_t { MAP = 0, FEATURE = 1, EXTERNAL = 2 };
 
   enum class Phase : uint8_t {
-    PROBE_ATAC = 0,
+    PROBE_EXTERNAL = 0,
     PROBE_MAP = 1,
     PROBE_FEATURE = 2,
     STEADY = 3
@@ -35,22 +38,22 @@ class SaturationPermitController {
 
   enum class Reason : uint8_t {
     NONE = 0,
-    ATAC_PROBE_COMPLETE,
+    EXTERNAL_PROBE_COMPLETE,
     MAP_PROBE_COMPLETE,
     FEATURE_PROBE_COMPLETE,
     MAP_ETA_LATE,
     MAP_ETA_EARLY,
     FEATURE_ETA_LATE,
-    ATAC_ETA_LATE,
+    EXTERNAL_ETA_LATE,
     MAP_COMPLETE,
     FEATURE_COMPLETE,
-    ATAC_COMPLETE
+    EXTERNAL_COMPLETE
   };
 
   struct WorkEstimates {
     uint64_t map = 0;
     uint64_t feature = 0;
-    uint64_t atac = 0;
+    uint64_t external = 0;
   };
 
   struct Config {
@@ -59,7 +62,7 @@ class SaturationPermitController {
     int probeWindows = 2;
     int completionWindows = 2;
     bool featureActive = false;
-    // Zero preserves legacy MAP/ATAC (+ optional FEATURE) behavior.
+    // Zero preserves legacy MAP/EXTERNAL (+ optional FEATURE) behavior.
     unsigned activeMask = 0;
     // GEX/FEATURE can seed an already controlled allocation instead of
     // spending a short workload's lifetime on exclusive saturation probes.
@@ -71,43 +74,43 @@ class SaturationPermitController {
   struct Observation {
     double mapOccupancy = 0.0;
     double featureOccupancy = 0.0;
-    double atacOccupancy = 0.0;
+    double externalOccupancy = 0.0;
     uint64_t mapUnitsDelta = 0;
     uint64_t featureUnitsDelta = 0;
-    uint64_t atacUnitsDelta = 0;
+    uint64_t externalUnitsDelta = 0;
     int mapInUse = 0;
     int featureInUse = 0;
-    int atacInUse = 0;
+    int externalInUse = 0;
     int mapWaiters = 0;
     int featureWaiters = 0;
-    int atacWaiters = 0;
+    int externalWaiters = 0;
     double mapEtaSec = std::numeric_limits<double>::infinity();
     double featureEtaSec = std::numeric_limits<double>::infinity();
-    double atacEtaSec = std::numeric_limits<double>::infinity();
+    double externalEtaSec = std::numeric_limits<double>::infinity();
     bool mapEstimateComplete = false;
     bool featureEstimateComplete = false;
-    bool atacEstimateComplete = false;
+    bool externalEstimateComplete = false;
   };
 
   struct Decision {
-    Phase phase = Phase::PROBE_ATAC;
+    Phase phase = Phase::PROBE_EXTERNAL;
     Reason reason = Reason::NONE;
-    Domain probeDomain = Domain::ATAC;
+    Domain probeDomain = Domain::EXTERNAL;
     bool floorsChanged = false;
     bool capacityLimited = false;
     bool mapSaturationKnown = false;
     bool featureSaturationKnown = false;
-    bool atacSaturationKnown = false;
+    bool externalSaturationKnown = false;
     int mapFloor = 1;
     int featureFloor = 0;
-    int atacFloor = 1;
+    int externalFloor = 1;
     int mapSaturation = 0;
     int featureSaturation = 0;
-    int atacSaturation = 0;
+    int externalSaturation = 0;
   };
 
   // Backward-compatible two-domain construction. A configured FEATURE floor
-  // remains fixed and is excluded from the MAP/ATAC probe budget.
+  // remains fixed and is excluded from the MAP/EXTERNAL probe budget.
   explicit SaturationPermitController(int configuredPermits,
                                       int fixedFeatureFloor = 0,
                                       int probeWindows = 2)
@@ -271,8 +274,8 @@ class SaturationPermitController {
     switch (domain) {
       case Domain::MAP: return "map";
       case Domain::FEATURE: return "feature";
-      case Domain::ATAC:
-      default: return "atac";
+      case Domain::EXTERNAL:
+      default: return "external";
     }
   }
 
@@ -281,30 +284,55 @@ class SaturationPermitController {
       case Phase::PROBE_MAP: return "probe-map";
       case Phase::PROBE_FEATURE: return "probe-feature";
       case Phase::STEADY: return "steady";
-      case Phase::PROBE_ATAC:
-      default: return "probe-atac";
+      case Phase::PROBE_EXTERNAL:
+      default: return "probe-external";
     }
   }
 
   static const char *reasonName(Reason reason) {
     switch (reason) {
-      case Reason::ATAC_PROBE_COMPLETE: return "atac-probe-complete";
+      case Reason::EXTERNAL_PROBE_COMPLETE: return "external-probe-complete";
       case Reason::MAP_PROBE_COMPLETE: return "map-probe-complete";
       case Reason::FEATURE_PROBE_COMPLETE: return "feature-probe-complete";
       case Reason::MAP_ETA_LATE: return "map-eta-late";
       case Reason::MAP_ETA_EARLY: return "map-eta-early";
       case Reason::FEATURE_ETA_LATE: return "feature-eta-late";
-      case Reason::ATAC_ETA_LATE: return "atac-eta-late";
+      case Reason::EXTERNAL_ETA_LATE: return "external-eta-late";
       case Reason::MAP_COMPLETE: return "map-complete";
       case Reason::FEATURE_COMPLETE: return "feature-complete";
-      case Reason::ATAC_COMPLETE: return "atac-complete";
+      case Reason::EXTERNAL_COMPLETE: return "external-complete";
       case Reason::NONE:
       default: return "none";
     }
   }
 
+  // The same names with the External domain shown under a host label
+  // (for example "atac"): "probe-external" becomes "probe-atac".
+  static std::string domainName(Domain domain, const std::string &externalLabel) {
+    return withExternalLabel(domainName(domain), externalLabel);
+  }
+
+  static std::string phaseName(Phase phase, const std::string &externalLabel) {
+    return withExternalLabel(phaseName(phase), externalLabel);
+  }
+
+  static std::string reasonName(Reason reason, const std::string &externalLabel) {
+    return withExternalLabel(reasonName(reason), externalLabel);
+  }
+
  private:
   static constexpr size_t kDomainCount = 3;
+
+  static std::string withExternalLabel(const char *name,
+                                       const std::string &externalLabel) {
+    std::string out(name);
+    const std::string generic("external");
+    const size_t at = out.find(generic);
+    if (at != std::string::npos && !externalLabel.empty()) {
+      out.replace(at, generic.size(), externalLabel);
+    }
+    return out;
+  }
 
   static int minimumBudget(const Config& config) {
     if (config.startFromFloors) return 1;
@@ -329,7 +357,7 @@ class SaturationPermitController {
 
   static int domainPriority(Domain domain) {
     switch (domain) {
-      case Domain::ATAC: return 0;
+      case Domain::EXTERNAL: return 0;
       case Domain::MAP: return 1;
       case Domain::FEATURE:
       default: return 2;
@@ -340,8 +368,8 @@ class SaturationPermitController {
     switch (domain) {
       case Domain::MAP: return estimates_.map;
       case Domain::FEATURE: return estimates_.feature;
-      case Domain::ATAC:
-      default: return estimates_.atac;
+      case Domain::EXTERNAL:
+      default: return estimates_.external;
     }
   }
 
@@ -349,8 +377,8 @@ class SaturationPermitController {
     switch (domain) {
       case Domain::MAP: return observation.mapOccupancy;
       case Domain::FEATURE: return observation.featureOccupancy;
-      case Domain::ATAC:
-      default: return observation.atacOccupancy;
+      case Domain::EXTERNAL:
+      default: return observation.externalOccupancy;
     }
   }
 
@@ -358,8 +386,8 @@ class SaturationPermitController {
     switch (domain) {
       case Domain::MAP: return observation.mapUnitsDelta;
       case Domain::FEATURE: return observation.featureUnitsDelta;
-      case Domain::ATAC:
-      default: return observation.atacUnitsDelta;
+      case Domain::EXTERNAL:
+      default: return observation.externalUnitsDelta;
     }
   }
 
@@ -367,8 +395,8 @@ class SaturationPermitController {
     switch (domain) {
       case Domain::MAP: return observation.mapInUse;
       case Domain::FEATURE: return observation.featureInUse;
-      case Domain::ATAC:
-      default: return observation.atacInUse;
+      case Domain::EXTERNAL:
+      default: return observation.externalInUse;
     }
   }
 
@@ -376,8 +404,8 @@ class SaturationPermitController {
     switch (domain) {
       case Domain::MAP: return observation.mapWaiters;
       case Domain::FEATURE: return observation.featureWaiters;
-      case Domain::ATAC:
-      default: return observation.atacWaiters;
+      case Domain::EXTERNAL:
+      default: return observation.externalWaiters;
     }
   }
 
@@ -385,8 +413,8 @@ class SaturationPermitController {
     switch (domain) {
       case Domain::MAP: return observation.mapEtaSec;
       case Domain::FEATURE: return observation.featureEtaSec;
-      case Domain::ATAC:
-      default: return observation.atacEtaSec;
+      case Domain::EXTERNAL:
+      default: return observation.externalEtaSec;
     }
   }
 
@@ -394,13 +422,13 @@ class SaturationPermitController {
     switch (domain) {
       case Domain::MAP: return observation.mapEstimateComplete;
       case Domain::FEATURE: return observation.featureEstimateComplete;
-      case Domain::ATAC:
-      default: return observation.atacEstimateComplete;
+      case Domain::EXTERNAL:
+      default: return observation.externalEstimateComplete;
     }
   }
 
   void buildProbeOrder() {
-    if (activeMask_ & 4U) probeOrder_.push_back(Domain::ATAC);
+    if (activeMask_ & 4U) probeOrder_.push_back(Domain::EXTERNAL);
     if (activeMask_ & 1U) probeOrder_.push_back(Domain::MAP);
     if (activeMask_ & 2U) {
       probeOrder_.push_back(Domain::FEATURE);
@@ -494,8 +522,8 @@ class SaturationPermitController {
     switch (domain) {
       case Domain::MAP: return Phase::PROBE_MAP;
       case Domain::FEATURE: return Phase::PROBE_FEATURE;
-      case Domain::ATAC:
-      default: return Phase::PROBE_ATAC;
+      case Domain::EXTERNAL:
+      default: return Phase::PROBE_EXTERNAL;
     }
   }
 
@@ -503,8 +531,8 @@ class SaturationPermitController {
     switch (domain) {
       case Domain::MAP: return Reason::MAP_PROBE_COMPLETE;
       case Domain::FEATURE: return Reason::FEATURE_PROBE_COMPLETE;
-      case Domain::ATAC:
-      default: return Reason::ATAC_PROBE_COMPLETE;
+      case Domain::EXTERNAL:
+      default: return Reason::EXTERNAL_PROBE_COMPLETE;
     }
   }
 
@@ -512,20 +540,20 @@ class SaturationPermitController {
     switch (domain) {
       case Domain::MAP: return Reason::MAP_COMPLETE;
       case Domain::FEATURE: return Reason::FEATURE_COMPLETE;
-      case Domain::ATAC:
-      default: return Reason::ATAC_COMPLETE;
+      case Domain::EXTERNAL:
+      default: return Reason::EXTERNAL_COMPLETE;
     }
   }
 
   Reason etaReason(Domain target) const {
-    if (!featureActive_ && target == Domain::ATAC) {
+    if (!featureActive_ && target == Domain::EXTERNAL) {
       return Reason::MAP_ETA_EARLY;
     }
     switch (target) {
       case Domain::MAP: return Reason::MAP_ETA_LATE;
       case Domain::FEATURE: return Reason::FEATURE_ETA_LATE;
-      case Domain::ATAC:
-      default: return Reason::ATAC_ETA_LATE;
+      case Domain::EXTERNAL:
+      default: return Reason::EXTERNAL_ETA_LATE;
     }
   }
 
@@ -541,13 +569,13 @@ class SaturationPermitController {
     decision.mapSaturationKnown = saturationKnown_[domainIndex(Domain::MAP)];
     decision.featureSaturationKnown =
         saturationKnown_[domainIndex(Domain::FEATURE)];
-    decision.atacSaturationKnown = saturationKnown_[domainIndex(Domain::ATAC)];
+    decision.externalSaturationKnown = saturationKnown_[domainIndex(Domain::EXTERNAL)];
     decision.mapFloor = floors_[domainIndex(Domain::MAP)];
     decision.featureFloor = floors_[domainIndex(Domain::FEATURE)];
-    decision.atacFloor = floors_[domainIndex(Domain::ATAC)];
+    decision.externalFloor = floors_[domainIndex(Domain::EXTERNAL)];
     decision.mapSaturation = saturation_[domainIndex(Domain::MAP)];
     decision.featureSaturation = saturation_[domainIndex(Domain::FEATURE)];
-    decision.atacSaturation = saturation_[domainIndex(Domain::ATAC)];
+    decision.externalSaturation = saturation_[domainIndex(Domain::EXTERNAL)];
     return decision;
   }
 
@@ -566,14 +594,14 @@ class SaturationPermitController {
   std::array<int, kDomainCount> completionStreak_{};
   std::vector<Domain> probeOrder_;
   size_t probeIndex_ = 0;
-  Phase phase_ = Phase::PROBE_ATAC;
+  Phase phase_ = Phase::PROBE_EXTERNAL;
   int probeCapacity_ = 1;
   int validProbeWindows_ = 0;
   double occupancySum_ = 0.0;
   bool capacityLimited_ = false;
 };
 
-}  // namespace multiome
+}  // namespace permits
 }  // namespace star
 
 #endif

@@ -92,7 +92,6 @@ def main():
     set_arg('--dynamicThreadMapFloor', 24)
     set_arg('--dynamicThreadFeatureFloor', 8)
     set_arg('--dynamicThreadPfControllerMode', 'off')
-    set_arg('--dynamicThreadAtacController', 0)
     set_arg('--dynamicThreadBgzfHierarchy', args.hierarchy)
     # A375 is a 10x 5' R2-only library (SC5P-R2): read 2 is antisense, so count Reverse (the recorded argv says Unstranded).
     set_arg('--soloStrand', 'Reverse')

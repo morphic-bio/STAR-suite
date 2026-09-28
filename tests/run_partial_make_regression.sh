@@ -40,6 +40,11 @@ for case_name in "${cases[@]}"; do
             args=(core HTSLIB=external)
             artifacts=(core/legacy/source/STAR)
             ;;
+        host-api)
+            # Builds STAR and libstar_suite, then runs tests/host_api.
+            args=(host-api-tests)
+            artifacts=(core/legacy/source/STAR core/legacy/source/libstar_suite.a)
+            ;;
         core-htslib)
             args=(core-htslib)
             artifacts=(core/legacy/source/htslib/libhts.a)

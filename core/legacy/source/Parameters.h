@@ -31,6 +31,9 @@ namespace spatial_gex {
 class Pipeline;
 }
 namespace star {
+namespace host {
+struct Hooks;
+} // namespace host
 namespace input {
 class CbqInputModule;
 struct CbqReadBatchView;
@@ -48,6 +51,18 @@ class Parameters {
         vector <string> parameterInputName;
 
         string commandLine, commandLineFull;
+
+        // Host program hooks (star::host::runMain; nullptr for standalone
+        // STAR). Only the primary instance built by runMain has them.
+        const star::host::Hooks* hostHooks = nullptr;
+        // Parameters unknown to STAR and accepted by the host, in first-seen
+        // order, with the input level of their last definition.
+        struct HostParameter {
+            string name;
+            vector<string> values;
+            int inputLevel;
+        };
+        vector<HostParameter> hostParameters;
 
         //version
         string versionGenome;
@@ -845,6 +860,7 @@ class Parameters {
     int readParsFromFile(ifstream*, ofstream*, int); //read parameters from one file
     int readPars(); // read parameters from all files
     int scanOneLine (string &lineIn, int inputLevel, int inputLevelRequested);
+    int scanHostParameter (const string &name, istringstream &valuesStream, int inputLevel);
     void scanAllLines (istream &streamIn, int inputLevel, int inputLevelRequested);
     void inputParameters (int argInN, char* argIn[]); //input parameters: default, from files, from command line
     void applyDefaultGroups(); //apply --default-* parameter bundles (only for params not explicitly set)

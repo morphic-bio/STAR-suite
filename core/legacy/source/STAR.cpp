@@ -62,6 +62,8 @@
 #include "PfMultiConfig.h"
 #include "VelocytoMexWriter.h"
 #include "OcmMultiMaterialize.h"
+#include "host/StarHost.h"
+#include "host/StarHostInternal.h"
 // Note: effective_length.h not included due to Transcriptome class name conflict
 // Use wrapper function instead
 #include "effective_length_wrapper.h"
@@ -564,8 +566,18 @@ void usage(int usageType)
     exit(0);
 };
 
-int main(int argInN, char *argIn[])
+// STAR's run, in the global namespace as the former main() was, so that name
+// lookup inside it is unchanged. star::host::runMain (below) is its public
+// entry: the STAR executable's main() (STARmain.cpp) calls it with no hooks;
+// a host program links libstar_suite.a and passes its own (host/StarHost.h).
+static int starRunMain(int argInN, char *argIn[], const star::host::Hooks *hooks)
 {
+    if (!star::host::detail::enterRunMain()) {
+        std::cerr << "EXITING because of fatal ERROR: star::host::runMain may be called only once per process\n";
+        return EXIT_CODE_RUNTIME;
+    }
+    ThreadControl::setExternalDomainLabel(star::host::detail::externalLabel(hooks));
+
     // If no argument is given, or the first argument is either '-h' or '--help', run usage()
     if (argInN == 1)
     {
@@ -581,7 +593,9 @@ int main(int argInN, char *argIn[])
     ///////////////////////////////////////////////////////////////////////
     ///////////////////////////////////////////// Parameters
     Parameters P; // all parameters
+    P.hostHooks = hooks;
     P.inputParameters(argInN, argIn);
+    star::host::detail::attachLog(&P.inOut->logMain);
     applyPfMultiGexInputFiltering(P);
     std::shared_ptr<PfMultiPreloadHandle> pfMultiPreload = startPfMultiConfigPreload(P);
     std::shared_ptr<PfFeatureAssignHandle> pfAssignHandle;
@@ -1330,7 +1344,25 @@ int main(int argInN, char *argIn[])
     std::vector<std::string> batchOutSAMattrRG;
     std::vector<std::string> batchOutSAMattrRGlineSplit;
 
-    
+    // Host lifecycle: the genome and run-time inputs are loaded and read
+    // mapping is about to start.
+    if (hooks != nullptr && hooks->preflight != nullptr) {
+        std::string hostError;
+        if (!hooks->preflight(hooks->ctx, star::host::detail::makeRunView(P), &hostError)) {
+            exitWithError("EXITING because of fatal ERROR: "
+                              + star::host::detail::hostErrorText(hostError, "host preflight failed"),
+                          std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+    }
+    if (hooks != nullptr && hooks->start != nullptr) {
+        std::string hostError;
+        if (!hooks->start(hooks->ctx, star::host::detail::makeRunView(P), &hostError)) {
+            exitWithError("EXITING because of fatal ERROR: "
+                              + star::host::detail::hostErrorText(hostError, "host start failed"),
+                          std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
+        }
+    }
+
     if (batchModeActive) {
         P.batchPaired = batchPaired;
         P.batchResumeHasList = false;
@@ -3562,12 +3594,24 @@ int main(int argInN, char *argIn[])
         signalFromBAM(P.outBAMfileCoordName, wigOutFileNamePrefix, P);
     }
 
+    // Host lifecycle: all of STAR's own work is done. The host joins its
+    // external work here, before the permit exit invariant and final logs.
+    if (hooks != nullptr && hooks->finish != nullptr) {
+        std::string hostError;
+        if (!hooks->finish(hooks->ctx, star::host::detail::makeRunView(P), &hostError)) {
+            exitWithError("EXITING because of fatal ERROR: "
+                              + star::host::detail::hostErrorText(hostError, "host finish failed"),
+                          std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
+        }
+    }
+
     // This is the first point at which mapping, asynchronous feature
-    // assignment, and concurrent ATAC have all joined.  Earlier summaries are
-    // useful interval diagnostics but cannot establish the permit exit
-    // invariant for a multi-arm worker.
+    // assignment, and any host external work have all joined.  Earlier
+    // summaries are useful interval diagnostics but cannot establish the
+    // permit exit invariant for a multi-arm worker.
     g_threadChunks.mapPermitStopHierarchy();
     if (P.dynamicThreadInterface == 1) {
+        const std::string externalLabel = ThreadControl::externalDomainLabel();
         const ThreadControl::MapPermitSnapshot permitFinal =
             g_threadChunks.mapPermitSnapshot();
         P.inOut->logMain
@@ -3579,20 +3623,24 @@ int main(int argInN, char *argIn[])
             << " waiters=" << permitFinal.currentWaiters
             << " mapInUse=" << permitFinal.mapDomain.inUse
             << " featureInUse=" << permitFinal.featureDomain.inUse
-            << " atacInUse=" << permitFinal.atacDomain.inUse
-            << " atacRetainedLease=" << permitFinal.atacDomain.inUse
+            << " " << externalLabel << "InUse=" << permitFinal.externalDomain.inUse
+            << " " << externalLabel << "RetainedLease=" << permitFinal.externalDomain.inUse
             << "\n" << flush;
-        const bool fixedPoolIncomplete = false;
+        const bool fixedPoolIncomplete =
+            hooks != nullptr && hooks->requiresFullPoolAtExit != nullptr &&
+            hooks->requiresFullPoolAtExit(hooks->ctx) &&
+            permitFinal.availablePermits != permitFinal.configuredPermits;
         if (permitFinal.inUsePermits != 0 ||
             permitFinal.currentWaiters != 0 ||
             permitFinal.mapDomain.inUse != 0 ||
             permitFinal.featureDomain.inUse != 0 ||
-            permitFinal.atacDomain.inUse != 0 ||
+            permitFinal.externalDomain.inUse != 0 ||
             fixedPoolIncomplete) {
             ostringstream errOut;
             errOut << "EXITING because of fatal ERROR: dynamic permit exit "
                    << "invariant failed after all application arms joined\n"
-                   << "SOLUTION: identify the MAP, FEATURE, or ATAC lease that "
+                   << "SOLUTION: identify the MAP, FEATURE, or "
+                   << star::host::detail::upperCopy(externalLabel) << " lease that "
                    << "was not released; do not accept this worker output.\n";
             exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
                           EXIT_CODE_RUNTIME, P);
@@ -3640,7 +3688,13 @@ int main(int argInN, char *argIn[])
     // Cleanup parameter registry (only primary instance owns it)
     P.cleanupParInfoForExit();
 
+    star::host::detail::attachLog(nullptr);
     delete P.inOut; // to close files
 
     return 0;
-}  // closes main()
+}  // closes starRunMain()
+
+int star::host::runMain(int argc, char **argv, const star::host::Hooks *hooks)
+{
+    return starRunMain(argc, argv, hooks);
+}

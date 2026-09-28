@@ -12,11 +12,14 @@
 #include "signalFromBAM.h"
 #include "bamRemoveDuplicates.h"
 #include "streamFuns.h"
+#include "host/StarHost.h"
 #include <fstream>
 #include <cctype>
 #include <cstring>
 #include <unordered_set>
 #include <cstdio>
+
+static string formatHostParameterValues(const vector<string> &values);
 
 // Define global atomic counter for processed read groups (matches Salmon's processedReads)
 // Used for pre-burn-in gating: aux params are enabled when this count >= numPreBurninFrags (5000)
@@ -1222,6 +1225,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                 clFull << "   --" << parArray[ii]->nameString << " " << *(parArray[ii]);
             };
         };
+    };
+    for (const auto &hostParameter : hostParameters) {// accepted by the host program
+        inOut->logMain << setw(PAR_NAME_PRINT_WIDTH) << hostParameter.name <<"    "<< formatHostParameterValues(hostParameter.values) << endl;
+        clFull << "   --" << hostParameter.name << " " << formatHostParameterValues(hostParameter.values);
     };
     commandLineFull=clFull.str();
     inOut->logMain << "\n-------------------------------\n##### Final effective command line:\n" <<  clFull.str() << "\n";
@@ -4115,6 +4122,12 @@ int Parameters::scanOneLine (string &lineIn, int inputLevel, int inputLevelReque
     lineInStream.str(lineIn); lineInStream.clear(); lineInStream >> parIn; //get the correct state of stream, past reading parIn
 
     if (iPar==parArray.size()) {//string is not identified
+        if (hostHooks != nullptr && hostHooks->parameter != nullptr && inputLevel > 0) {
+            // Host pass-through: parameters are delivered with the full scan
+            // of their input, never from the initial command-line pass.
+            if (inputLevelRequested >= 0) return 1;
+            return scanHostParameter(parIn, lineInStream, inputLevel);
+        }
         ostringstream errOut;
         errOut << "EXITING: FATAL INPUT ERROR: unrecognized parameter name \""<< parIn << "\" in input \"" << parameterInputName.at(inputLevel) <<"\"\n";
         errOut << "SOLUTION: use correct parameter name (check the manual)\n"<<flush;
@@ -4145,6 +4158,67 @@ int Parameters::scanOneLine (string &lineIn, int inputLevel, int inputLevelReque
     };
     return 0;
 };
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Values of a host parameter as STAR prints its own: one value as a scalar,
+// several as a vector.
+static string formatHostParameterValues(const vector<string> &values) {
+    ostringstream out;
+    for (size_t ii = 0; ii < values.size(); ii++) {
+        string value = values[ii];
+        printOneValue(&value, out);
+        if (values.size() > 1) out << "   ";
+    }
+    return out.str();
+}
+
+int Parameters::scanHostParameter (const string &name, istringstream &valuesStream, int inputLevel) {
+    vector<string> values;
+    valuesStream >> ws;
+    while (valuesStream.good()) {
+        values.push_back(inputOneValue <string> (valuesStream));
+        valuesStream >> ws;
+    }
+
+    HostParameter *known = nullptr;
+    for (auto &hostParameter : hostParameters) {
+        if (hostParameter.name == name) {
+            known = &hostParameter;
+            break;
+        }
+    }
+    if (known != nullptr && known->inputLevel == inputLevel) {
+        ostringstream errOut;
+        errOut << "EXITING: FATAL INPUT ERROR: duplicate parameter \""<< name << "\" in input \"" << parameterInputName.at(inputLevel) << "\"\n";
+        errOut << "SOLUTION: keep only one definition of input parameters in each input source\n"<<flush;
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+
+    string error;
+    if (!hostHooks->parameter(hostHooks->ctx, name, values, inputLevel, &error)) {
+        ostringstream errOut;
+        if (error.empty()) {
+            errOut << "EXITING: FATAL INPUT ERROR: unrecognized parameter name \""<< name << "\" in input \"" << parameterInputName.at(inputLevel) <<"\"\n";
+            errOut << "SOLUTION: use correct parameter name (check the manual)\n"<<flush;
+        } else {
+            errOut << "EXITING: FATAL INPUT ERROR: invalid value for parameter \""<< name << "\" in input \"" << parameterInputName.at(inputLevel) << "\": " << error << "\n";
+            errOut << "SOLUTION: correct the value of this parameter\n"<<flush;
+        }
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+
+    if (known == nullptr) {
+        hostParameters.push_back(HostParameter{name, values, inputLevel});
+    } else {
+        known->values = values;
+        known->inputLevel = inputLevel;
+    }
+    if ( inOut->logMain.good() ) {
+        inOut->logMain << setiosflags(ios::left) << setw(PAR_NAME_PRINT_WIDTH) << name << formatHostParameterValues(values)
+                       << "     ~RE-DEFINED" << endl;
+    }
+    return 0;
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Copy constructor: compiler-generated (memberwise copy).

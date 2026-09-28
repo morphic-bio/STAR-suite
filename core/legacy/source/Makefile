@@ -202,7 +202,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	SpliceGraph_findSuperTr.o sjAlignSplit.o \
 	GTF.o GTF_transcriptGeneSJ.o GTF_superTranscript.o SuperTranscriptome.o TranscriptomeFasta.o \
 	ReadAlign_outputAlignments.o ReadAlign_resolveAmbiguousCBs.o ReadAlign_slamQuant.o \
-		ReadAlign.o STAR.o TranscriptQuantEC.o TranscriptVBSidecar.o LibFormatDetection.o TranscriptQuantOutput.o SlamQuant.o SlamSolver.o slam_vb_overdisp.o SlamCompat.o SlamVarianceAnalysis.o SlamReadBuffer.o SlamDump.o SlamQcOutput.o TrimQc.o TrimQcOutput.o TrimQcShard.o SnpMaskBuild.o \
+		ReadAlign.o STARmain.o STAR.o StarHost.o TranscriptQuantEC.o TranscriptVBSidecar.o LibFormatDetection.o TranscriptQuantOutput.o SlamQuant.o SlamSolver.o slam_vb_overdisp.o SlamCompat.o SlamVarianceAnalysis.o SlamReadBuffer.o SlamDump.o SlamQcOutput.o TrimQc.o TrimQcOutput.o TrimQcShard.o SnpMaskBuild.o \
 	SharedMemory.o PackedArray.o SuffixArrayFuns.o Parameters.o Parameters_samAttributes.o InOutStreams.o SequenceFuns.o Genome.o ParametersGenome.o Stats.o \
 	Transcript.o Transcript_alignScore.o Transcript_generateCigarP.o Chain.o \
 	Transcript_variationAdjust.o Variation.o ReadAlign_waspMap.o \
@@ -240,7 +240,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	CbUbTagInjector.o
 
 # Unit tests for CR-compat regression components (built as a single binary)
-OBJECTS_NO_MAIN := $(filter-out STAR.o,$(OBJECTS))
+OBJECTS_NO_MAIN := $(filter-out STAR.o STARmain.o,$(OBJECTS))
 COMPAT_UNIT_TEST_SRC := $(ROOT_DIR)/tests/compat/test_cr_compat_components.cpp
 
 .PHONY: compat-unit-tests
@@ -492,8 +492,8 @@ test_autocksum: CellRangerFormatter.o
 # Once the loader abstraction is introduced, consider extracting a smaller test lib to reduce build time.
 test_SoloReadInfoBaseline: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_SoloReadInfoBaseline: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/SoloReadInfoBaseline_test.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/solo_readinfo_baseline
+test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/SoloReadInfoBaseline_test.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/solo_readinfo_baseline
 	../test/solo_readinfo_baseline
 
 .PHONY: test
@@ -585,9 +585,9 @@ test_complex_barcode_whitelist_lookup:
 .PHONY: test_MinimalSink
 test_MinimalSink: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_MinimalSink: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-test_MinimalSink: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
+test_MinimalSink: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
 ifeq ($(STAR_TEST_SKIP_TXOME),)
-	$(CXX) $(CXXFLAGS) ../test/MinimalSink_test.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/minimal_sink_test
+	$(CXX) $(CXXFLAGS) ../test/MinimalSink_test.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/minimal_sink_test
 	../test/minimal_sink_test
 else
 	@echo "Skipping MinimalSink_test due to STAR_TEST_SKIP_TXOME=1 or missing STAR_TXOME_DIR"
@@ -596,16 +596,16 @@ endif
 .PHONY: test_SoloReadInfoLoader
 test_SoloReadInfoLoader: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_SoloReadInfoLoader: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-test_SoloReadInfoLoader: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/SoloReadInfoLoader_test.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/solo_readinfo_loader
+test_SoloReadInfoLoader: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/SoloReadInfoLoader_test.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/solo_readinfo_loader
 	../test/solo_readinfo_loader
 
 # Parity test (loader minimal vs counting)
 .PHONY: test_SoloReadInfoParity
 test_SoloReadInfoParity: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_SoloReadInfoParity: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-test_SoloReadInfoParity: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/SoloReadInfoParity_test.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/solo_readinfo_parity
+test_SoloReadInfoParity: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/SoloReadInfoParity_test.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/solo_readinfo_parity
 	../test/solo_readinfo_parity
 
 # CbCorrector unit test
@@ -629,29 +629,29 @@ test_CbBayesianResolverPhase2: solo/CbBayesianResolver.o
 .PHONY: test_inline_hash_record_capture
 test_inline_hash_record_capture: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -DINLINE_HASH_STANDALONE=0
 test_inline_hash_record_capture: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-test_inline_hash_record_capture: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_record_capture.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/test_inline_hash_record_capture
+test_inline_hash_record_capture: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_record_capture.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/test_inline_hash_record_capture
 	../test/test_inline_hash_record_capture
 
 .PHONY: test_inline_hash_resolver
 test_inline_hash_resolver: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -DINLINE_HASH_STANDALONE=0
 test_inline_hash_resolver: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-test_inline_hash_resolver: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_resolver.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/test_inline_hash_resolver
+test_inline_hash_resolver: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_resolver.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/test_inline_hash_resolver
 	../test/test_inline_hash_resolver
 
 .PHONY: test_inline_hash_clique
 test_inline_hash_clique: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -DINLINE_HASH_STANDALONE=0
 test_inline_hash_clique: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-test_inline_hash_clique: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_clique.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/test_inline_hash_clique
+test_inline_hash_clique: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_clique.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/test_inline_hash_clique
 	../test/test_inline_hash_clique
 
 .PHONY: test_inline_hash_parity
 test_inline_hash_parity: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -DINLINE_HASH_STANDALONE=0
 test_inline_hash_parity: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-test_inline_hash_parity: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_parity.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/test_inline_hash_parity
+test_inline_hash_parity: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_parity.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/test_inline_hash_parity
 	../test/test_inline_hash_parity
 
 .PHONY: test_gene_resolver
@@ -663,8 +663,8 @@ test_gene_resolver: GeneResolver.o
 .PHONY: test_SamtoolsSorter
 test_SamtoolsSorter: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_SamtoolsSorter: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-test_SamtoolsSorter: Depend.list parametersDefault.xxd libflex libtrim libem $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/SamtoolsSorter_test.cpp $(filter-out STAR.o,$(OBJECTS)) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS) -o ../test/samtools_sorter_test
+test_SamtoolsSorter: Depend.list parametersDefault.xxd libflex libtrim libem $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/SamtoolsSorter_test.cpp $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS) -o ../test/samtools_sorter_test
 	../test/samtools_sorter_test
 
 .PHONY: test_trim_parity
@@ -736,7 +736,7 @@ solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_S
 
 .PHONY: clean
 clean:
-	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call transcriptvb_finalize trim_qc_fastq trim_qc_merge trim_qc_replay fastx_input_harness bgzf_input_harness cb_bucket_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness Depend.list parametersDefault.xxd .depend.htslib_*
+	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong libstar_suite.a libstar_suite.link star_feature_call transcriptvb_finalize trim_qc_fastq trim_qc_merge trim_qc_replay fastx_input_harness bgzf_input_harness cb_bucket_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness Depend.list parametersDefault.xxd .depend.htslib_*
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean
@@ -852,6 +852,36 @@ STAR$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STAR$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(GLIB_LIBS_SHARED)
 STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features_integrated $(LIBSCRNA_LIB)
 	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
+
+# Host library (star::host, docs/HOST_API.md). libstar_suite.a holds every
+# STAR object except STARmain.o (the executable's main); the eight OBJECTS
+# entries that STAR compiles as .cpp at link time are compiled to objects
+# here. libstar_suite.link lists, on one line, what a host must link after
+# the archive: STAR's dependent archives, HTSlib and system libraries.
+# Headers for hosts: host/StarHost.h (includes host/PermitTypes.h) and
+# host/SaturationPermitController.h. Build with HTSLIB=external when the
+# host links other code built against an installed HTSlib.
+STAR_HOST_LIB := libstar_suite.a
+STAR_HOST_LINKFILE := libstar_suite.link
+STAR_HOST_OBJECTS := $(patsubst %.cpp,%.o,$(filter-out STARmain.o,$(OBJECTS)))
+ifeq ($(HTSLIB),bundled)
+STAR_HOST_HTSLIB_LINK := $(abspath htslib/libhts.a)
+else
+STAR_HOST_HTSLIB_LINK := $(HTSLIB_LIBS)
+endif
+STAR_HOST_LINK_ARGS := $(abspath $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB)) \
+	$(STAR_HOST_HTSLIB_LINK) -fopenmp -pthread -lz -lssl -lcrypto -ldl $(GLIB_LIBS_SHARED)
+
+.PHONY: libstar_suite $(STAR_HOST_LINKFILE)
+libstar_suite : $(STAR_HOST_LIB) $(STAR_HOST_LINKFILE)
+
+$(STAR_HOST_LIB) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+$(STAR_HOST_LIB) : Depend.list parametersDefault.xxd $(STAR_HOST_OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features_integrated $(LIBSCRNA_LIB)
+	'rm' -f $@
+	$(AR) rcs $@ $(STAR_HOST_OBJECTS)
+
+$(STAR_HOST_LINKFILE) :
+	@printf '%s\n' '$(strip $(STAR_HOST_LINK_ARGS))' > $@.tmp && mv -f $@.tmp $@
 
 STARstatic$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STARstatic$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS) $(GLIB_LIBS_STATIC)

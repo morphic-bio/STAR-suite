@@ -1,5 +1,5 @@
 #include "ThreadControl.h"
-#include "SaturationPermitController.h"
+#include "host/SaturationPermitController.h"
 
 #include <cassert>
 #include <chrono>
@@ -54,35 +54,35 @@ int main() {
         assert(snap.featureDomain.floor == 0);
     }
 
-    // Saturation-aware policy: observe the larger ATAC arm first, preserve
+    // Saturation-aware policy: observe the larger external arm first, preserve
     // its sustained demand, then probe MAP with the remainder. When both
     // observed demands fit, ETA noise must not move the learned floors.
     {
-        using Controller = star::multiome::SaturationPermitController;
+        using Controller = star::permits::SaturationPermitController;
         Controller controller(32, 0, 2);
         Controller::Decision initial = controller.initialDecision();
-        assert(initial.phase == Controller::Phase::PROBE_ATAC);
+        assert(initial.phase == Controller::Phase::PROBE_EXTERNAL);
         assert(initial.mapFloor == 1);
-        assert(initial.atacFloor == 31);
+        assert(initial.externalFloor == 31);
 
         Controller::Observation probe{};
-        probe.atacUnitsDelta = 1000;
-        probe.atacOccupancy = 20.4;
+        probe.externalUnitsDelta = 1000;
+        probe.externalOccupancy = 20.4;
         assert(!controller.observe(probe).floorsChanged);
-        probe.atacOccupancy = 21.0;
-        Controller::Decision atacLearned = controller.observe(probe);
-        assert(atacLearned.floorsChanged);
-        assert(atacLearned.phase == Controller::Phase::PROBE_MAP);
-        assert(atacLearned.atacSaturation == 21);
-        assert(atacLearned.atacSaturationKnown);
-        assert(atacLearned.mapFloor == 11);
+        probe.externalOccupancy = 21.0;
+        Controller::Decision externalLearned = controller.observe(probe);
+        assert(externalLearned.floorsChanged);
+        assert(externalLearned.phase == Controller::Phase::PROBE_MAP);
+        assert(externalLearned.externalSaturation == 21);
+        assert(externalLearned.externalSaturationKnown);
+        assert(externalLearned.mapFloor == 11);
 
         probe = Controller::Observation{};
         probe.mapUnitsDelta = 1000;
         probe.mapOccupancy = 1.0;
         probe.mapInUse = 1;
         probe.mapWaiters = 10;
-        probe.atacInUse = 31;
+        probe.externalInUse = 31;
         assert(!controller.observe(probe).floorsChanged);
 
         probe = Controller::Observation{};
@@ -90,7 +90,7 @@ int main() {
         probe.mapOccupancy = 9.2;
         probe.mapInUse = 10;
         probe.mapWaiters = 1;
-        probe.atacInUse = 21;
+        probe.externalInUse = 21;
         assert(!controller.observe(probe).floorsChanged);
         probe.mapOccupancy = 9.6;
         Controller::Decision bothLearned = controller.observe(probe);
@@ -100,12 +100,12 @@ int main() {
         assert(bothLearned.mapSaturationKnown);
         assert(!bothLearned.capacityLimited);
         assert(bothLearned.mapFloor == 10);
-        assert(bothLearned.atacFloor == 21);
+        assert(bothLearned.externalFloor == 21);
 
         probe.mapUnitsDelta = 1000;
-        probe.atacUnitsDelta = 1000;
+        probe.externalUnitsDelta = 1000;
         probe.mapEtaSec = 1000.0;
-        probe.atacEtaSec = 10.0;
+        probe.externalEtaSec = 10.0;
         assert(!controller.observe(probe).floorsChanged);
     }
 
@@ -113,15 +113,15 @@ int main() {
     // work becomes the coarse tie-breaker. It moves one borrowable floor per
     // window and retains at least one permit for each live arm.
     {
-        using Controller = star::multiome::SaturationPermitController;
+        using Controller = star::permits::SaturationPermitController;
         Controller controller(32, 0, 2);
         Controller::Observation probe{};
-        probe.atacUnitsDelta = 1000;
-        probe.atacOccupancy = 31.0;
+        probe.externalUnitsDelta = 1000;
+        probe.externalOccupancy = 31.0;
         controller.observe(probe);
-        Controller::Decision atacLimited = controller.observe(probe);
-        assert(!atacLimited.atacSaturationKnown);
-        assert(atacLimited.mapFloor == 1);
+        Controller::Decision externalLimited = controller.observe(probe);
+        assert(!externalLimited.externalSaturationKnown);
+        assert(externalLimited.mapFloor == 1);
 
         probe = Controller::Observation{};
         probe.mapUnitsDelta = 1000;
@@ -130,71 +130,71 @@ int main() {
         Controller::Decision capacityLimited = controller.observe(probe);
         assert(capacityLimited.capacityLimited);
         assert(capacityLimited.mapFloor == 1);
-        assert(capacityLimited.atacFloor == 31);
+        assert(capacityLimited.externalFloor == 31);
 
-        probe.atacUnitsDelta = 1000;
+        probe.externalUnitsDelta = 1000;
         probe.mapEtaSec = 300.0;
-        probe.atacEtaSec = 100.0;
+        probe.externalEtaSec = 100.0;
         Controller::Decision helpMap = controller.observe(probe);
         assert(helpMap.floorsChanged);
         assert(helpMap.reason == Controller::Reason::MAP_ETA_LATE);
         assert(helpMap.mapFloor == 2);
-        assert(helpMap.atacFloor == 30);
+        assert(helpMap.externalFloor == 30);
 
         probe.mapEtaSec = 50.0;
-        probe.atacEtaSec = 200.0;
-        Controller::Decision helpAtac = controller.observe(probe);
-        assert(helpAtac.floorsChanged);
-        assert(helpAtac.reason == Controller::Reason::MAP_ETA_EARLY);
-        assert(helpAtac.mapFloor == 1);
-        assert(helpAtac.atacFloor == 31);
+        probe.externalEtaSec = 200.0;
+        Controller::Decision helpExternal = controller.observe(probe);
+        assert(helpExternal.floorsChanged);
+        assert(helpExternal.reason == Controller::Reason::MAP_ETA_EARLY);
+        assert(helpExternal.mapFloor == 1);
+        assert(helpExternal.externalFloor == 31);
     }
 
     // Three-domain learning probes the estimated largest arm
     // first, reserves one permit for every other live arm, and keeps all
     // learned demands as borrowable floors when they fit.
     {
-        using Controller = star::multiome::SaturationPermitController;
+        using Controller = star::permits::SaturationPermitController;
         Controller::Config config;
         config.configuredPermits = 32;
         config.featureActive = true;
         config.probeWindows = 2;
-        config.workEstimates.atac = 300000;
+        config.workEstimates.external = 300000;
         config.workEstimates.map = 200000;
         config.workEstimates.feature = 100000;
         Controller controller(config);
 
         Controller::Decision initial = controller.initialDecision();
-        assert(initial.phase == Controller::Phase::PROBE_ATAC);
-        assert(initial.probeDomain == Controller::Domain::ATAC);
+        assert(initial.phase == Controller::Phase::PROBE_EXTERNAL);
+        assert(initial.probeDomain == Controller::Domain::EXTERNAL);
         assert(initial.mapFloor == 1);
         assert(initial.featureFloor == 1);
-        assert(initial.atacFloor == 30);
+        assert(initial.externalFloor == 30);
 
         Controller::Observation probe{};
-        probe.atacUnitsDelta = 1000;
-        probe.atacOccupancy = 10.4;
+        probe.externalUnitsDelta = 1000;
+        probe.externalOccupancy = 10.4;
         controller.observe(probe);
-        probe.atacOccupancy = 10.8;
-        Controller::Decision atacLearned = controller.observe(probe);
-        assert(atacLearned.phase == Controller::Phase::PROBE_MAP);
-        assert(atacLearned.atacSaturation == 11);
-        assert(atacLearned.mapFloor == 20);
-        assert(atacLearned.featureFloor == 1);
+        probe.externalOccupancy = 10.8;
+        Controller::Decision externalLearned = controller.observe(probe);
+        assert(externalLearned.phase == Controller::Phase::PROBE_MAP);
+        assert(externalLearned.externalSaturation == 11);
+        assert(externalLearned.mapFloor == 20);
+        assert(externalLearned.featureFloor == 1);
 
-        // MAP cannot be sampled while non-preemptive ATAC leases from the
-        // preceding probe still exceed ATAC's learned floor.
+        // MAP cannot be sampled while non-preemptive external leases from the
+        // preceding probe still exceed external's learned floor.
         probe = Controller::Observation{};
         probe.mapUnitsDelta = 1000;
         probe.mapOccupancy = 1.0;
         probe.mapInUse = 1;
         probe.mapWaiters = 10;
-        probe.atacInUse = 30;
+        probe.externalInUse = 30;
         assert(!controller.observe(probe).floorsChanged);
 
         probe.mapOccupancy = 16.1;
         probe.mapInUse = 17;
-        probe.atacInUse = 11;
+        probe.externalInUse = 11;
         controller.observe(probe);
         probe.mapOccupancy = 16.6;
         Controller::Decision mapLearned = controller.observe(probe);
@@ -212,15 +212,15 @@ int main() {
         assert(allLearned.featureSaturation == 2);
         assert(allLearned.mapFloor == 17);
         assert(allLearned.featureFloor == 2);
-        assert(allLearned.atacFloor == 11);
+        assert(allLearned.externalFloor == 11);
         assert(!allLearned.capacityLimited);
 
         probe.mapUnitsDelta = 1000;
         probe.featureUnitsDelta = 0;  // transient provider gap
-        probe.atacUnitsDelta = 1000;
+        probe.externalUnitsDelta = 1000;
         probe.mapEtaSec = 1000.0;
         probe.featureEtaSec = 5000.0;
-        probe.atacEtaSec = 10.0;
+        probe.externalEtaSec = 10.0;
         assert(!controller.observe(probe).floorsChanged);
 
         // Estimate exhaustion alone is not completion. Require two quiescent
@@ -233,20 +233,20 @@ int main() {
         assert(featureComplete.reason == Controller::Reason::FEATURE_COMPLETE);
         assert(featureComplete.featureFloor == 0);
         assert(featureComplete.mapFloor == 17);
-        assert(featureComplete.atacFloor == 11);
+        assert(featureComplete.externalFloor == 11);
     }
 
     // Probe order is data-driven when estimates are supplied. If all three
     // probes consume their available capacity, ETA can transfer one
     // reservation to the latest arm without exceeding the pool.
     {
-        using Controller = star::multiome::SaturationPermitController;
+        using Controller = star::permits::SaturationPermitController;
         Controller::Config config;
         config.configuredPermits = 32;
         config.featureActive = true;
         config.probeWindows = 1;
         config.workEstimates.feature = 300;
-        config.workEstimates.atac = 200;
+        config.workEstimates.external = 200;
         config.workEstimates.map = 100;
         Controller controller(config);
         assert(controller.initialDecision().phase ==
@@ -257,13 +257,13 @@ int main() {
         probe.featureOccupancy = 30.0;
         Controller::Decision featureLimited = controller.observe(probe);
         assert(!featureLimited.featureSaturationKnown);
-        assert(featureLimited.phase == Controller::Phase::PROBE_ATAC);
+        assert(featureLimited.phase == Controller::Phase::PROBE_EXTERNAL);
 
         probe = Controller::Observation{};
-        probe.atacUnitsDelta = 1;
-        probe.atacOccupancy = 1.0;
-        Controller::Decision atacLimited = controller.observe(probe);
-        assert(atacLimited.phase == Controller::Phase::PROBE_MAP);
+        probe.externalUnitsDelta = 1;
+        probe.externalOccupancy = 1.0;
+        Controller::Decision externalLimited = controller.observe(probe);
+        assert(externalLimited.phase == Controller::Phase::PROBE_MAP);
 
         probe = Controller::Observation{};
         probe.mapUnitsDelta = 1;
@@ -272,32 +272,32 @@ int main() {
         assert(limited.phase == Controller::Phase::STEADY);
         assert(limited.capacityLimited);
         assert(limited.featureFloor == 30);
-        assert(limited.atacFloor == 1);
+        assert(limited.externalFloor == 1);
         assert(limited.mapFloor == 1);
 
         probe.featureUnitsDelta = 1;
-        probe.atacUnitsDelta = 1;
+        probe.externalUnitsDelta = 1;
         probe.mapUnitsDelta = 1;
         probe.featureEtaSec = 50.0;
-        probe.atacEtaSec = 100.0;
+        probe.externalEtaSec = 100.0;
         probe.mapEtaSec = 300.0;
         Controller::Decision helpMap = controller.observe(probe);
         assert(helpMap.floorsChanged);
         assert(helpMap.reason == Controller::Reason::MAP_ETA_LATE);
         assert(helpMap.featureFloor == 29);
-        assert(helpMap.atacFloor == 1);
+        assert(helpMap.externalFloor == 1);
         assert(helpMap.mapFloor == 2);
 
         // The earliest ETA domain may already be at its one-permit minimum.
         // The next eligible early domain must still be able to donate.
         probe.featureEtaSec = 300.0;
-        probe.atacEtaSec = 10.0;  // cannot donate: floor is already one
+        probe.externalEtaSec = 10.0;  // cannot donate: floor is already one
         probe.mapEtaSec = 1000.0;
         Controller::Decision alternateDonor = controller.observe(probe);
         assert(alternateDonor.floorsChanged);
         assert(alternateDonor.reason == Controller::Reason::MAP_ETA_LATE);
         assert(alternateDonor.featureFloor == 28);
-        assert(alternateDonor.atacFloor == 1);
+        assert(alternateDonor.externalFloor == 1);
         assert(alternateDonor.mapFloor == 3);
     }
 
@@ -309,20 +309,20 @@ int main() {
         ThreadControl legacy;
         legacy.mapPermitConfigure(true, 4, 2, true, false);
         const uint64_t wait = legacy.mapPermitAcquireForDomain(
-            ThreadControl::PermitDomain::ATAC);
+            ThreadControl::PermitDomain::EXTERNAL);
         ThreadControl::MapPermitSnapshot held = legacy.mapPermitSnapshot();
         assert(!held.floorsActive);
         assert(!held.fifoEnabled);
-        assert(held.atacDomain.inUse == 1);
-        assert(held.atacDomain.maxInUse == 1);
+        assert(held.externalDomain.inUse == 1);
+        assert(held.externalDomain.maxInUse == 1);
         legacy.mapPermitReleaseForDomain(
-            ThreadControl::PermitDomain::ATAC, wait, 1, 64, 1000);
-        assert(legacy.mapPermitSnapshot().atacDomain.inUse == 0);
+            ThreadControl::PermitDomain::EXTERNAL, wait, 1, 64, 1000);
+        assert(legacy.mapPermitSnapshot().externalDomain.inUse == 0);
     }
 
     // Floors are minimum reservations, not a conserved allocation. With a
-    // 22-permit pool and 1/1 MAP/ATAC floors, MAP may borrow all 22 while
-    // ATAC has no waiter. A controller that changes only floors therefore
+    // 22-permit pool and 1/1 MAP/external floors, MAP may borrow all 22 while
+    // external has no waiter. A controller that changes only floors therefore
     // does not define an 11/11 target split.
     {
         ThreadControl shared;
@@ -336,9 +336,9 @@ int main() {
         }
         ThreadControl::MapPermitSnapshot borrowed = shared.mapPermitSnapshot();
         assert(borrowed.mapDomain.inUse == 22);
-        assert(borrowed.atacDomain.inUse == 0);
+        assert(borrowed.externalDomain.inUse == 0);
         assert(borrowed.mapDomain.floor == 1);
-        assert(borrowed.atacDomain.floor == 1);
+        assert(borrowed.externalDomain.floor == 1);
         assert(borrowed.floorChangeCalls == 1);
         for (uint64_t waitNs : waits) {
             shared.mapPermitReleaseForDomain(
@@ -348,7 +348,7 @@ int main() {
         assert(shared.mapPermitSnapshot().floorChangeCalls == 2);
     }
 
-    // Three-domain floors remain borrowable. A completed FEATURE/ATAC arm
+    // Three-domain floors remain borrowable. A completed FEATURE/external arm
     // with no waiters cannot strand its learned reservation.
     {
         ThreadControl shared;
@@ -363,7 +363,7 @@ int main() {
         ThreadControl::MapPermitSnapshot borrowed = shared.mapPermitSnapshot();
         assert(borrowed.mapDomain.inUse == 32);
         assert(borrowed.featureDomain.inUse == 0);
-        assert(borrowed.atacDomain.inUse == 0);
+        assert(borrowed.externalDomain.inUse == 0);
         for (uint64_t waitNs : waits) {
             shared.mapPermitReleaseForDomain(
                 ThreadControl::PermitDomain::MAP, waitNs, 1, 64, 1000);
@@ -381,18 +381,18 @@ int main() {
 
     const uint64_t firstMapWait =
         permits.mapPermitAcquireForDomain(ThreadControl::PermitDomain::MAP);
-    const uint64_t atacWait =
-        permits.mapPermitAcquireForDomain(ThreadControl::PermitDomain::ATAC);
+    const uint64_t externalWait =
+        permits.mapPermitAcquireForDomain(ThreadControl::PermitDomain::EXTERNAL);
 
     ThreadControl::MapPermitSnapshot saturated = permits.mapPermitSnapshot();
     assert(saturated.configuredPermits == 2);
     assert(saturated.availablePermits == 0);
     assert(saturated.mapDomain.floor == 1);
-    assert(saturated.atacDomain.floor == 1);
+    assert(saturated.externalDomain.floor == 1);
     assert(saturated.mapDomain.inUse == 1);
-    assert(saturated.atacDomain.inUse == 1);
+    assert(saturated.externalDomain.inUse == 1);
     assert(saturated.mapDomain.fastAcquireCalls == 1);
-    assert(saturated.atacDomain.fastAcquireCalls == 1);
+    assert(saturated.externalDomain.fastAcquireCalls == 1);
 
     std::mutex stateMutex;
     std::condition_variable stateCv;
@@ -429,8 +429,8 @@ int main() {
     assert(queued.fifoQueueDepth == 1);
     assert(queued.mapDomain.blockedAcquireCalls == 1);
 
-    permits.mapPermitReleaseForDomain(ThreadControl::PermitDomain::ATAC,
-                                      atacWait, 1, 64, 1000);
+    permits.mapPermitReleaseForDomain(ThreadControl::PermitDomain::EXTERNAL,
+                                      externalWait, 1, 64, 1000);
     {
         std::unique_lock<std::mutex> lock(stateMutex);
         stateCv.wait(lock, [&]() { return waiterFinished; });
@@ -443,14 +443,14 @@ int main() {
     assert(done.availablePermits == 2);
     assert(done.inUsePermits == 0);
     assert(done.mapDomain.inUse == 0);
-    assert(done.atacDomain.inUse == 0);
+    assert(done.externalDomain.inUse == 0);
     assert(done.mapDomain.currentWaiters == 0);
     assert(done.fifoQueueDepth == 0);
     assert(done.mapDomain.acquireCalls == 2);
     assert(done.mapDomain.fastAcquireCalls == 1);
     assert(done.mapDomain.queuedGrantCalls == 1);
     assert(done.mapDomain.releaseCalls == 2);
-    assert(done.atacDomain.releaseCalls == 1);
+    assert(done.externalDomain.releaseCalls == 1);
     assert(done.mapDomain.maxInUse == 2);
     assert(done.mapDomain.maxWaiters == 1);
     assert(done.mapDomain.inUsePermitNs > 0);

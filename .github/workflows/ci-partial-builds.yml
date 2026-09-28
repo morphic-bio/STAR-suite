@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [core, core-static, core-htslib, release-companion-tools, star-feature-call, feature-barcodes-tools, process-features-lib, yremove-tools]
+        target: [core, core-static, core-htslib, host-api, release-companion-tools, star-feature-call, feature-barcodes-tools, process-features-lib, yremove-tools]
     steps:
       - uses: actions/checkout@v4
       - name: Install build prerequisites

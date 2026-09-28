@@ -1857,3 +1857,10 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
 
 - `tests/test_ambient_fdr_feature_type.sh` creates and removes
   `/tmp/celltag_ambient_test.*`, testing CellTag selection alongside real guides.
+
+## Host interface tests (1.10.0)
+
+- `tests/host_api/run_host_api_tests.sh` (`make host-api-tests`) writes the
+  test host, the synthetic scRNA fixtures and all STAR/host outputs under a
+  fresh `/tmp/star-host-api.*`, or under `HOST_API_TEST_OUT` when set. It does
+  not remove them; nothing is committed.

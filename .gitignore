@@ -196,3 +196,5 @@ AGENTS_local.md
 /SJ.out.tab
 /test_slam_qc_output.json
 **/Aligned.out.sam
+/core/legacy/source/libstar_suite.a
+/core/legacy/source/libstar_suite.link

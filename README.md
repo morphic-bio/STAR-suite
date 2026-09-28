@@ -107,7 +107,8 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 - **STAR-core** (`core/`): Legacy STAR (indexing, bulk, Solo) plus shared utilities.
   Build: `make core` for the binary at `core/legacy/source/STAR`. STAR Suite
   depends on no other suite. The joint RNA + ATAC (multiome) binary is built
-  by Multiomics Suite.
+  by Multiomics Suite, which links STAR Suite through its host interface
+  ([`docs/HOST_API.md`](docs/HOST_API.md)).
 - **STAR-perturb** (`core/legacy/` + `core/features/process_features/`): CR-compatible perturb-seq path with integrated feature extraction/calling (`process_features` + `call_features`) and `crispr_analysis/` outputs in CR-compat mode.
   Primary run path: `STAR --pfMultiConfig ... --defaultCrCompat yes` (see STAR-perturb section below).
 - **STAR-OCM scRNA-seq** (`core/legacy/`): GEM-X OCM support on the CR-compatible
@@ -253,7 +254,8 @@ selection, run `make core-clean` first.
 
 Since 1.10.0 STAR Suite no longer links Chromap Suite. The `--chromapAtac*`,
 `--multiomeAtac*` and ATAC-only permit parameters moved with the multiome binary
-to Multiomics Suite.
+to Multiomics Suite. `make star-host-lib` builds `libstar_suite.a` for host
+programs such as that binary; see [`docs/HOST_API.md`](docs/HOST_API.md).
 
 ### From release artifacts
 

@@ -2,6 +2,7 @@
 #define THREAD_CONTROL_DEF
 
 #include "ReadAlignChunk.h"
+#include "host/PermitTypes.h"
 #include <pthread.h>
 #include <atomic>
 #include <cstddef>
@@ -18,10 +19,12 @@
 
 class ThreadControl {
 public:
+    // EXTERNAL is lent to a host program (star::host, docs/HOST_API.md);
+    // standalone STAR never acquires it.
     enum class PermitDomain : uint8_t {
         MAP = 0,
         FEATURE = 1,
-        ATAC = 2
+        EXTERNAL = 2
     };
 
     enum class PermitWork : uint8_t { PROCESS, BGZF };
@@ -32,37 +35,10 @@ public:
         PermitHookContext(PermitDomain d, PermitWork w = PermitWork::PROCESS) : domain(d), work(w) {}
     };
 
-    struct DecodeSnapshot {
-        int inUse = 0, waiters = 0, limit = 1;
-        uint64_t acquireCalls = 0, releaseCalls = 0, maxInUse = 0;
-        uint64_t blocks = 0, bytes = 0, workNs = 0, waitNs = 0;
-        uint64_t ready = 0, outstanding = 0, capacity = 0, workers = 0;
-        uint64_t waitingReaders = 0, inputWaitNs = 0;
-    };
-
-    struct PermitDomainSnapshot {
-        DecodeSnapshot decode;
-        uint64_t completedReadPairs = 0;
-        bool complete;
-        int floor;
-        int inUse;
-        int currentWaiters;
-        uint64_t maxInUse;
-        uint64_t maxWaiters;
-        uint64_t blockedAcquireCalls;
-        uint64_t fastAcquireCalls;
-        uint64_t queuedGrantCalls;
-        uint64_t releaseCalls;
-        uint64_t inUsePermitNs;
-        uint64_t waiterNs;
-        uint64_t acquireCalls;
-        uint64_t waitNsTotal;
-        uint64_t waitNsMax;
-        uint64_t workUnitsTotal;
-        uint64_t workBytesTotal;
-        uint64_t workNsTotal;
-        uint64_t workNsMax;
-    };
+    // Snapshot types are the public star::host types (host/PermitTypes.h).
+    using DecodeSnapshot = star::host::DecodeSnapshot;
+    using PermitDomainSnapshot = star::host::PermitDomainSnapshot;
+    using MapPermitSnapshot = star::host::PermitSnapshot;
 
     bool threadBool;
 
@@ -84,53 +60,6 @@ public:
     ThreadControl();
     ~ThreadControl();
     
-    struct MapPermitSnapshot {
-        bool enabled;
-        bool telemetryEnabled;
-        bool variableThreadsEnabled;
-        bool cpuAwareEnabled;
-        bool cpuInitialized;
-        bool floorsActive;
-        bool fifoEnabled;
-        int retuneEveryAcquires;
-        int sequenceLength;
-        int targetPermits;
-        int configuredPermits;
-        int availablePermits;
-        int inUsePermits;
-        uint64_t fifoQueueDepth;
-        int cpuSampleIntervalMs;
-        std::vector<int> retuneTraceTargets;
-        uint64_t retuneTraceDropped;
-        uint64_t acquireCalls;
-        uint64_t retuneCalls;
-        uint64_t blockedAcquireCalls;
-        uint64_t waitTimeoutEvents;
-        uint64_t stallWarnEvents;
-        uint64_t currentWaiters;
-        uint64_t maxWaiters;
-        uint64_t lastReleaseAgoNs;
-        uint64_t waitNsTotal;
-        uint64_t waitNsMax;
-        uint64_t workUnitsTotal;
-        uint64_t workBytesTotal;
-        uint64_t workNsTotal;
-        uint64_t workNsMax;
-        uint64_t telemetryElapsedNs;
-        uint64_t availablePermitNs;
-        uint64_t contendedIdlePermitNs;
-        uint64_t noAdmissibleGrantEvents;
-        uint64_t floorChangeCalls;
-        uint64_t cpuSampleCount;
-        uint64_t cpuLastSampleAgoNs;
-        double cpuBusyInstant;
-        double cpuBusyEma;
-        double cpuIdleEma;
-        PermitDomainSnapshot mapDomain;
-        PermitDomainSnapshot featureDomain;
-        PermitDomainSnapshot atacDomain;
-    };
-
     void mapPermitConfigure(bool enabled, int totalThreads, int configuredPermits, bool telemetryEnabled, bool variableThreads);
     void mapPermitConfigureCpuAware(bool enabled, int sampleIntervalMs, double emaAlpha);
     void mapPermitConfigureRetunePlan(const std::vector<int> &permitSequence, int retuneEveryAcquires);
@@ -179,6 +108,10 @@ public:
     void mapPermitPublishWorkEstimates(uint64_t mapPairs, uint64_t featurePairs);
     void mapPermitStopHierarchy();
     bool mapPermitHierarchyEnabled() const { return mapPermitHierarchyEnabledFlag.load(); }
+    // Name of the EXTERNAL domain in permit log lines ("external" unless a
+    // host sets its own label). Not thread-safe; set before mapping starts.
+    static void setExternalDomainLabel(const char* label);
+    static const char* externalDomainLabel();
 
     static void* threadRAprocessChunks(void *RAchunk) {
         ( (ReadAlignChunk*) RAchunk )->processChunks();

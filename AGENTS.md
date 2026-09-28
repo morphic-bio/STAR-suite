@@ -357,6 +357,7 @@ Workflow schemas: `mcp_server/workflows/`
 - `docs/Github-actions.md`
 - `docs/CBQ_FORMAT_AND_IMPLEMENTATION.md`
 - `docs/Star-binary-distribution.md`
+- `docs/HOST_API.md`
 - `docs/feature_barcodes.md`
 - `docs/RUNBOOK_REPOSITORY_SPLIT_RECIPES_PROVENANCE.md`
 - `docs/todos`

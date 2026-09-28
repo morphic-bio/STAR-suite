@@ -46,6 +46,8 @@ help:
 	@echo "STAR-suite build targets:"
 	@echo "  make core            Build the STAR core binary (bundled HTSlib)"
 	@echo "  make core-portable   Alias for make core"
+	@echo "  make star-host-lib   Build libstar_suite.a for host programs (docs/HOST_API.md)"
+	@echo "  make host-api-tests  Build STAR + host library and run tests/host_api"
 	@echo "  make flex            Build core + Flex tools"
 	@echo "  make slam            Build core + SLAM tools"
 	@echo "  make tools           Build all external tools"
