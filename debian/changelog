@@ -1,3 +1,22 @@
+star-suite (1.10.0-1) unstable; urgency=medium
+
+  * Remove every dependency on other suites: STAR no longer links Chromap
+    Suite or RapidMACS. The --chromapAtac*, --multiomeAtac* and ATAC-only
+    permit parameters, the libchromap contract, the multiome orchestration,
+    libscrna's ATAC evidence reader and multiome tools, and the CBQ-to-Chromap
+    adapter move to Multiomics Suite, which builds the multiome binary.
+  * make core builds STAR with its bundled HTSlib (formerly make
+    core-portable, kept as an alias); HTSLIB=external selects an installed
+    HTSlib. Release packages were already built this way.
+  * Add a generic host interface (star::host::runMain, parameter
+    pass-through, lifecycle and permit-plan callbacks, a permit facade) and
+    make star-host-lib, which builds libstar_suite.a. The unused third permit
+    domain is now EXTERNAL.
+  * Add paired hashtag demultiplexing and per-library ambient-FDR feature
+    calling, with CellTag selection beside real guide features.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Mon, 28 Sep 2026 17:10:51 +0000
+
 star-suite (1.9.5.a-1) unstable; urgency=medium
 
   * Fix external HTSlib header/library discovery for Chromap-enabled make core,
