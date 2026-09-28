@@ -224,7 +224,6 @@ Current public workflows:
 | `star_flex_fixed_rna` | STAR-Flex Fixed RNA command on the 1.9.4 half-probe route: count-only, no genome index loaded, tag-aware cell calling. | Caller-supplied Fixed RNA FASTQs (probe read R2 first), whitelist, sample probes and the required half-probe (H1X2) cache; alignment-based routes need `flex_legacy yes`. |
 | `star_flex_fixed_rna_cbq` | STAR-Flex Fixed RNA command with CBQ input on the same half-probe, count-only route. | `--readFilesType Binseq PE --flex yes` with paired CBQ files in Flex mate order and the required half-probe (H1X2) cache. |
 | `star_perturb_cr_compat` | Perturb-seq CR-compatible STAR command with the option set used for the 1.9.4 A375 and MSK benchmarks. | Gene-expression FASTQs and whitelist, `--pfMultiConfig` feature libraries, CR-compatible threading defaults; `solo_strand` is required (Reverse for 5' R2-only libraries such as A375). |
-| `morphic_multiome` | Cross-repo Morphic 10x Multiome recipe from `/mnt/pikachu/morphic-recipes`. | Minimal compose-up floor (`--profile matrices-peaks --dry-run`) with low-memory Chromap and optional `chromap_macs3_frag_qvalue` for MACS3 q-value peak selection. |
 
 Current local/private SLAM workflows:
 

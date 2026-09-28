@@ -7,7 +7,7 @@ out=${OUT_ROOT:-$(mktemp -d /tmp/star-partial-make.XXXXXX)}
 jobs=${MAKE_JOBS:-8}
 cases=("$@")
 if [[ ${#cases[@]} -eq 0 ]]; then
-    cases=(core-portable core-static core-htslib release-companion-tools
+    cases=(core core-static core-htslib release-companion-tools
            star-feature-call feature-barcodes-tools process-features-lib yremove-tools)
 fi
 mkdir -p "$out"
@@ -32,12 +32,12 @@ for case_name in "${cases[@]}"; do
     args=()
     artifacts=()
     case "$case_name" in
-        core-portable|core-static)
+        core|core-portable|core-static)
             args=("$case_name")
             artifacts=(core/legacy/source/STAR)
             ;;
-        core-without-chromap)
-            args=(core WITH_CHROMAP=0)
+        core-external-htslib)
+            args=(core HTSLIB=external)
             artifacts=(core/legacy/source/STAR)
             ;;
         core-htslib)
@@ -67,11 +67,6 @@ for case_name in "${cases[@]}"; do
         yremove-tools)
             args=(yremove-tools)
             artifacts=(core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads)
-            ;;
-        chromap-core)
-            : "${CHROMAP_SUITE_DIR:?Set CHROMAP_SUITE_DIR for the full Chromap build}"
-            args=(core "CHROMAP_SUITE_DIR=$CHROMAP_SUITE_DIR")
-            artifacts=(core/legacy/source/STAR)
             ;;
         *) echo "ERROR: unknown partial build case: $case_name" >&2; exit 2 ;;
     esac

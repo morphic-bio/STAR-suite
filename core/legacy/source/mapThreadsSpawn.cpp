@@ -11,7 +11,6 @@
 #include "GlobalVariables.h"
 #include "ErrorWarning.h"
 #include "InlineCBCorrection.h"
-#include "SaturationPermitController.h"
 #include "TimeFunctions.h"
 #include "streamFuns.h"
 #include "systemFunctions.h"
@@ -257,9 +256,6 @@ bool flexNoGenomeCountOnlyActivationGuard(Parameters &P, std::string *reason) {
     }
     if (P.var.yes || P.wasp.yes || P.trimQcEnabled) {
         return reject("variant/WASP/trim-QC mode is enabled");
-    }
-    if (P.chromapAtac.enabled != 0 || !unsetToken(P.multiomeAtacPeakMex.inlineMode)) {
-        return reject("Chromap/multiome ATAC output is enabled");
     }
     if (!unsetToken(P.pfMulti.pfMultiConfig) || !unsetToken(P.pfMulti.ocmMultiEnable)) {
         return reject("pf-multi/OCM post-processing is enabled");
@@ -922,21 +918,16 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     const bool interfaceEnabled = (P.dynamicThreadInterface == 1) || bool(P.bgzfPipes);
     const bool telemetryEnabled = (P.dynamicThreadTelemetry == 1);
     const bool variableThreadsEnabled = (P.variableThreads == 1);
-    // Permit-pool budget. With chromapAtac concurrent the pool spans STAR's
-    // GEX MAP/FEATURE workers AND chromap's ATAC workers, so the budget is
-    // runThreadN + chromapAtac.threads (a separate thread budget than runThreadN
-    // alone). When chromapAtac is off, pool stays at runThreadN. The user can
-    // override via --dynamicThreadConstMapPermits, which is now honored as-is
-    // (no clamp to runThreadN); pass 0 for the auto-sized default.
-    const int permitTotalThreads = (P.chromapAtac.enabled == 1)
-        ? (P.runThreadN + std::max(0, P.chromapAtac.threads))
-        : P.runThreadN;
+    // Permit-pool budget. The user can override via
+    // --dynamicThreadConstMapPermits, which is honored as-is (no clamp to
+    // runThreadN); pass 0 for the auto-sized default.
+    const int permitTotalThreads = P.runThreadN;
     const int configuredPermits = (P.dynamicThreadConstMapPermits > 0)
         ? P.dynamicThreadConstMapPermits
         : permitTotalThreads;
     int configuredMapFloor = std::max(0, P.dynamicThreadMapFloor);
     int configuredFeatureFloor = std::max(0, P.dynamicThreadFeatureFloor);
-    int configuredAtacFloor = std::max(0, P.dynamicThreadAtacFloor);
+    int configuredAtacFloor = 0;
     if (!g_threadChunks.mapPermitHierarchyEnabled()) {
     g_threadChunks.mapPermitConfigure(interfaceEnabled, permitTotalThreads, configuredPermits, telemetryEnabled, variableThreadsEnabled);
     g_threadChunks.mapPermitConfigureCpuAware(
@@ -948,29 +939,6 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
 
     // Per-domain borrowable floors (Step 5a). Index order must match
     // ThreadControl::permitDomainIndex(): MAP=0, FEATURE=1, ATAC=2.
-    if (interfaceEnabled && P.chromapAtac.enabled == 1 &&
-        P.dynamicThreadAtacController == 2) {
-        const bool featureActive = P.dynamicThreadFeatureWorkEstimate > 0;
-        if (featureActive && configuredPermits < 3) {
-            ostringstream errOut;
-            errOut << "EXITING because of FATAL ERROR: three-domain saturation "
-                   << "control requires at least 3 configured permits, got "
-                   << configuredPermits;
-            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, 1, P);
-        }
-        star::multiome::SaturationPermitController::Config controllerConfig;
-        controllerConfig.configuredPermits = configuredPermits;
-        controllerConfig.fixedFeatureFloor = configuredFeatureFloor;
-        controllerConfig.featureActive = featureActive;
-        controllerConfig.workEstimates.map = P.dynamicThreadMapWorkEstimate;
-        controllerConfig.workEstimates.feature = P.dynamicThreadFeatureWorkEstimate;
-        controllerConfig.workEstimates.atac = P.dynamicThreadAtacWorkEstimate;
-        const star::multiome::SaturationPermitController controller(controllerConfig);
-        const auto initial = controller.initialDecision();
-        configuredMapFloor = initial.mapFloor;
-        configuredFeatureFloor = initial.featureFloor;
-        configuredAtacFloor = initial.atacFloor;
-    }
     {
         std::vector<int> domainFloors(3, 0);
         domainFloors[0] = configuredMapFloor;
@@ -1004,7 +972,6 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
                          << configuredMapFloor << "/"
                          << configuredFeatureFloor << "/"
                          << configuredAtacFloor
-                         << ", atacController=" << P.dynamicThreadAtacController
                          << ", fifo=" << ((P.dynamicThreadFifoWaiters == 1) ? "on" : "off")
                          << ")\n" << flush;
         pthread_mutex_unlock(&g_threadChunks.mutexLogMain);

@@ -63,28 +63,18 @@ class Parameters {
         int dynamicThreadInterface = 0; // 0: off, 1: constant map permits + telemetry hooks
         int dynamicThreadConstMapPermits = 0; // <=0 means use runThreadN
         int dynamicThreadTelemetry = 0; // 0: off, 1: on
-        int dynamicThreadTelemetryIntervalSec = 10; // periodic mapPermitSnapshot emit (sec) when chromapAtacEnabled+dynamicThreadTelemetry; 0 disables periodic sampler (end-of-run summary still emits)
         // Per-domain borrowable permit floors (Step 5a). Each domain reserves
         // at LEAST `floor` concurrent permits whenever it has waiters; surplus
         // permits are fully shared. 0 disables that domain's floor. Setting
         // any floor > 0 activates the floor-aware acquire/release path with
         // per-domain CVs (eliminates the notify_one wakeup-fairness pathology).
         int dynamicThreadMapFloor = 0;
-        int dynamicThreadAtacFloor = 0;
         int dynamicThreadFeatureFloor = 0;
-        // Multiome permit controller. 1 retains the legacy raw-rate MAP/ATAC
-        // controller. 2 learns sustained occupancy for every live domain,
-        // retains those values as borrowable floors when they fit, and
-        // consults remaining-work ETA only when the probes are capacity-limited.
-        // Mode 2 requires permit telemetry and a positive sampler interval.
-        int dynamicThreadAtacController = 0;
-        // Optional total-work estimates for capacity-limited mode-2 ETA
-        // balancing and descending-work probe order. Zero lets an active input
-        // provider supply the estimate where one is available. A positive
-        // FEATURE estimate activates three-domain MAP/FEATURE/ATAC learning.
+        // Optional total-work estimates for ETA balancing and descending-work
+        // probe order. Zero lets an active input provider supply the estimate
+        // where one is available.
         uint64 dynamicThreadMapWorkEstimate = 0;
         uint64 dynamicThreadFeatureWorkEstimate = 0;
-        uint64 dynamicThreadAtacWorkEstimate = 0;
         // FIFO waiter-queue admission. When 1, ThreadControl routes acquires
         // through a queue under the permit mutex: queued waiters are served
         // in arrival order, and new arrivals cannot fast-path past existing
@@ -815,80 +805,6 @@ class Parameters {
             string ocmMultiBamSplit;         // no|yes|auto - write OCM per-sample BAMs during tagged BAM replay
             string ocmMultiOutputCompat;     // cellranger (default) - output layout compat mode
         } pfMulti;
-
-        // In-process Chromap ATAC (STAR libchromap contract); off unless chromapAtacEnable=1
-        struct {
-            int enabled = 0;
-            string referenceFasta;
-            string chromapIndex;
-            string inputFormat = "fastq";
-            string read1Csv;
-            string read2Csv;
-            string barcodeCsv;
-            string readPairCbqCsv;
-            string barcodeCbqCsv;
-            string readFormat;
-            string barcodeWhitelist;
-            string barcodeTranslate;
-            // If 1, the barcode translate table is read in natural
-            // <from_bc>\t<to_bc> order (col1 = source / hash key). Default 0
-            // preserves the historical Chromap convention where col2 is the
-            // hash key.
-            int barcodeTranslateFromFirst = 0;
-            string outputFragments;
-            string secondaryFragments;
-            string outputFormat = "BED";
-            string summary;
-            string tempDir;
-            int threads = 1;
-            int htsThreads = 0;
-            int sortBam = 0;
-            int writeIndex = 0;
-            uint64 sortBamRam = 8ULL * 1024 * 1024 * 1024;
-            int emitNoYBam = 0;
-            int emitYBam = 0;
-            string noYOutput;
-            string YOutput;
-            int lowMem = 0;
-            uint64 lowMemRam = 0;
-            int callMacs3FragPeaks = 0;
-            string macs3FragPeaksOutput;
-            string macs3FragSummitsOutput;
-            string macs3FragKeepIntermediates;
-            double macs3FragPvalue = 1e-5;
-            double macs3FragQvalue = 0.0;
-            int macs3FragMinLength = 200;
-            int macs3FragMaxGap = 30;
-            int macs3FragUint8Counts = 1;
-            int macs3FragLowMem = 0;
-            // Optional per-barcode ATAC evidence-from-peaks output (single-
-            // process equivalent of the standalone scrna_build_atac_evidence
-            // _from_peaks tool). When set to a real path, after concurrent
-            // chromap ATAC + MACS3 FRAG peaks finish, STAR's orchestration
-            // calls libscrna::atac::RunAtacEvidenceFromPeaks on the
-            // just-produced binary sidecar + atac_peaks.narrowPeak and writes
-            // the per-barcode evidence TSV here. Empty / "-" disables. No
-            // effect when the FRAG narrowPeak isn't produced.
-            string evidenceFromPeaksOutput;
-            string tn5ShiftMode = "classical";
-            string startMode = "postMapping";
-        } chromapAtac;
-
-        // Phase-2 Multiome ATAC peak/MEX materialization from the Chromap AEV1
-        // sidecar. This is off by default for Phase B parity validation.
-        struct {
-            string inlineMode = "no";
-            string barcodeTranslate;
-            string barcodeTranslateFromFirst = "yes";
-            string metricsTsv;
-            string mexOutDir;
-            string narrowPeak;
-            string summits;
-            string peakCallMode = "frag";
-            string macsProfile;
-            int threads = 0;       // 0 inherits runThreadN
-            uint64 maxBarcodes = 0;
-        } multiomeAtacPeakMex;
 
         // Default module flag groups - apply predefined parameter bundles
         struct {

@@ -1,4 +1,4 @@
-.PHONY: tools tools-clean vbem-tools yremove-tools feature-barcodes-tools process-features-tools process-features-lib star-feature-call star-libchromap-contract
+.PHONY: tools tools-clean vbem-tools yremove-tools feature-barcodes-tools process-features-tools process-features-lib star-feature-call
 .PHONY: vbem-compute-expected-gc vbem-sample-fld vbem-compute-gc-bias vbem-em-quant vbem-transcriptvb-finalize release-companion-tools
 .PHONY: vbem-ec-filter-test vbem-tximport-compat vbem-trimvalidate
 
@@ -37,7 +37,7 @@ vbem-transcriptvb-finalize: trim-qc-tools
 # separate top-level make. Keeping all legacy-source companion executables in
 # one submake prevents parallel dependency/configuration races in that tree.
 release-companion-tools:
-	$(MAKE) -C $(LEGACY_SRC_DIR) release-transcriptvb-finalize release-trim-qc-fastq release-trim-qc-merge WITH_CHROMAP=0
+	$(MAKE) -C $(LEGACY_SRC_DIR) release-transcriptvb-finalize release-trim-qc-fastq release-trim-qc-merge
 
 yremove-tools:
 	$(MAKE) -C $(YREMOVE_FASTQ_DIR)/tools/remove_y_reads
@@ -53,10 +53,7 @@ process-features-lib:
 	$(MAKE) -C $(PROCESS_FEATURES_DIR) lib
 
 star-feature-call:
-	$(MAKE) -C $(LEGACY_SRC_DIR) star_feature_call WITH_CHROMAP=0
-
-star-libchromap-contract:
-	$(MAKE) -C $(LIBCHROMAP_CONTRACT_DIR)
+	$(MAKE) -C $(LEGACY_SRC_DIR) star_feature_call
 
 tools-clean:
 	$(MAKE) -C $(VBEM_DIR)/tools/compute_expected_gc clean
@@ -73,4 +70,3 @@ tools-clean:
 	$(MAKE) -C $(YREMOVE_FASTQ_DIR)/tools/remove_y_reads clean
 	$(MAKE) -C $(FEATURE_BARCODES_DIR) clean
 	$(MAKE) -C $(PROCESS_FEATURES_DIR) clean
-	$(MAKE) -C $(LIBCHROMAP_CONTRACT_DIR) clean

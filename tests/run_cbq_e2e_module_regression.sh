@@ -5,7 +5,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUT_ROOT="${OUT_ROOT:-/tmp/star_suite_cbq_e2e_module_regression_${STAMP}}"
 RUN_NETWORK="${RUN_NETWORK:-0}"
-RUN_CHROMAP_MAPPING_SMOKE="${RUN_CHROMAP_MAPPING_SMOKE:-auto}"
 
 die() {
     echo "ERROR: $*" >&2
@@ -55,7 +54,6 @@ run_case() {
         env \
             BQTOOLS="$BQTOOLS_BIN" \
             OUT_ROOT="$work_dir" \
-            RUN_CHROMAP_MAPPING_SMOKE="$RUN_CHROMAP_MAPPING_SMOKE" \
             bash "$ROOT_DIR/$script"
     ) > "$case_dir/stdout.log" 2> "$case_dir/stderr.log"
     local status=$?
@@ -82,7 +80,6 @@ run_case cbq_ordered_encoder tests/run_cbq_ordered_encoder_smoke.sh
 run_case cbq_star_mapper_e2e tests/run_cbq_star_input_smoke.sh
 run_case cbq_starsolo_e2e tests/run_cbq_solo_e2e_smoke.sh
 run_case cbq_process_features_adapter tests/run_cbq_pf_adapter_smoke.sh
-run_case cbq_chromap_adapter tests/run_cbq_chromap_adapter_smoke.sh
 
 if [[ "$RUN_NETWORK" == "1" ]]; then
     run_case binseq_upstream_arc_fixture tests/run_binseq_upstream_fixture_smoke.sh

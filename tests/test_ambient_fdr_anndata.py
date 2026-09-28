@@ -4,7 +4,6 @@ import tempfile
 from pathlib import Path
 
 import anndata as ad
-import mudata as md
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -122,42 +121,6 @@ def main() -> None:
         assert feature_adata.obs.loc["cell1", "top_feature_name"] == "guideA"
         assert feature_adata.obs.loc["cell2", "top_feature_name"] == "guideB"
         assert feature_adata.obs.loc["cell3", "top_feature_name"] == ""
-
-        atac = work / "atac"
-        write_text(
-            atac / "matrix.mtx",
-            """%%MatrixMarket matrix coordinate integer general
-%
-1 3 3
-1 1 5
-1 2 6
-1 3 7
-""",
-        )
-        write_text(atac / "features.tsv", "chr1:10-20\tchr1:10-20\tPeaks\n")
-        write_text(atac / "barcodes.tsv", "cell1-1\ncell2-1\ncell3-1\n")
-        output_h5mu = work / "out.h5mu"
-        subprocess.run(
-            [
-                "python3",
-                str(ROOT / "scripts" / "build_multiome_mudata.py"),
-                "--rna-h5ad",
-                str(counts),
-                "--atac-mex-dir",
-                str(atac),
-                "--output-h5mu",
-                str(output_h5mu),
-                "--all-barcodes-are-cells",
-            ],
-            check=True,
-            cwd=ROOT,
-        )
-
-        mdata = md.read_h5mu(output_h5mu)
-        assert "guide_fdr_num_umis" in mdata.obs.columns
-        assert "guide_fdr_min_called_umi" in mdata.obs.columns
-        assert mdata.obs.loc["cell1-1", "guide_fdr_num_umis"] == 7
-        assert mdata.obs.loc["cell2-1", "guide_fdr_min_called_umi"] == 3
 
 
 if __name__ == "__main__":

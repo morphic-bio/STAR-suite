@@ -24,8 +24,7 @@ STAR Suite supports CBQ file version 1 through:
 
 FASTQ and FASTQ.gz paths are unchanged. Production CBQ support means the
 consumer receives an in-memory decoded view or a direct adapter into its native
-read buffers. It does not mean writing temporary FASTQ files, except for the
-current Chromap compatibility adapter.
+read buffers. It does not mean writing temporary FASTQ files.
 
 The generic input contract does not require source-order preservation. The
 native `cbq_ordered_encoder` does preserve FASTQ source order and should be
@@ -287,29 +286,14 @@ Relevant files:
 - `core/legacy/source/input/cbq_pf_adapter_harness.cpp`
 - `docs/RUNBOOK_PROCESS_FEATURES_CBQ_NATIVE.md`
 
-### Chromap
+### Chromap (moved to Multiomics Suite in 1.10.0)
 
-STAR still keeps the historical Chromap compatibility adapter as a test oracle,
-but the production libchromap contract can now pass CBQ paths directly to
-Chromap-suite's native CBQ reader:
-
-```text
---chromapAtacInputFormat cbq
---chromapAtacReadPairCbq lane1.reads.cbq,lane2.reads.cbq
---chromapAtacBarcodeCbq lane1.barcodes.cbq,lane2.barcodes.cbq
-```
-
-This path avoids temporary FASTQ materialization and shares the existing
-Chromap ATAC mapping, BAM/fragments, sidecar, and peak-MEX surfaces.
-
-Relevant files:
-
-- `core/legacy/source/input/CbqChromapAdapter.h`
-- `core/legacy/source/input/CbqChromapAdapter.cpp`
-- `core/legacy/source/input/cbq_chromap_adapter_harness.cpp`
-- `core/features/libchromap_contract/include/star_chromap_contract.h`
-- `core/features/libchromap_contract/src/star_chromap_contract.cpp`
-- `core/legacy/source/star_chromap_orchestration.cpp`
+The libchromap contract, its native CBQ input options (`--chromapAtacInputFormat
+cbq`, `--chromapAtacReadPairCbq`, `--chromapAtacBarcodeCbq`) and the historical
+`CbqChromapAdapter` FASTQ materializer with its harness and smoke test moved to
+Multiomics Suite with the multiome binary. See
+`docs/HANDOVER_MULTIOMICS_1.10.md` for the last STAR commits of those files.
+Chromap Suite keeps its own native CBQ reader.
 
 ## Command Surface
 
@@ -354,7 +338,6 @@ Core smoke and regression coverage:
 - `tests/run_cbq_star_input_smoke.sh`
 - `tests/run_cbq_solo_e2e_smoke.sh`
 - `tests/run_cbq_pf_adapter_smoke.sh`
-- `tests/run_cbq_chromap_adapter_smoke.sh`
 - `tests/run_cbq_ocm_composite_smoke.sh`
 - `tests/run_cbq_flex_tiny_public_smoke.sh`
 - `tests/run_slam_cbq_divergence_harness.sh`
@@ -373,8 +356,6 @@ harnesses with pre-NTR parity.
 - Y/noY FASTQ emission remains FASTQ-only until non-FASTQ emission has a
   separate contract.
 - SLAM per-file skipping is rejected for BINSEQ input.
-- Chromap ATAC CBQ requires Chromap-suite with native CBQ support and uses
-  split sources: one paired-read CBQ plus one barcode CBQ per lane.
 - The CBQ index is used only by the indexed range mode
   (`--readFilesCbqRangeMode`), which supports order-independent runs; other
   runs stream blocks in order (see `docs/EXPERIMENTAL_BINSEQ_INPUT.md`).

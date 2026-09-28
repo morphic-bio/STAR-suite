@@ -13,8 +13,8 @@ TRIM_QC_MERGE_BIN="${TRIM_QC_MERGE_BIN:-$src/trim_qc_merge}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-[ -x "$TRIM_QC_FASTQ_BIN" ] || make -C "$src" trim_qc_fastq WITH_CHROMAP=0 >/dev/null
-[ -x "$TRIM_QC_MERGE_BIN" ] || make -C "$src" trim_qc_merge WITH_CHROMAP=0 >/dev/null
+[ -x "$TRIM_QC_FASTQ_BIN" ] || make -C "$src" trim_qc_fastq >/dev/null
+[ -x "$TRIM_QC_MERGE_BIN" ] || make -C "$src" trim_qc_merge >/dev/null
 
 python3 - "$work" <<'PY'
 import random, os, sys

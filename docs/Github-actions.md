@@ -79,19 +79,19 @@ Tag policy:
 PR, dev-release, master, and release workflows call `ci-partial-builds.yml`.
 Publishing waits for this gate. Each matrix job starts from a fresh source
 export and runs **one** target without first building `core` or `all`:
-`core-portable`, `core-static`, `core-htslib`, `release-companion-tools`,
+`core`, `core-static`, `core-htslib`, `release-companion-tools`,
 `star-feature-call`, `feature-barcodes-tools`, `process-features-lib`, and
 `yremove-tools`. Only the standalone feature-tools job installs system HTSlib
-headers; the portable jobs must use the bundled copy. Logs are retained as
+headers; the other jobs must use the bundled copy. Logs are retained as
 workflow artifacts.
 
 `tests/test_htslib_build_discovery.py` also checks custom HTSlib prefixes,
-include overrides, missing dependencies, portable includes, cached scans, and
-atomic failure. It compiles and links the HTSlib preflight probe, and compiles
-an object with Carl's indirect `ParametersSolo.h` -> `htslib/khash.h` include
-using a nonstandard HTSlib prefix. The full Chromap build is a local acceptance case with its
-external checkout explicitly supplied; it is not silently substituted with a
-portable build in CI.
+include overrides, missing dependencies, the default bundled includes, switching
+between `HTSLIB=bundled` and `HTSLIB=external`, cached scans, and atomic
+failure. It compiles and links the HTSlib preflight probe, and compiles an
+object with Carl's indirect `ParametersSolo.h` -> `htslib/khash.h` include
+using a nonstandard HTSlib prefix. `core-external-htslib` is available as a
+local partial-build case.
 
 The independently built core binaries also run `tests/test_scrna_gex_counts.py`:
 exact synthetic counts for default Solo and every UMI deduplication method,
@@ -106,8 +106,7 @@ Run the same regression matrix locally (compiler prerequisites required):
 bash tests/run_partial_make_regression.sh
 # Or select cases; each still gets its own fresh tree:
 bash tests/run_partial_make_regression.sh release-companion-tools yremove-tools
-CHROMAP_SUITE_DIR=/path/to/Chromap-suite \
-  bash tests/run_partial_make_regression.sh chromap-core
+bash tests/run_partial_make_regression.sh core-external-htslib
 ```
 
 The runner uses working-tree versions of tracked files and keeps artifacts

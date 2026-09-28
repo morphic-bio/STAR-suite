@@ -28,13 +28,12 @@ const LAUNCHPAD_WORKFLOW_ORDER = [
   "star_scrna_solo_droplet",
   "star_flex_fixed_rna",
   "star_perturb_cr_compat",
-  "morphic_multiome",
   "slam_pe_100k_smoke",
   "slam_pe_production",
   "slam_deseq2_container",
 ];
 
-const LAUNCHPAD_DEFAULT_WORKFLOWS = new Set(["morphic_multiome"]);
+const LAUNCHPAD_DEFAULT_WORKFLOWS = new Set([]);
 
 function launchpadIsDefaultWorkflow(id) {
   const s = String(id || "");

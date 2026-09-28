@@ -31,8 +31,8 @@ run_quiet() {
     fi
 }
 
-[ -x "$STAR_BIN" ] || make -C "$src" STAR WITH_CHROMAP=0 >/dev/null
-[ -x "$TRANSCRIPTVB_FINALIZE_BIN" ] || make -C "$src" transcriptvb-finalize WITH_CHROMAP=0 >/dev/null
+[ -x "$STAR_BIN" ] || make -C "$src" STAR >/dev/null
+[ -x "$TRANSCRIPTVB_FINALIZE_BIN" ] || make -C "$src" transcriptvb-finalize >/dev/null
 
 python3 - "$work" <<'PY'
 import random, sys, os

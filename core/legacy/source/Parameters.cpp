@@ -164,14 +164,10 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadInterface", &dynamicThreadInterface));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadConstMapPermits", &dynamicThreadConstMapPermits));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadTelemetry", &dynamicThreadTelemetry));
-    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadTelemetryIntervalSec", &dynamicThreadTelemetryIntervalSec));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadMapFloor", &dynamicThreadMapFloor));
-    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacFloor", &dynamicThreadAtacFloor));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFeatureFloor", &dynamicThreadFeatureFloor));
-    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacController", &dynamicThreadAtacController));
     parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadMapWorkEstimate", &dynamicThreadMapWorkEstimate));
     parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadFeatureWorkEstimate", &dynamicThreadFeatureWorkEstimate));
-    parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadAtacWorkEstimate", &dynamicThreadAtacWorkEstimate));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFifoWaiters", &dynamicThreadFifoWaiters));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadBgzfHierarchy", &dynamicThreadBgzfHierarchy));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadBalance", &dynamicThreadBalance));
@@ -792,59 +788,6 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiBarcodeMode", &pfMulti.ocmMultiBarcodeMode));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiBamSplit", &pfMulti.ocmMultiBamSplit));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiOutputCompat", &pfMulti.ocmMultiOutputCompat));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacEnable", &chromapAtac.enabled));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacReferenceFasta", &chromapAtac.referenceFasta));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacIndex", &chromapAtac.chromapIndex));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacInputFormat", &chromapAtac.inputFormat));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacRead1", &chromapAtac.read1Csv));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacRead2", &chromapAtac.read2Csv));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcode", &chromapAtac.barcodeCsv));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacReadPairCbq", &chromapAtac.readPairCbqCsv));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeCbq", &chromapAtac.barcodeCbqCsv));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacReadFormat", &chromapAtac.readFormat));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeWhitelist", &chromapAtac.barcodeWhitelist));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeTranslate", &chromapAtac.barcodeTranslate));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacBarcodeTranslateFromFirst", &chromapAtac.barcodeTranslateFromFirst));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacOutputFragments", &chromapAtac.outputFragments));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacSecondaryFragments", &chromapAtac.secondaryFragments));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacOutputFormat", &chromapAtac.outputFormat));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacSummary", &chromapAtac.summary));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacTempDir", &chromapAtac.tempDir));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacThreads", &chromapAtac.threads));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacHtsThreads", &chromapAtac.htsThreads));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacSortBam", &chromapAtac.sortBam));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacWriteIndex", &chromapAtac.writeIndex));
-    parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "chromapAtacSortBamRam", &chromapAtac.sortBamRam));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacEmitNoYBam", &chromapAtac.emitNoYBam));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacEmitYBam", &chromapAtac.emitYBam));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacNoYOutput", &chromapAtac.noYOutput));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacYOutput", &chromapAtac.YOutput));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacLowMem", &chromapAtac.lowMem));
-    parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "chromapAtacLowMemRam", &chromapAtac.lowMemRam));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacCallMacs3FragPeaks", &chromapAtac.callMacs3FragPeaks));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacMacs3FragPeaksOutput", &chromapAtac.macs3FragPeaksOutput));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacMacs3FragSummitsOutput", &chromapAtac.macs3FragSummitsOutput));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacMacs3FragKeepIntermediates", &chromapAtac.macs3FragKeepIntermediates));
-    parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "chromapAtacMacs3FragPvalue", &chromapAtac.macs3FragPvalue));
-    parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "chromapAtacMacs3FragQvalue", &chromapAtac.macs3FragQvalue));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragMinLength", &chromapAtac.macs3FragMinLength));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragMaxGap", &chromapAtac.macs3FragMaxGap));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragUint8Counts", &chromapAtac.macs3FragUint8Counts));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragLowMem", &chromapAtac.macs3FragLowMem));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacEvidenceFromPeaksOutput", &chromapAtac.evidenceFromPeaksOutput));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacTn5ShiftMode", &chromapAtac.tn5ShiftMode));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacStartMode", &chromapAtac.startMode));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakMexInline", &multiomeAtacPeakMex.inlineMode));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakBarcodeTranslate", &multiomeAtacPeakMex.barcodeTranslate));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakBarcodeTranslateFromFirst", &multiomeAtacPeakMex.barcodeTranslateFromFirst));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakMetricsTsv", &multiomeAtacPeakMex.metricsTsv));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakMexOutDir", &multiomeAtacPeakMex.mexOutDir));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakNarrowPeak", &multiomeAtacPeakMex.narrowPeak));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakSummits", &multiomeAtacPeakMex.summits));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakCallMode", &multiomeAtacPeakMex.peakCallMode));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakMacsProfile", &multiomeAtacPeakMex.macsProfile));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "multiomeAtacPeakThreads", &multiomeAtacPeakMex.threads));
-    parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "multiomeAtacPeakMaxBarcodes", &multiomeAtacPeakMex.maxBarcodes));
 
     // Default module flag groups
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultBulk", &defaultGroups.bulk));
@@ -1015,218 +958,6 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "ocmMultiOutputCompat" && p->inputLevel < 0) {
             pfMulti.ocmMultiOutputCompat = "cellranger";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacEnable" && p->inputLevel < 0) {
-            chromapAtac.enabled = 0;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacReferenceFasta" && p->inputLevel < 0) {
-            chromapAtac.referenceFasta = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacIndex" && p->inputLevel < 0) {
-            chromapAtac.chromapIndex = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacInputFormat" && p->inputLevel < 0) {
-            chromapAtac.inputFormat = "fastq";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacRead1" && p->inputLevel < 0) {
-            chromapAtac.read1Csv = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacRead2" && p->inputLevel < 0) {
-            chromapAtac.read2Csv = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacBarcode" && p->inputLevel < 0) {
-            chromapAtac.barcodeCsv = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacReadPairCbq" && p->inputLevel < 0) {
-            chromapAtac.readPairCbqCsv = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacBarcodeCbq" && p->inputLevel < 0) {
-            chromapAtac.barcodeCbqCsv = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacReadFormat" && p->inputLevel < 0) {
-            chromapAtac.readFormat = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacBarcodeWhitelist" && p->inputLevel < 0) {
-            chromapAtac.barcodeWhitelist = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacBarcodeTranslate" && p->inputLevel < 0) {
-            chromapAtac.barcodeTranslate = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacBarcodeTranslateFromFirst" && p->inputLevel < 0) {
-            chromapAtac.barcodeTranslateFromFirst = 0;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacOutputFragments" && p->inputLevel < 0) {
-            chromapAtac.outputFragments = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacSecondaryFragments" && p->inputLevel < 0) {
-            chromapAtac.secondaryFragments = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacOutputFormat" && p->inputLevel < 0) {
-            chromapAtac.outputFormat = "BED";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacSummary" && p->inputLevel < 0) {
-            chromapAtac.summary = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacTempDir" && p->inputLevel < 0) {
-            chromapAtac.tempDir = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacThreads" && p->inputLevel < 0) {
-            chromapAtac.threads = 1;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacHtsThreads" && p->inputLevel < 0) {
-            chromapAtac.htsThreads = 0;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacSortBam" && p->inputLevel < 0) {
-            chromapAtac.sortBam = 0;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacWriteIndex" && p->inputLevel < 0) {
-            chromapAtac.writeIndex = 0;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacSortBamRam" && p->inputLevel < 0) {
-            chromapAtac.sortBamRam = 8ULL * 1024 * 1024 * 1024;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacEmitNoYBam" && p->inputLevel < 0) {
-            chromapAtac.emitNoYBam = 0;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacEmitYBam" && p->inputLevel < 0) {
-            chromapAtac.emitYBam = 0;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacNoYOutput" && p->inputLevel < 0) {
-            chromapAtac.noYOutput = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacYOutput" && p->inputLevel < 0) {
-            chromapAtac.YOutput = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacLowMem" && p->inputLevel < 0) {
-            chromapAtac.lowMem = 0;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacLowMemRam" && p->inputLevel < 0) {
-            chromapAtac.lowMemRam = 0;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacCallMacs3FragPeaks" && p->inputLevel < 0) {
-            chromapAtac.callMacs3FragPeaks = 0;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacMacs3FragPeaksOutput" && p->inputLevel < 0) {
-            chromapAtac.macs3FragPeaksOutput = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacMacs3FragSummitsOutput" && p->inputLevel < 0) {
-            chromapAtac.macs3FragSummitsOutput = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacMacs3FragKeepIntermediates" && p->inputLevel < 0) {
-            chromapAtac.macs3FragKeepIntermediates = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacEvidenceFromPeaksOutput" && p->inputLevel < 0) {
-            chromapAtac.evidenceFromPeaksOutput = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacMacs3FragPvalue" && p->inputLevel < 0) {
-            chromapAtac.macs3FragPvalue = 1e-5;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacMacs3FragQvalue" && p->inputLevel < 0) {
-            chromapAtac.macs3FragQvalue = 0.0;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacMacs3FragMinLength" && p->inputLevel < 0) {
-            chromapAtac.macs3FragMinLength = 200;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacMacs3FragMaxGap" && p->inputLevel < 0) {
-            chromapAtac.macs3FragMaxGap = 30;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacMacs3FragUint8Counts" && p->inputLevel < 0) {
-            chromapAtac.macs3FragUint8Counts = 1;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacMacs3FragLowMem" && p->inputLevel < 0) {
-            chromapAtac.macs3FragLowMem = 0;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacTn5ShiftMode" && p->inputLevel < 0) {
-            chromapAtac.tn5ShiftMode = "classical";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacStartMode" && p->inputLevel < 0) {
-            chromapAtac.startMode = "postMapping";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "multiomeAtacPeakMexInline" && p->inputLevel < 0) {
-            multiomeAtacPeakMex.inlineMode = "no";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "multiomeAtacPeakBarcodeTranslate" && p->inputLevel < 0) {
-            multiomeAtacPeakMex.barcodeTranslate = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "multiomeAtacPeakBarcodeTranslateFromFirst" && p->inputLevel < 0) {
-            multiomeAtacPeakMex.barcodeTranslateFromFirst = "yes";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "multiomeAtacPeakMetricsTsv" && p->inputLevel < 0) {
-            multiomeAtacPeakMex.metricsTsv = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "multiomeAtacPeakMexOutDir" && p->inputLevel < 0) {
-            multiomeAtacPeakMex.mexOutDir = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "multiomeAtacPeakNarrowPeak" && p->inputLevel < 0) {
-            multiomeAtacPeakMex.narrowPeak = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "multiomeAtacPeakSummits" && p->inputLevel < 0) {
-            multiomeAtacPeakMex.summits = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "multiomeAtacPeakCallMode" && p->inputLevel < 0) {
-            multiomeAtacPeakMex.peakCallMode = "frag";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "multiomeAtacPeakMacsProfile" && p->inputLevel < 0) {
-            multiomeAtacPeakMex.macsProfile = "-";
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "multiomeAtacPeakThreads" && p->inputLevel < 0) {
-            multiomeAtacPeakMex.threads = 0;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "multiomeAtacPeakMaxBarcodes" && p->inputLevel < 0) {
-            multiomeAtacPeakMex.maxBarcodes = 0;
             p->inputLevel = 0;
         }
     }
@@ -2026,28 +1757,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                <<dynamicThreadTelemetry<<"\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
-    if (dynamicThreadTelemetryIntervalSec < 0) {
+    if (dynamicThreadMapFloor < 0 || dynamicThreadFeatureFloor < 0) {
         ostringstream errOut;
-        errOut <<"EXITING: fatal input ERROR: --dynamicThreadTelemetryIntervalSec must be >=0, user-defined value="
-               <<dynamicThreadTelemetryIntervalSec<<"\n";
-        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
-    }
-    if (dynamicThreadMapFloor < 0 || dynamicThreadAtacFloor < 0 || dynamicThreadFeatureFloor < 0) {
-        ostringstream errOut;
-        errOut <<"EXITING: fatal input ERROR: per-domain floors (--dynamicThread{Map,Atac,Feature}Floor) must be >=0\n";
-        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
-    }
-    if (dynamicThreadAtacController < 0 || dynamicThreadAtacController > 2) {
-        ostringstream errOut;
-        errOut <<"EXITING: fatal input ERROR: --dynamicThreadAtacController must be 0, 1, or 2, user-defined value="
-               <<dynamicThreadAtacController<<"\n";
-        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
-    }
-    if (dynamicThreadAtacController == 2 &&
-        (dynamicThreadTelemetry != 1 || dynamicThreadTelemetryIntervalSec <= 0)) {
-        ostringstream errOut;
-        errOut <<"EXITING: fatal input ERROR: --dynamicThreadAtacController 2 requires "
-               <<"--dynamicThreadTelemetry 1 and --dynamicThreadTelemetryIntervalSec > 0\n";
+        errOut <<"EXITING: fatal input ERROR: per-domain floors (--dynamicThread{Map,Feature}Floor) must be >=0\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
     if (dynamicThreadFifoWaiters != 0 && dynamicThreadFifoWaiters != 1) {
@@ -2066,18 +1778,18 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     }
     if (dynamicThreadBgzfHierarchy == 1) {
         if (dynamicThreadInterface != 1 || dynamicThreadPfControllerMode != "off" ||
-            dynamicThreadAtacController != 0 || chromapAtac.enabled == 1 || variableThreads != 0) {
-            exitWithError("BGZF hierarchy requires --dynamicThreadInterface 1, --dynamicThreadPfControllerMode off, "
-                "--dynamicThreadAtacController 0, --variableThreads 0 and no concurrent ATAC\n",
+            variableThreads != 0) {
+            exitWithError("BGZF hierarchy requires --dynamicThreadInterface 1, --dynamicThreadPfControllerMode off "
+                "and --variableThreads 0\n",
                 std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
         dynamicThreadFifoWaiters = 1;
     }
     // FIFO + floors/controller are now composable (Step 8f): the FIFO
     // helper updates mapPermitDomainInUse/Waiters under the lock and picks
-    // the first admittable queued waiter when floors are active, so the
-    // ATAC drain-time controller can shift floors and the queue grant logic
-    // routes new permits to the under-floor domain.
+    // the first admittable queued waiter when floors are active, so a
+    // floor controller can shift floors and the queue grant logic routes
+    // new permits to the under-floor domain.
     if (dynamicThreadConstMapPermits < 0) {
         ostringstream errOut;
         errOut <<"EXITING: fatal input ERROR: --dynamicThreadConstMapPermits must be >=0, user-defined value="
@@ -2215,17 +1927,6 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     }
 
     const bool pfControllerEnabled = (dynamicThreadPfControllerMode != "off");
-    const bool pfControllerAppliesUpdates =
-        dynamicThreadPfControllerMode == "active" ||
-        dynamicThreadPfControllerMode == "eta" ||
-        dynamicThreadPfControllerMode == "chunked";
-    if (dynamicThreadAtacController == 2 && pfControllerAppliesUpdates) {
-        ostringstream errOut;
-        errOut <<"EXITING: fatal input ERROR: saturation controller mode 2 owns "
-               <<"the shared MAP/FEATURE/ATAC allocation and cannot be combined "
-               <<"with an applying --dynamicThreadPfControllerMode\n";
-        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
-    }
     if (pfControllerEnabled && dynamicThreadInterface != 1) {
         ostringstream errOut;
         errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode requires --dynamicThreadInterface=1\n";

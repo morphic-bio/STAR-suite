@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [core-portable, core-static, core-htslib, release-companion-tools, star-feature-call, feature-barcodes-tools, process-features-lib, yremove-tools]
+        target: [core, core-static, core-htslib, release-companion-tools, star-feature-call, feature-barcodes-tools, process-features-lib, yremove-tools]
     steps:
       - uses: actions/checkout@v4
       - name: Install build prerequisites
@@ -51,7 +51,7 @@ jobs:
             ${{ runner.temp }}/partial-build/summary.tsv
             ${{ runner.temp }}/partial-build/*/build.log
       - name: Validate plain scRNA counts in independently built core
-        if: matrix.target == 'core-portable' || matrix.target == 'core-static'
+        if: matrix.target == 'core' || matrix.target == 'core-static'
         env:
           STAR_BIN: ${{ runner.temp }}/partial-build/${{ matrix.target }}/source/core/legacy/source/STAR
         run: python3 tests/test_scrna_gex_counts.py

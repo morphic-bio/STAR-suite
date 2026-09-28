@@ -42,6 +42,7 @@ Log.out
 *.o
 Depend.list
 .depend.with_chromap_*
+.depend.htslib_*
 /source/*.d
 /source/Depend.list
 /source/STAR

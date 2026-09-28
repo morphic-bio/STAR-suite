@@ -6,7 +6,7 @@
 
 #include "Genome.h"
 #include "Transcriptome.h"
-#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#if defined(STAR_EXTERNAL_HTSLIB) && STAR_EXTERNAL_HTSLIB
 #include <htslib/bgzf.h>
 #include <htslib/kstring.h>
 #include <htslib/tbx.h>

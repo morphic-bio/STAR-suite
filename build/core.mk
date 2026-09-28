@@ -5,14 +5,15 @@ core: core-star
 core-star:
 	$(MAKE) -C $(LEGACY_SRC_DIR) STAR
 
-core-portable:
-	$(MAKE) -C $(LEGACY_SRC_DIR) STAR WITH_CHROMAP=0
+# Compatibility alias: since 1.10.0 `make core` is already the portable build
+# (STAR's bundled HTSlib, no other suite on any path).
+core-portable: core-star
 
 core-long:
-	$(MAKE) -C $(LEGACY_SRC_DIR) STARlong WITH_CHROMAP=0
+	$(MAKE) -C $(LEGACY_SRC_DIR) STARlong
 
 core-static:
-	$(MAKE) -C $(LEGACY_SRC_DIR) STARstatic WITH_CHROMAP=0
+	$(MAKE) -C $(LEGACY_SRC_DIR) STARstatic
 
 core-htslib:
 	$(MAKE) -C $(LEGACY_SRC_DIR)/htslib lib-static

@@ -62,7 +62,6 @@
 #include "PfMultiConfig.h"
 #include "VelocytoMexWriter.h"
 #include "OcmMultiMaterialize.h"
-#include "star_chromap_orchestration.h"
 // Note: effective_length.h not included due to Transcriptome class name conflict
 // Use wrapper function instead
 #include "effective_length_wrapper.h"
@@ -80,7 +79,7 @@
 
 #include "twoPassRunPass1.h"
 
-#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#if defined(STAR_EXTERNAL_HTSLIB) && STAR_EXTERNAL_HTSLIB
 #include <htslib/sam.h>
 #else
 #include "htslib/htslib/sam.h"
@@ -1331,20 +1330,6 @@ int main(int argInN, char *argIn[])
     std::vector<std::string> batchOutSAMattrRG;
     std::vector<std::string> batchOutSAMattrRGlineSplit;
 
-    if (!preflightStarChromapAtacIfEnabled(P, batchModeActive)) {
-        ostringstream errOut;
-        errOut << "EXITING because of fatal ERROR: invalid Chromap ATAC integration configuration\n"
-               << "SOLUTION: fix --chromapAtac* inputs, disable --chromapAtacEnable, or rebuild with WITH_CHROMAP=1.\n";
-        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
-    }
-
-    StarChromapAtacAsyncRun chromapAtacAsyncRun;
-    if (!startStarChromapAtacIfEnabled(P, batchModeActive, chromapAtacAsyncRun)) {
-        ostringstream errOut;
-        errOut << "EXITING because of fatal ERROR: could not start Chromap ATAC integration\n"
-               << "SOLUTION: check --chromapAtac* inputs and --chromapAtacStartMode.\n";
-        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
-    }
     
     if (batchModeActive) {
         P.batchPaired = batchPaired;
@@ -3577,13 +3562,6 @@ int main(int argInN, char *argIn[])
         signalFromBAM(P.outBAMfileCoordName, wigOutFileNamePrefix, P);
     }
 
-    if (!runStarChromapAtacIfEnabled(P, batchModeActive, chromapAtacAsyncRun)) {
-        ostringstream errOut;
-        errOut << "EXITING because of fatal ERROR: Chromap ATAC integration failed\n"
-               << "SOLUTION: check --chromapAtac* inputs and Chromap logs above.\n";
-        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
-    }
-
     // This is the first point at which mapping, asynchronous feature
     // assignment, and concurrent ATAC have all joined.  Earlier summaries are
     // useful interval diagnostics but cannot establish the permit exit
@@ -3604,9 +3582,7 @@ int main(int argInN, char *argIn[])
             << " atacInUse=" << permitFinal.atacDomain.inUse
             << " atacRetainedLease=" << permitFinal.atacDomain.inUse
             << "\n" << flush;
-        const bool fixedPoolIncomplete =
-            P.dynamicThreadAtacController == 2 &&
-            permitFinal.availablePermits != permitFinal.configuredPermits;
+        const bool fixedPoolIncomplete = false;
         if (permitFinal.inUsePermits != 0 ||
             permitFinal.currentWaiters != 0 ||
             permitFinal.mapDomain.inUse != 0 ||

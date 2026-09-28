@@ -52,7 +52,7 @@ THE SOFTWARE.
 #include <stdlib.h>
 #include <unistd.h>
 
-#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#if defined(STAR_EXTERNAL_HTSLIB) && STAR_EXTERNAL_HTSLIB
 #include <htslib/bgzf.h>
 #include <htslib/sam.h>
 #else
