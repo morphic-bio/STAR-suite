@@ -1,0 +1,109 @@
+# STAR Suite v1.10.0 Release Notes
+
+Date: 2026-09-28 (release candidate `v1.10.0-rc1`)
+
+STAR Suite 1.10.0 removes every dependency on other suites. STAR no longer
+links Chromap Suite or RapidMACS, and no longer hosts the joint RNA + ATAC
+(multiome) run. That integration moves to Multiomics Suite, which builds the
+multiome binary from released STAR Suite, Chromap Suite and RapidMACS
+versions. In its place STAR gains a small, generic host interface that knows
+nothing about Chromap or ATAC. The release also adds paired hashtag
+demultiplexing and per-library ambient-FDR feature calling.
+
+`STAR --version` reports `1.10.0`. Debian source packaging uses `1.10.0-1`;
+Ubuntu packages use `1.10.0-1~ubuntu22.04.1` and `1.10.0-1~ubuntu24.04.1`.
+Upstream STAR remains `2.7.11b`, genome-index compatibility remains `2.7.4a`,
+and legacy compatibility remains `2.7.1a`. Existing indexes do not need
+rebuilding.
+
+This is a release candidate. The final `v1.10.0` tag follows once Multiomics
+Suite has built its binary against the host interface; a change the interface
+needs would come as `v1.10.0-rc2`.
+
+## Removed: the Chromap integration
+
+- **The multiome run moves to Multiomics Suite.** Removed from STAR: the
+  Chromap orchestration (asynchronous ATAC worker, permit-telemetry sampler,
+  drain-time and saturation controllers), the libchromap contract library and
+  its runners, the inline peak/matrix step, libscrna's ATAC evidence reader
+  and its five multiome cell-calling tools, the CBQ-to-Chromap FASTQ adapter
+  with its harness and smoke test, the multiome tests and scripts, the
+  `morphic_multiome` MCP workflow and the integration runbooks.
+- **57 parameters are gone:** the 42 `--chromapAtac*`, the 11
+  `--multiomeAtac*`, and the ATAC-only permit parameters
+  `--dynamicThreadAtacFloor`, `--dynamicThreadAtacController`,
+  `--dynamicThreadAtacWorkEstimate` and `--dynamicThreadTelemetryIntervalSec`.
+  STAR now rejects them as unknown parameters. Multiomics Suite accepts the
+  same names, types and defaults.
+- **Nothing is lost.** Every removed file, code block, symbol and parameter is
+  listed with its last STAR commit in
+  [the hand-over document](https://github.com/morphic-bio/STAR-suite/blob/v1.10.0-rc1/docs/HANDOVER_MULTIOMICS_1.10.md),
+  so that Multiomics Suite can copy it unchanged. The CBQ adapter moves rather
+  than being deleted.
+- **What stays in STAR:** the CAT-ATAC guide arm (a feature-barcode arm that
+  reads its barcode in the ATAC whitelist namespace), the shared thread-permit
+  pool and its saturation controller, and libscrna's EmptyDrops, OrdMag and
+  occupancy code.
+
+## Build
+
+- **`make core` no longer needs Chromap Suite.** It builds STAR with its
+  bundled HTSlib, which is what `make core-portable` built before;
+  `core-portable` remains as an alias. `WITH_CHROMAP` and `CHROMAP_SUITE_DIR`
+  are no longer used.
+- **Published artifacts were already Chromap-free.** Release tarballs were
+  built with `core-static`, Debian packages with `core-portable`, and the
+  Docker image with `STAR_WITH_CHROMAP=0`. Only a local `make core` linked
+  Chromap. Users who built that way and write BAM will see different
+  compressed BAM bytes with identical records, because STAR's bundled HTSlib
+  replaces the system HTSlib.
+- **`HTSLIB=external`** compiles and links STAR against an installed HTSlib
+  (`pkg-config htslib`, or `HTSLIB_CFLAGS`/`HTSLIB_LIBS`), for programs that
+  embed STAR alongside other HTSlib users.
+
+## Host interface (new)
+
+A program can now link STAR Suite as a library and run its own work beside
+STAR in the same process, sharing STAR's thread permits. See the
+[host interface reference](https://github.com/morphic-bio/STAR-suite/blob/v1.10.0-rc1/docs/HOST_API.md).
+
+- `make star-host-lib` builds `libstar_suite.a` and `libstar_suite.link`
+  (the libraries to link after it). The headers are in
+  `core/legacy/source/host/`. Host API version 1.
+- `star::host::runMain(argc, argv, hooks)` runs STAR. The `STAR` executable is
+  `runMain(argc, argv, nullptr)`, so standalone behaviour is unchanged.
+- Parameters STAR does not know go to the host, which accepts or rejects them.
+  STAR records accepted ones in `Log.out` and in the command lines it writes to
+  BAM headers, including those given in `--parametersFiles`.
+- Callbacks run before read mapping (`preflight`, `start`) and after all of
+  STAR's own work (`finish`), where STAR used to call Chromap. Further
+  callbacks set the extra permit threads and the initial floors, refuse routes
+  that cannot share the pool, and require a full pool at exit.
+- The third permit domain, formerly `ATAC`, is now a neutral `EXTERNAL`
+  domain that STAR lends to the host. Standalone permit logs name it
+  `external`; a host supplies its own label (Multiomics Suite uses `atac`).
+  The `atacController=` field of the "Dynamic thread interface enabled" line is
+  gone.
+- The saturation permit controller is now a public header,
+  `host/SaturationPermitController.h`, in namespace `star::permits`.
+
+## Feature calling
+
+- **Paired hashtag demultiplexing.** `star_hash_demux_method=pair` in a
+  pf-multi library assigns each cell to a sample from a
+  `sample, hash_a, hash_b` table (`star_hash_sample_table`), with
+  `star_hash_min_pair_ratio` (default 2.0). Cells whose top two tags form an
+  unknown pair are reported as `unknown_pair`. The standalone
+  `assignBarcodes` accepts `--hash-demux-method pair`. The default `ratio`
+  method and its output are unchanged.
+- **Per-library ambient-FDR calls.** `star_feature_caller=ambient-fdr` now
+  calls a named non-GEX library on its own, with `star_feature_call_fdr`
+  (default 0.01) and `star_feature_call_min_umi` (default 1), within the
+  EmptyDrops cell set. Output is written to
+  `outs/feature_analysis/<library_id>/ambient_fdr/`. CellTag libraries are
+  selected by `feature_type=CellTag` and are not mixed with guides. The
+  automatic CRISPR path and its `guide_*` outputs are unchanged.
+
+## Validation
+
+GATE_RESULTS_PLACEHOLDER
