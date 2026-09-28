@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Historical March-2026 oracle, not the modern half-probe STAR counting gate.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,7 +30,7 @@ mkdir -p "${OUT_ROOT}"
 make -C "${TOOL_DIR}" all
 "${TOOL_DIR}/test_hash_screen" | tee "${OUT_ROOT}/unit.log"
 "${TOOL_DIR}/hash_screen_replay" \
-    "${CACHE}" "${DUMP}" --mode both --stats --diff "${OUT_ROOT}/diff.tsv" \
+    "${CACHE}" "${DUMP}" --legacy-negative-policy --mode both --stats --diff "${OUT_ROOT}/diff.tsv" \
     | tee "${OUT_ROOT}/replay.log"
 
 [[ "$(wc -l < "${OUT_ROOT}/diff.tsv")" -eq 1 ]] || {
@@ -43,4 +44,5 @@ grep -Fq 'Result: PASS' "${OUT_ROOT}/replay.log"
 
 printf 'cache_sha256\t%s\n' "${CACHE_SHA256}" > "${OUT_ROOT}/provenance.tsv"
 printf 'dump_sha256\t%s\n' "${DUMP_SHA256}" >> "${OUT_ROOT}/provenance.tsv"
+printf 'negative_policy\tlegacy-alignment\n' >> "${OUT_ROOT}/provenance.tsv"
 echo "Flex hash-screen replay regression passed"

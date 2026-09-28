@@ -61,11 +61,20 @@ FlexHashScreenDecision FlatCache::classifyHits(
         const bool sampleMatched = (rec->sampleIdx != 0 && rec->sampleIdx == runtimeSampleIdx);
         const bool sampleSpecifiedMismatch = (rec->sampleIdx != 0 && rec->sampleIdx != runtimeSampleIdx);
 
-        if (rec->resolvedGeneIdx15 == 0 || rec->cacheClass == 2) {
+        // Legacy alignment-validated caches only certify probe ambiguity.
+        // Other unresolved records must retain the alignment fallback.
+        const bool certifiedNegative = legacyNegativePolicy_
+            ? (rec->cacheClass == 2 && rec->negativeCode == FlexHashNegProbeAmbig)
+            : (rec->resolvedGeneIdx15 == 0 || rec->cacheClass == 2);
+        if (certifiedNegative) {
             sawAmbig = true;
             out.negativeCode = rec->negativeCode != FlexHashNegNone
                 ? rec->negativeCode : static_cast<uint8_t>(FlexHashNegProbeAmbig);
             out.offset = relativeOffsets[idx];
+            continue;
+        }
+
+        if (rec->resolvedGeneIdx15 == 0) {
             continue;
         }
 

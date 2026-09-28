@@ -14,9 +14,16 @@ S193="${STAR_REF_BIN:-}"
 IFMT="${FLEX_HALF_CACHE_DIR:-/mnt/pikachu/storage_offload_20260912/inputfmt_20260910/stage}"
 FQ="${FLEX_FIXTURE_DIR:-/mnt/pikachu/storage_symlinked_20260912/downsampled_100K/SC2300771}"
 V="${TEST_WORKDIR:-/tmp/star_suite_flex_v194_default_route_$$}"
+SINGLE_RUN="${FLEX_SINGLE_RUN:-0}"
+REFERENCE_OUTPUT="${FLEX_REFERENCE_OUTPUT:-}"
 [[ -x "$S194" ]] || { echo "ERROR: STAR binary not executable: $S194" >&2; exit 2; }
 [[ -f "$IFMT/model_h01x2_cache.half.khash" ]] || { echo "ERROR: half-probe cache missing under FLEX_HALF_CACHE_DIR=$IFMT" >&2; exit 2; }
 [[ -d "$FQ" ]] || { echo "ERROR: fixture missing: FLEX_FIXTURE_DIR=$FQ" >&2; exit 2; }
+[[ ! -e "$V" ]] || { echo "ERROR: refusing to overwrite existing output: $V" >&2; exit 2; }
+if [[ "$SINGLE_RUN" == 1 && ! -d "$REFERENCE_OUTPUT" ]]; then
+  echo "ERROR: FLEX_SINGLE_RUN=1 requires completed FLEX_REFERENCE_OUTPUT" >&2
+  exit 2
+fi
 mkdir -p "$V"
 pass=0; fail=0
 ok(){ echo "  PASS  $*"; pass=$((pass+1)); }
@@ -40,7 +47,7 @@ else
 fi
 
 P=SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5
-EMPTY=$V/empty_genome_index; rm -rf $EMPTY; mkdir -p $EMPTY
+EMPTY=$V/empty_genome_index; mkdir -p "$EMPTY"
 R2=(); R1=(); for L in L001 L002 L003 L004 L005 L006 L007 L008; do
   R2+=("$FQ/${P}_${L}_R2_001.fastq.gz"); R1+=("$FQ/${P}_${L}_R1_001.fastq.gz"); done
 base=(--runThreadN 32 --genomeDir "$EMPTY" --soloType CB_UMI_Simple --soloCBstart 1 --soloUMIstart 17
@@ -66,7 +73,7 @@ base=(--runThreadN 32 --genomeDir "$EMPTY" --soloType CB_UMI_Simple --soloCBstar
 CACHE=(--soloHashScreenFile "$IFMT/model_h01x2_cache.half.khash")
 EXPLICIT=(--outSAMtype None --flexPipeline yes --flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1)
 run(){ # name binary args...
-  local n=$1 b=$2; shift 2; local o=$V/$n; rm -rf $o; mkdir -p $o
+  local n=$1 b=$2; shift 2; local o=$V/$n; mkdir "$o" || exit 2
   "$b" "${base[@]}" "$@" --soloFlexOutputPrefix "$o/per_sample" --soloFlexDebugOutputDir "$o/caller_diagnostics" \
       --outTmpDir "$o/_STARtmp" --outFileNamePrefix "$o/" > "$o/stdout.txt" 2>&1
   echo $? > "$o/rc"; rm -rf "$o/_STARtmp"
@@ -76,6 +83,33 @@ logs(){ cat "$V/$1/stdout.txt" "$V/$1/Log.out" 2>/dev/null; }
 # all other output bytes, and separately reject those reports in new runs.
 digest(){ (cd "$V/$1" && find . -type f ! -name 'Log.*' ! -name stdout.txt ! -name rc \
   ! -name gdna_metrics.json ! -name flex_gdna_library.json ! -name flex_gdna_summary.tsv | sort | xargs -r sha256sum) ; }
+
+# One changed-binary validation against preserved output, without repeating the
+# reference execution or the default/explicit/legacy-equivalence arms.
+if [[ "$SINGLE_RUN" == 1 ]]; then
+  [[ -f "$REFERENCE_OUTPUT/rc" && "$(cat "$REFERENCE_OUTPUT/rc")" == 0 && -s "$REFERENCE_OUTPUT/Log.final.out" ]] || {
+    echo "ERROR: reference output lacks successful completion evidence" >&2; exit 2;
+  }
+  sha256sum "$S194" "$IFMT/model_h01x2_cache.half.khash" \
+    "$IFMT/model_gene_ids.txt" "$IFMT/included_gene_ids.txt" > "$V/inputs.sha256"
+  run A "$S194" "${CACHE[@]}"
+  [[ "$(cat "$V/A/rc")" == 0 ]] && ok "A completed" || bad "A did not complete"
+  logs A | grep -qF 'Flex probe route: half-probe H1X2 (1.9.4 default)' \
+    && ok "modern H1X2 route" || bad "modern route missing"
+  logs A | grep -qi 'fused no-genome threads started' \
+    && ok "fused no-genome pipeline" || bad "fused no-genome pipeline missing"
+  ln -s "$(realpath "$REFERENCE_OUTPUT")" "$V/reference"
+  digest A > "$V/candidate.sha256"
+  digest reference > "$V/reference.sha256"
+  if [[ -s "$V/reference.sha256" ]] && diff -u "$V/reference.sha256" "$V/candidate.sha256" > "$V/output.diff"; then
+    ok "all $(wc -l < "$V/candidate.sha256") non-log, non-diagnostic outputs byte-identical to reference"
+  else
+    bad "output differences: $V/output.diff"
+  fi
+  echo "== single-run summary: $pass passed, $fail failed =="
+  [[ "$fail" == 0 ]] && date -u +%FT%TZ > "$V/PASS"
+  exit "$fail"
+fi
 
 echo "== positive runs =="
 run A $S194 "${CACHE[@]}" "${EXPLICIT[@]}"

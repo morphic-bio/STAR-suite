@@ -416,8 +416,8 @@ static void test_empty_cache() {
 
 // ── Bonus: unresolved cache hits are certified negatives ───────────────────
 
-static void test_unresolved_hit_denied() {
-    fprintf(stderr, "Test bonus: Unresolved cache hits are certified negatives\n");
+static void test_unresolved_hit_passes() {
+    fprintf(stderr, "Test bonus: Unresolved legacy cache hits fall back to alignment\n");
     char read[52]; makeRead(read, 51);
     uint64_t lo, hi; encodeRead(read, lo, hi);
 
@@ -433,11 +433,32 @@ static void test_unresolved_hit_denied() {
     CHECK(tiered.denyCount() == 1, "tiered has 1 deny");
     CHECK(tiered.droppedCount() == 0, "tiered dropped none");
 
-    // A cache hit with no resolved gene is known bad; only absence is PASS.
+    // Only probe ambiguity certifies rejection in this legacy replay policy.
+    flat.setLegacyNegativePolicy(true);
+    tiered.setLegacyNegativePolicy(true);
     auto df = flat.classifyRead(read, 51, 5);
     auto dt = tiered.classifyRead(read, 51, 5);
-    CHECK_DECISION(df, dt, FlexHashScreenDecision::Deny, "unresolved hit → DENY");
+    CHECK_DECISION(df, dt, FlexHashScreenDecision::Pass, "unresolved hit -> PASS");
     ++g_pass;
+}
+
+static void test_legacy_negative_codes_pass() {
+    char read[52]; makeRead(read, 51);
+    uint64_t lo, hi; encodeRead(read, lo, hi);
+    for (uint8_t code : {uint8_t(4), uint8_t(6), uint8_t(8)}) {
+        std::vector<Record> recs = {makeRecord(lo, hi, 0, 2, 0, code)};
+        FlatCache flat; flat.init(recs);
+        TieredCache tiered; tiered.init(recs);
+        auto df = flat.classifyRead(read, 51, 5);
+        auto dt = tiered.classifyRead(read, 51, 5);
+        CHECK_DECISION(df, dt, FlexHashScreenDecision::Deny, "current unresolved -> DENY");
+        flat.setLegacyNegativePolicy(true);
+        tiered.setLegacyNegativePolicy(true);
+        df = flat.classifyRead(read, 51, 5);
+        dt = tiered.classifyRead(read, 51, 5);
+        CHECK_DECISION(df, dt, FlexHashScreenDecision::Pass, "legacy negative -> PASS");
+        ++g_pass;
+    }
 }
 
 // ── Bonus: H0 exact match with sample match → immediate KEEP ───────────────
@@ -527,7 +548,8 @@ int main() {
     test_h0_plus_deny_same_offset();
     test_h0_h1_cross_offset_gene_conflict();
     test_empty_cache();
-    test_unresolved_hit_denied();
+    test_unresolved_hit_passes();
+    test_legacy_negative_codes_pass();
     test_h0_sample_match_immediate_keep();
     test_v3_cache_gene_mask();
 

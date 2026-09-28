@@ -36,7 +36,7 @@ run_star() {
     local label="$1"
     shift
     local out_dir="${OUT_ROOT}/${label}"
-    local tmp_dir="${TMP_ROOT}/flex_hash_screen_internal_${label}"
+    local tmp_dir="${RUN_TMP}/${label}"
     local sam_args=(--outSAMtype None --outSAMattributes None)
 
     if [[ "${WRITE_BAM}" == "yes" ]]; then
@@ -46,7 +46,10 @@ run_star() {
         return 2
     fi
 
-    rm -rf "${out_dir}" "${tmp_dir}"
+    [[ ! -e "${out_dir}" && ! -e "${tmp_dir}" ]] || {
+        echo "ERROR: output or temporary directory already exists" >&2
+        return 1
+    }
     mkdir -p "${out_dir}"
 
     echo "=== ${label} ==="
@@ -170,7 +173,9 @@ prepare_hash_cache() {
     } >"${OUT_ROOT}/cache_manifest.tsv"
 }
 
+[[ ! -e "${OUT_ROOT}" ]] || { echo "ERROR: refusing to overwrite ${OUT_ROOT}" >&2; exit 1; }
 mkdir -p "${OUT_ROOT}" "${TMP_ROOT}"
+RUN_TMP="$(mktemp -d "${TMP_ROOT}/flex_hash_internal.XXXXXX")"
 prepare_hash_cache
 
 run_star hash_on

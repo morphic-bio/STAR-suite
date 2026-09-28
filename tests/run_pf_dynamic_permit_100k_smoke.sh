@@ -490,6 +490,7 @@ main() {
   ls "${GEX_TIER_DIR}"/*R1*.fastq.gz >/dev/null 2>&1 || die "No GEX R1 fastqs in ${GEX_TIER_DIR}"
   ls "${GEX_TIER_DIR}"/*R2*.fastq.gz >/dev/null 2>&1 || die "No GEX R2 fastqs in ${GEX_TIER_DIR}"
 
+  [[ ! -e "${OUT_BASE}" ]] || die "Refusing to overwrite existing output: ${OUT_BASE}"
   mkdir -p "${OUT_BASE}"
 
   log "=== PF Dynamic Permit 100K Smoke ==="

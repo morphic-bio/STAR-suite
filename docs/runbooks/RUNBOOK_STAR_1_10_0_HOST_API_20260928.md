@@ -55,6 +55,23 @@ that tag only in `AGENTS.md`; it is code-equivalent, not the same Git commit.
 
 ## Steps
 
+**2026-09-28 correction:** the modern Flex workload is
+`tests/run_flex_half_probe_100k_smoke.sh`, using the established H0/H1X2 half-khash
+and matching model/included-gene lists. It passed all 121 output comparisons to
+saved v1.9.5.a results. The March H0/H1 hash-versus-alignment script is an obsolete
+choice for the modern release gate; keep its unresolved drift as a separate
+historical diagnostic. No STAR Flex classification change is included in this
+follow-up. The historical standalone replay uses an explicit legacy policy.
+See the handoff's **Latest follow-up** for exact paths, hashes and commands.
+
+The PF stress suite and a separate five-epoch CUDA/layer smoke also passed.
+The sparse UCSF 100K test now tests STAR/downstream H5ADs, with CUDA denoising
+validated separately on raw A375 droplets. Seed/failure-handling fixes are in an
+isolated canonical recipes worktree and one saved-MEX downstream execution passed.
+Repeat proofs remain held for authorization. The G-S3 driver is now fail-closed,
+preserves output and uses the modern Flex workload, but has not been launched.
+Earlier batch totals below are historical, not retroactively green gates.
+
 | Step | Work | Command / where | Gate |
 |---|---|---|---|
 | S1 | Branch from `master`; cherry-pick `7d9d71d` (paired hashtag demux, per-library ambient FDR) and `dd14f5b` (CellTag ambient-FDR test) | `git worktree add -b dev-release-v1.10.0 … master`; `git cherry-pick -x` | `make core-portable process-features-lib`; `tests/multi_feature/test_hash_pair_demux_pf_multi.sh`; `tests/test_ambient_fdr_feature_type.sh` |
@@ -99,9 +116,12 @@ and symlinks are retained in the archive; no source outputs were removed.
    pairs, differing exit status and comparator failures. It does not implement
    every Step 0 semantic normalization; its differences require review.
 6. CI partial builds: `run_partial_builds.sh` (both trees, under the lock).
-7. G-S3: **held**, not launched. Repair and review the driver before use;
-   completion of G-S1 alone is insufficient authorization. Intended records:
-   `$G/gs3/<workload>/<tree>/rep<n>/` (`time.txt`, `timed/HOST_LOAD.json`).
+7. G-S3: **held**, not launched. The driver has now been repaired to require
+   explicit repeat approval, G-S1 acceptance and the accepted clean candidate
+   binary. It refuses existing output directories and propagates failures.
+   Review before use; completion of G-S1 alone is insufficient authorization.
+   Default records: `$D/gs3_acceptance/<workload>/<tree>/rep<n>/`
+   (`time.txt`, `timed/HOST_LOAD.json`). Modern Flex uses the half-probe wrapper.
 
 ## Gate audit and current hold
 
@@ -150,7 +170,7 @@ fails during prior estimation, so GPU denoising is not validated.
 See the [handoff](../handoffs/HANDOFF_STAR_1_10_0_HOST_API_20260928.md)
 for precise failures, comparison limits and remaining actions.
 
-**Do not launch the current G-S3 driver unchanged.** The baseline batch exposed
+**Historical G-S3 diagnosis (superseded by the correction above).** The baseline batch exposed
 an invalid legacy Flex invocation: `run_flex_hash_screen_internal_100k.sh`
 sets `--flexLegacy yes` and legacy expected-cell tuning without selecting
 `--soloFlexCellCaller legacy`. That flag is now fixed. Follow-up runs complete

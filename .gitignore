@@ -198,3 +198,6 @@ AGENTS_local.md
 **/Aligned.out.sam
 /core/legacy/source/libstar_suite.a
 /core/legacy/source/libstar_suite.link
+# Standalone replay executables (source and historical oracle stay tracked).
+/flex/tools/hash_screen_replay/hash_screen_replay
+/flex/tools/hash_screen_replay/test_hash_screen

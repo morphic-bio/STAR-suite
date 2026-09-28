@@ -24,7 +24,7 @@ die() {
 TEST_ROOT="$(mktemp -d /tmp/star_flex_h0_h1_routing.XXXXXX)"
 cleanup() {
     local status=$?
-    if [[ ${status} -eq 0 ]]; then
+    if [[ ${status} -eq 0 && "${KEEP_TEST_OUTPUT:-0}" != "1" ]]; then
         rm -rf "${TEST_ROOT}"
     else
         echo "Routing-test artifacts preserved at ${TEST_ROOT}" >&2
@@ -170,6 +170,7 @@ run_case() {
         --soloInlineHashMode yes \
         --soloBucketMode ram --soloBucketCount 4 \
         --flex yes --flexLegacy yes \
+        --soloFlexCellCaller legacy \
         --soloFlexExpectedCellsPerTag 1 \
         --flexPipeline yes --flexPipelineNTriage 0 --flexPipelineNSolo 0 \
         --flexNoAlign "${no_align}" \
@@ -294,6 +295,7 @@ run_bam_sidecar_case() {
         --soloInlineHashMode yes \
         --soloFlexDecisionSidecar "${out_dir}/flex_decisions.bin" \
         --flex yes --flexLegacy yes --flexPipeline no \
+        --soloFlexCellCaller legacy \
         --soloFlexExpectedCellsPerTag 1 \
         --outSAMtype BAM Unsorted \
         --outSAMattributes NH HI AS nM NM CB UB \

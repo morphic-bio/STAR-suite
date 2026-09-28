@@ -1893,3 +1893,16 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
   test host, the synthetic scRNA fixtures and all STAR/host outputs under a
   fresh `/tmp/star-host-api.*`, or under `HOST_API_TEST_OUT` when set. It does
   not remove them; nothing is committed.
+# STAR 1.10.0 gate follow-up (2026-09-28)
+
+- `/mnt/pikachu/star_suite_v1100_gates_20260928/fixes_20260928/`: permit stress,
+  clean-build logs, historical policy-versioned replay, modern H0/H1X2 100K
+  comparison, seeded saved-MEX downstream and five-epoch CUDA/layer smoke.
+  Experimental legacy-routing code/binary and failed matrices are retained here,
+  not in the release source. See the 1.10.0 handoff for disposition.
+- `/mnt/pikachu/star_suite_v1100_gates_20260928/flex_modern_reference_v195a/`:
+  preserved completed 1.9.5.a JAX 8 x 100K half-probe reference output; original
+  `/tmp/star-flex-removal-20260927/jax-parity/B`. Not a new reference execution.
+- `/tmp/star_cellbender_cuda_*/`, `/tmp/star_flex_half_probe_100k_*/`,
+  `/tmp/downstream_contract_*/`, `/tmp/flex_mex_compare_*/`: default isolated
+  smoke/unit outputs. CUDA smoke outputs are not production denoising releases.

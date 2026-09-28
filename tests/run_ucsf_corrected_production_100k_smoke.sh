@@ -11,7 +11,7 @@ FEATURE_REF="${UCSF_100K_SMOKE_FEATURE_REF:-/mnt/pikachu/ucsf-perturb-seq/cellra
 GENOME_DIR="${UCSF_100K_SMOKE_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 SOLO_CB_WHITELIST="${UCSF_100K_SMOKE_SOLO_WHITELIST:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt}"
 CR_WHITELIST="${UCSF_100K_SMOKE_CR_WHITELIST:-${SOLO_CB_WHITELIST}}"
-STAR_BIN="${UCSF_100K_SMOKE_STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR.release}"
+STAR_BIN="${UCSF_100K_SMOKE_STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
 THREADS="${UCSF_100K_SMOKE_THREADS:-24}"
 READS="${UCSF_100K_SMOKE_READS:-100000}"
 SOURCE_SAMPLE_ROOT="${UCSF_100K_SMOKE_SOURCE_SAMPLE_ROOT:-${SCRIPT_DIR}/ucsf_corrected_production_100k_output_20260329_074313/samples/${SAMPLE}}"
@@ -31,7 +31,7 @@ die() {
 [[ -d "${DATASET_ROOT}/${SAMPLE}/guides" ]] || die "Missing corrected guide dir for ${SAMPLE}"
 
 if [[ "${REUSE_OUT_ROOT}" != "1" ]]; then
-  rm -rf "${OUT_ROOT}"
+  [[ ! -e "${OUT_ROOT}" ]] || die "Refusing to overwrite output root: ${OUT_ROOT}"
 fi
 mkdir -p "${OUT_ROOT}"
 
@@ -45,12 +45,13 @@ echo "Sample: ${SAMPLE}"
 echo "Output root: ${OUT_ROOT}"
 echo "Threads: ${THREADS}"
 echo "Downsample reads per library: ${READS}"
+echo "CellBender: separate raw-droplet CUDA smoke (100K reads cannot support prior estimation)"
 if [[ "${USE_EXISTING_STAGED_FIXTURE}" == "1" ]]; then
   echo "Reusing staged 100K fixture from: ${SOURCE_SAMPLE_ROOT}"
 fi
 
 if [[ "${USE_EXISTING_STAGED_FIXTURE}" == "1" ]]; then
-  rm -rf "${TEMP_FIXTURE_ROOT}"
+  [[ ! -e "${TEMP_FIXTURE_ROOT}" ]] || die "Refusing to overwrite fixture root: ${TEMP_FIXTURE_ROOT}"
   mkdir -p "${TEMP_FIXTURE_ROOT}/${SAMPLE}"
   ln -s "${SOURCE_SAMPLE_ROOT}/staged_input/GEX/${SAMPLE}" "${TEMP_FIXTURE_ROOT}/${SAMPLE}/GEX"
   ln -s "${SOURCE_SAMPLE_ROOT}/staged_input/guides/${SAMPLE}" "${TEMP_FIXTURE_ROOT}/${SAMPLE}/guides"
@@ -65,7 +66,7 @@ if [[ "${USE_EXISTING_STAGED_FIXTURE}" == "1" ]]; then
     --out-root "${OUT_ROOT}" \
     --threads "${THREADS}" \
     --star-bin "${STAR_BIN}" \
-    --cellbender-cpu-cores "${THREADS}"
+    --star-only
 else
   "${WORKFLOW}" \
     --samples "${SAMPLE}" \
@@ -77,13 +78,15 @@ else
     --out-root "${OUT_ROOT}" \
     --threads "${THREADS}" \
     --star-bin "${STAR_BIN}" \
-    --cellbender-cpu-cores "${THREADS}" \
+    --star-only \
     --downsample-reads "${READS}"
 fi
 
 SAMPLE_ROOT="${OUT_ROOT}/samples/${SAMPLE}"
 RUN_DIR="${SAMPLE_ROOT}/run"
-DOWNSTREAM_DIR="${SAMPLE_ROOT}/downstream_genefull_velocyto_cellbender"
+DOWNSTREAM_DIR="${SAMPLE_ROOT}/downstream_genefull_velocyto"
+bash "${REPO_ROOT}/scripts/run_scrna_downstream_gene_full_velocyto.sh" \
+  --run-dir "${RUN_DIR}" --output-dir "${DOWNSTREAM_DIR}" --adaptive-filter
 
 for path in \
   "${OUT_ROOT}/RUN_WRAPPER_COMMAND.sh" \
@@ -104,14 +107,9 @@ for path in \
   "${DOWNSTREAM_DIR}/unfiltered_counts.h5ad" \
   "${DOWNSTREAM_DIR}/filtered_counts.h5ad" \
   "${DOWNSTREAM_DIR}/default_singlet_filtered_counts.h5ad" \
-  "${DOWNSTREAM_DIR}/final_counts.h5ad" \
   "${DOWNSTREAM_DIR}/summary.txt"; do
   [[ -f "${path}" ]] || die "Missing expected output: ${path}"
 done
-
-if [[ ! -f "${DOWNSTREAM_DIR}/cellbender/cellbender_counts.h5" ]] && [[ ! -f "${DOWNSTREAM_DIR}/cellbender/CELLBENDER_FAILED.txt" ]]; then
-  die "Expected either CellBender output or failure note in ${DOWNSTREAM_DIR}/cellbender"
-fi
 
 [[ -d "${RUN_DIR}/y_separated" ]] || die "Missing y_separated directory"
 find "${RUN_DIR}/y_separated" -maxdepth 1 -type f -name '*.fastq.gz' | grep -q . || die "No Y/noY FASTQs emitted"
@@ -132,7 +130,7 @@ print(f"FILTERED_VELOCYTO_NNZ={manifest['filtered']['nnz_total']}")
 
 summary_lines = [line.strip() for line in summary_path.read_text().splitlines() if line.strip()]
 print(f"SUMMARY_LINES={len(summary_lines)}")
-print(f"CELLBENDER_STATUS={'produced_h5' if (summary_path.parent / 'cellbender' / 'cellbender_counts.h5').exists() else 'fallback_note'}")
+print("CELLBENDER_STATUS=not_run_separate_cuda_gate_required")
 PY
 )
 

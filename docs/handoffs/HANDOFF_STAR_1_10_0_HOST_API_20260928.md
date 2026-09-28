@@ -5,6 +5,131 @@ Updated: 2026-09-28, after both G-S1 batches completed. Runbook:
 
 ## State
 
+### Latest follow-up: current Flex fixture corrected
+
+This section supersedes the earlier interpretation of the legacy Flex failure
+as a blocker to the current 100K route. The old batch records below are retained,
+not rewritten into passes.
+
+The failing `run_flex_hash_screen_internal_100k.sh` uses a March-2026 H0/H1
+cache and the 2020 alignment reference. It is **not** the established 1.9.5.a
+JAX half-probe regression. Selecting it as G-S3's Flex workload was a test-selection
+error. Correct current inputs, under
+`/mnt/pikachu/storage_offload_20260912/inputfmt_20260910/stage/`:
+
+| Input | SHA256 |
+|---|---|
+| `model_h01x2_cache.half.khash` | `801fc6143a383b6a94c55307f816bf824c7a9c685d3049405b2ffcc4d72db296` |
+| `model_gene_ids.txt` | `9f19693ee17820f068ce0dec1d27a905720cfe5912e2215c7d023d55feeb13aa` |
+| `included_gene_ids.txt` | `5366fd7971227e5b9fab720affc0d93eab287c22254eaa01af35efd58f1ba431` |
+
+Use `tests/run_flex_half_probe_100k_smoke.sh`, which invokes the established
+`test_flex_v194_default_route.sh` in new single-run mode. It executes the current
+binary once and compares to preserved successful 1.9.5.a output, without rerunning
+the reference or the default/explicit equivalence arms. It uses all eight lanes,
+100K pairs per lane, the matching model/filter gene axes, the tag-aware caller,
+and the fused no-genome route. It is not a hash-versus-genomic-alignment test.
+The reference is copied unchanged from
+`/tmp/star-flex-removal-20260927/jax-parity/B` to the durable
+`/mnt/pikachu/star_suite_v1100_gates_20260928/flex_modern_reference_v195a/`.
+Its original logs retain their original paths.
+
+Completed modern validation: **121/121 non-log, non-diagnostic outputs
+byte-identical**, including raw/filtered matrices and caller outputs; seven
+checks passed. Evidence: `$D/fixes_20260928/flex_modern_100k/`. This first run
+used clean binary `ee0bfc87fd0d329247f42e23fbf04c8d6a9e83b1e8974a11d6420c080293b459`.
+An inactive legacy helper was temporarily changed in that build; modern routing
+was unchanged. All experimental STAR Flex source changes were subsequently
+removed. Do not use the experiment binary for release.
+
+After removing all production Flex edits, another clean build and the single-run
+wrapper passed **121/121** again. Authoritative final evidence:
+`$D/fixes_20260928/flex_modern_final/`; tested binary SHA256
+`2746e2037d8632d8c516a195283cda830043ceb3e869ec86e834879d19704512`.
+Command: `OUT_ROOT=$D/fixes_20260928/flex_modern_final bash tests/run_flex_half_probe_100k_smoke.sh`
+under the shared host lock and nice 10. This was changed-source validation after
+removing the experiment, not a timing repetition.
+
+The historical replayer now has explicit `--legacy-negative-policy` for its
+immutable March oracle. Its default certified-negative policy is preserved;
+synthetic tests check both. This changes a standalone test tool, not STAR's
+runtime classifier. Historical replay: 800,000/800,000 decisions agree, 20
+synthetic checks pass. Evidence: `$D/fixes_20260928/flex_replay_versioned/`.
+Do not use that historical success as a modern count-validation claim.
+
+A temporary production-routing experiment did **not** solve historical count
+drift (6,761 differing pooled coordinates, 0.9903%; previous 1.9299%). It was
+removed, with the patch/binary and outputs retained under
+`$D/fixes_20260928/{legacy_routing_experiment.patch,STAR.legacy-routing-experiment,flex_e2e/}`.
+The old diagnostic remains available and failing; its exact cause is unresolved.
+Never label it a benign difference merely because the baseline also failed.
+
+### Other fixes and validation
+
+- PF permit stress completed successfully with the earlier clean OCM-fix binary
+  (`c74e9019...`): off/on MEX parity, 3->2->4 and 1->2->1 resizing,
+  shadow/active controller, timeout and recovery. Evidence: `fixes_20260928/pf_stress/`.
+- Canonical downstream edits are isolated in
+  `/mnt/pikachu/morphic-recipes-v1100-20260928`, branch
+  `fix/v1100-downstream-validation`, local commit `bbf8b54`; the main recipes worktree's cardiac edits
+  are untouched. Set `MORPHIC_RECIPES_ROOT` to that worktree when testing STAR's
+  compatibility launcher. The STAR R mirror matches the canonical helper.
+- The R container now receives `SCDBLFINDER_SEED`, default 1; scDblFinder uses
+  R's seed plus `SerialParam(RNGseed=...)`. Errors fail instead of marking all
+  cells singlets. Saved-UCSF-MEX downstream validation completed with 3,943
+  STAR cells and 281 doublets. This is one seeded run, not repeated-run proof.
+  Evidence: `fixes_20260928/seeded_downstream/` and `seeded_downstream.log`.
+- CellBender requires CUDA and successful nonempty output. Partial failures and
+  stale/reused failed output cannot become successful fallback H5ADs. Ten
+  orchestration tests pass in recipes. The 100K UCSF smoke now validates
+  alignment/H5ADs without pretending its sparse input validates denoising.
+- Separate CUDA smoke passed on 20,000 raw A375 droplets x 38,606 GEX features
+  from `/storage/A375/paper_bench_20260326_134444/outs/raw_feature_bc_matrix`.
+  Raw UMIs: 21,546,719; denoised: 20,993,095; denoised NNZ: 6,267,577.
+  Raw X and barcode/gene order remain unchanged. `nvidia-smi` captured 1,104 MiB
+  for CellBender. Five epochs test execution/layer integration, **not production
+  convergence**. Evidence: `fixes_20260928/cellbender_cuda/{manifest.json,PASS.json,GPU_ACTIVE.txt}`.
+- Downstream image ID: `sha256:c052c1568727f24a6e2c8ec793357ccfdf1ffdf5622542a7b2da40d8df47825b`;
+  CellBender: `sha256:f31f1e993f3d87659c3dd541a22f505fec7ee4366f6d5da1324061c2c09dcb2a`.
+- Five keyed-MEX comparator tests pass; automatically compare the emitted sample
+  set without assuming the shallow fixture calls cells in all four tags. A
+  missing sample on one side, missing matrix, or raw count drift still fails.
+- `$D/tools/run_gs3.sh` now resolves the durable paths, uses the modern half-probe
+  test, refuses output overwrites, propagates failures, records binary hashes,
+  and checks repeat-approval/G-S1-acceptance records before any execution. Its
+  no-approval dry check exits 2 without running a workload. Actual timings remain held.
+
+### Remaining release work
+
+Explicit repeat approval is still needed for G-S3, SE/PE SLAM determinism and the
+second seeded doublet run. No approval markers were created. Finish output-pairing
+normalization and the complete gate audit; the initial failed batches remain
+failed historical records. The new 100K smoke scope and separate CUDA test are
+not retroactive passes of the old combined wrapper. Multiomics integration and
+its recipe executable/snapshot migration remain stable-release dependencies
+after the local RC is available, not a reason to change the current Flex cache.
+No push, tag or master merge is authorized by this follow-up.
+
+Completed execution commands (records, not rerun authorization):
+
+```bash
+# Each data execution used flock $D/../e2e_bench_20260926/pikachu_timed.lock
+# (actual lock: /mnt/pikachu/e2e_bench_20260926/pikachu_timed.lock), nice -n 10.
+PF_DYNAMIC_100K_OUT_BASE=$D/fixes_20260928/pf_stress bash tests/run_pf_dynamic_permit_100k_smoke.sh
+OUT_ROOT=$D/fixes_20260928/flex_replay_versioned bash tests/run_flex_hash_screen_replay_regression.sh
+FLEX_SINGLE_RUN=1 FLEX_REFERENCE_OUTPUT=/tmp/star-flex-removal-20260927/jax-parity/B \
+  TEST_WORKDIR=$D/fixes_20260928/flex_modern_100k bash tests/test_flex_v194_default_route.sh
+MORPHIC_RECIPES_ROOT=/mnt/pikachu/morphic-recipes-v1100-20260928 \
+  CELLBENDER_SMOKE_OUT=$D/fixes_20260928/cellbender_cuda bash tests/run_cellbender_cuda_smoke.sh
+# In the isolated recipes worktree:
+SCRNA_DOWNSTREAM_IMAGE=sha256:c052c1568727f24a6e2c8ec793357ccfdf1ffdf5622542a7b2da40d8df47825b \
+  SCDBLFINDER_SEED=1 bash scripts/run_scrna_downstream_gene_full_velocyto.sh \
+  --run-dir $D/gate/run110/ucsf/samples/EBs2_2/run \
+  --output-dir $D/fixes_20260928/seeded_downstream --python-backend host
+```
+
+### Earlier branch history
+
 - Worktree `/mnt/pikachu/STAR-suite-v1100-20260928`, branch
   `dev-release-v1.10.0`. Nothing pushed; no tag yet; `master` untouched.
 - Commits on the branch (oldest first):
@@ -236,7 +361,7 @@ verification. Scratch sources were not removed.
   The external repository was not modified; no annotation difference is
   waived by this diagnosis.
 
-## Next
+## Earlier checkpoint (superseded by Latest follow-up above)
 
 1. Finish disposition of the four original failures using the follow-up above;
    retain existing outputs and validate any changed code against a clean build.

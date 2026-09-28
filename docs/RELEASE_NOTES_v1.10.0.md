@@ -116,7 +116,14 @@ STAR in the same process, sharing STAR's thread permits. See the
   concurrent GEX work instead of expecting one permit per record. Add nine
   validator unit tests, including invalid and missing telemetry.
 - Explicitly select the legacy caller in the legacy Flex smoke. Its remaining
-  hash-on/legacy parity failure is not waived by this parameter correction.
+  hash-on/legacy parity failure remains a historical diagnostic, not the modern
+  release gate. The release gate now uses the established H0/H1X2 half-probe
+  fixture with matching model/filtered gene axes and preserved 1.9.5.a output.
+- Version the standalone March decision replay with an explicit legacy negative
+  policy, leaving the default policy and STAR runtime classification unchanged.
+- Seed scDblFinder in the canonical downstream recipe's R container and match
+  the STAR mirror. Fail on doublet errors rather than silently assigning singlets.
+  Require CUDA and successful CellBender output; reject stale/partial failures.
 
 ## Validation
 
@@ -132,9 +139,14 @@ batch as approval to tag or publish this candidate.
 - Selected PBMC matrices and keyed A375 feature counts match. UCSF
   `counts.h5ad` dataset values differ only in provenance paths. Downstream
   doublet identities/scores differ; the external canonical recipe does not
-  set the seed used in STAR's local R script. Output parity remains open.
+  set the seed used in STAR's local R script. That gap is now fixed in the
+  isolated recipe branch, with one successful saved-MEX downstream run. A
+  repeated-run reproducibility check is still held for approval.
 - Both UCSF rows continued after CellBender failed during prior estimation;
   the successful smoke wrapper exits validate fallback, not GPU denoising.
+  The updated 100K smoke separates this sparse-input test from CUDA validation.
+  A real raw-droplet CUDA smoke has since passed inference and H5AD layer
+  integration on 20,000 droplets. It used five epochs, not production convergence.
 - Follow-up: the clean-built OCM allocation fix passes six synthetic cases
   (three modes, normal and low-memory). Both real 1,000-read OCM executions
   complete with byte-identical CBQ/FASTQ pooled and per-sample outputs; all
@@ -143,14 +155,20 @@ batch as approval to tag or publish this candidate.
   saved plans, not by repeating alignment. Its original exit 1 is retained.
   Permit-validator units pass, and all
   four saved off/on telemetry records pass the corrected assertions; the
-  previously unexecuted stress modes still require coverage. The expanded
+  resizing, shadow/active-controller and forced-exit/recovery modes have since
+  passed. The expanded
   Tier A suite has 15 cases; the initial batch's 13/13 is historical evidence.
-- Flex replay differences are reproduced by the September 4 negative-cache
+- Historical Flex replay differences are reproduced by the September 4 negative-cache
   policy change using exactly the same cache and March dump, not a change of
-  reference or duplicate handling. The historical oracle is retained.
-- G-S3 is on hold: the corrected legacy Flex recipe runs, but hash-on/legacy
-  matrix parity fails identically in both versions. Repeated timing runs also
-  require explicit owner approval.
+  reference or duplicate handling. The historical oracle is retained and passes
+  all 800,000 decisions under its explicit historical policy.
+- Current Flex 100K: **121/121 non-log, non-diagnostic outputs byte-identical**
+  to preserved 1.9.5.a output with the correct H0/H1X2 half-probe fixture.
+  The earlier March H0/H1 test was the wrong modern gate; its matrix drift is
+  not evidence of a regression in the current half-probe route.
+- G-S3 remains held for explicit repeat approval and completion of the wider
+  output audit. Its driver now refuses overwrites, propagates failures, and
+  selects the modern half-probe workload.
 - Official snapshot digest/count validation passed (11 recipes, 10 evidence
   records). Migration of the pinned multiome recipes is still a separate
   dependency.
