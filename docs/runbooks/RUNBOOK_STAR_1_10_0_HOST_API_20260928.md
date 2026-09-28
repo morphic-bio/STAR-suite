@@ -22,6 +22,9 @@ feature is a minor release.
 Worktree: `/mnt/pikachu/STAR-suite-v1100-20260928`, branch
 `dev-release-v1.10.0` from `master` (`4824548`, v1.9.5.a).
 
+The published `v1.9.5.a` tag is `f0d9f27`. Baseline `4824548` differs from
+that tag only in `AGENTS.md`; it is code-equivalent, not the same Git commit.
+
 ## Rules
 
 - **Clean room.** Never read, grep or summarize 10x Genomics code (Cell
@@ -41,6 +44,14 @@ Worktree: `/mnt/pikachu/STAR-suite-v1100-20260928`, branch
   its verdict. Untimed builds: `nice -n 10`, at most `-j16`. Do not use
   `pkill -f` with a pattern that appears in your own command line.
 - **Design problems.** If a design assumption is wrong, stop and report.
+- **Gate failures are not passes.** Matching failures on both binaries can
+  establish that a problem predates this refactor, but do not satisfy coverage
+  for an RC. Inspect per-case summaries and downstream failure markers, not
+  just the batch driver's exit code or `finished_utc`.
+- **Identical repeats require explicit owner approval.** Do not launch the
+  three G-S3 repetitions just because they appear in this runbook. Preserve
+  each existing run directory; the original scratch drivers remove outputs
+  unconditionally and must not be used to restart an existing arm.
 
 ## Steps
 
@@ -80,3 +91,35 @@ copies and outputs are in the session scratchpad
 7. G-S3: `nohup bash $G/run_gs3.sh &` after G-S1 finishes (run_timed refuses
    while another STAR runs). Records in `$G/gs3/<workload>/<tree>/rep<n>/`
    (`time.txt`, `timed/HOST_LOAD.json`).
+
+## Gate audit and current hold
+
+Before using a completed batch as evidence, run the read-only execution audit
+from this checkout, using a new report path each time:
+
+```bash
+python3 tests/host_api/audit_gate_batch.py "$G/run195" \
+  --manifest tests/production_module_regression_manifest.tsv \
+  --report /mnt/pikachu/star_suite_v1100_gates_20260928/gs1_baseline_execution_audit.json
+```
+
+Use `run110` and a different report name for the candidate. Nonzero is expected
+when any case fails, is skipped, lacks completion evidence, or has a
+`CELLBENDER_FAILED.txt` marker. A successful execution audit still does not
+establish output parity or performance. Unit coverage:
+
+```bash
+python3 -m unittest discover -s tests/host_api -p 'test_audit_gate_batch.py' -v
+```
+
+**Do not launch the current G-S3 driver unchanged.** The baseline batch exposed
+an invalid legacy Flex invocation: `run_flex_hash_screen_internal_100k.sh`
+sets `--flexLegacy yes` and legacy expected-cell tuning without selecting
+`--soloFlexCellCaller legacy`. It exits 102 before mapping. Timing that failure
+would not measure the intended workload. Resolve the recipe and the remaining
+G-S1 failures, obtain repeat approval, and make the timing driver preserve
+existing output directories and propagate failures before proceeding.
+
+The official snapshot validator checks digest/count integrity, not whether
+the six pinned multiome recipes have migrated to the Multiomics executable.
+Keep that migration as a separate release dependency.

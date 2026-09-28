@@ -1,6 +1,6 @@
 # STAR Suite v1.10.0 Release Notes
 
-Date: 2026-09-28 (release candidate `v1.10.0-rc1`)
+Draft: 2026-09-28 (intended release candidate `v1.10.0-rc1`; not tagged)
 
 STAR Suite 1.10.0 removes every dependency on other suites. STAR no longer
 links Chromap Suite or RapidMACS, and no longer hosts the joint RNA + ATAC
@@ -16,7 +16,7 @@ Upstream STAR remains `2.7.11b`, genome-index compatibility remains `2.7.4a`,
 and legacy compatibility remains `2.7.1a`. Existing indexes do not need
 rebuilding.
 
-This is a release candidate. The final `v1.10.0` tag follows once Multiomics
+This is an unreleased candidate. The final `v1.10.0` tag follows once Multiomics
 Suite has built its binary against the host interface; a change the interface
 needs would come as `v1.10.0-rc2`.
 
@@ -106,4 +106,21 @@ STAR in the same process, sharing STAR's thread permits. See the
 
 ## Validation
 
-GATE_RESULTS_PLACEHOLDER
+The release gates are not complete. Do not interpret a completed regression
+batch as approval to tag or publish this candidate.
+
+- Previously completed: clean no-Chromap build, bundled/external HTSlib host
+  API tests, and partial builds (baseline 8/8; candidate 11/11).
+- The G-S1 baseline completed all 24 production rows and 13 Tier A tests.
+  Tier A passed; six production rows failed. The UCSF row additionally
+  continued after CellBender failed, so its successful wrapper exit does not
+  establish CellBender coverage. Candidate comparison is pending.
+- G-S3 is on hold: the legacy Flex recipe fails before mapping, and the
+  repeated timing runs require explicit owner approval.
+- Official snapshot digest/count validation passed (11 recipes, 10 evidence
+  records). Migration of the pinned multiome recipes is still a separate
+  dependency.
+
+See the [runbook](runbooks/RUNBOOK_STAR_1_10_0_HOST_API_20260928.md) and
+[handoff](handoffs/HANDOFF_STAR_1_10_0_HOST_API_20260928.md) for gate evidence
+and remaining work. No performance-regression claim is made yet.

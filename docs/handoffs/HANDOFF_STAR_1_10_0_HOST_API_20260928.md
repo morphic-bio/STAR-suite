@@ -1,6 +1,6 @@
 # Handoff: STAR Suite 1.10.0 host interface and Chromap removal
 
-Updated: 2026-09-28 17:50 UTC. Runbook:
+Updated: 2026-09-28 18:33 UTC. Runbook:
 `docs/runbooks/RUNBOOK_STAR_1_10_0_HOST_API_20260928.md`.
 
 ## State
@@ -15,8 +15,9 @@ Updated: 2026-09-28 17:50 UTC. Runbook:
   - `face24f` `docs/HANDOVER_MULTIOMICS_1.10.md`
   - `0b92ce2` version 1.10.0, `debian/changelog` 1.10.0-1
   - this runbook and handoff
-- Uncommitted: none, except the draft `docs/RELEASE_NOTES_v1.10.0.md`
-  (validation section pending), committed with this handoff as a draft.
+- Continuation changes: execution-coverage auditor and its unit tests,
+  updated runbook warnings, and explicit unreleased status in the release
+  notes. STAR's C++ implementation has not changed during this continuation.
 
 ### Done
 
@@ -32,16 +33,20 @@ Updated: 2026-09-28 17:50 UTC. Runbook:
 
 `$G` = `/tmp/claude-1000/-mnt-pikachu-chromap-suite-paper/53e97281-48e6-45f8-90f8-a4913b843536/scratchpad/gate`.
 
-### In progress (background jobs)
+### G-S1 continuation
 
-- `bash $G/run_gs1.sh 195` (PID 1061295), started 17:28 UTC: G-S1 baseline
-  rows and Tier A with the v1.9.5.a gate binary. Log
-  `$G/../logs/gs1_195.log`; status `$G/run195/manifest_status.tsv`,
-  `$G/run195/tierA/status.tsv`; captures `$G/run195/capture/`. Rows 1-8
-  exit 0. Row `cbq-ocm-composite-local` exits 1 on the v1.9.5.a baseline
-  itself ("Velocyto's gene-like source did not populate per-read CB/UMI
-  storage", with the current morphic-recipes OCM script): pre-existing; 1.10
-  must fail the same way.
+- Baseline completed at 18:17 UTC (`finished_utc`; `done 195` in
+  `$G/../logs/gs1_195.log`). All 24 production rows ran: 18 exited zero,
+  six failed. All 13 Tier A tests passed. Do not restart this arm.
+- Candidate started at 18:19:05 UTC with
+  `nice -n 10 bash "$G/run_gs1.sh" 110`, under the driver's per-row shared
+  host lock. At 18:31 UTC rows 1-16 were complete; the OCM failure reproduced.
+  Inspect `$G/run110/manifest_status.tsv`, `$G/run110/tierA/status.tsv`, and
+  `$G/run110/finished_utc`. Do not start a second candidate batch.
+- First PBMC capture: 22 non-log files identical, no differing/missing files.
+  The PBMC 100K `report.json` inputs and all three profile QC/matrix-checksum
+  objects match (vanilla, modern, modern_bam). This is partial comparison
+  evidence, not a full G-S1 pass.
 - Partial builds finished (both trees).
 - Gate binaries (built in container `star-suite-gate-v1100:20260928`):
   `$G/src195/core/legacy/source/STAR.real` (1.9.5.a, `4824548`) and
@@ -51,19 +56,55 @@ Updated: 2026-09-28 17:50 UTC. Runbook:
 
 ## Next
 
-1. When `run_gs1.sh 195` prints `done 195` in its log: `cd $G && nohup nice -n 10 bash run_gs1.sh 110 > $G/../logs/gs1_110.log 2>&1 &`.
+1. Let the existing candidate batch finish; do not restart either arm. Audit
+   both completed batches with `tests/host_api/audit_gate_batch.py` (runbook).
+   The new auditor's 12 unit tests pass. Exit zero from the original batch
+   driver means only that it reached its end, not that all cases passed.
 2. Compare captures and kept outputs with `compare_outputs.py` (runbook,
    step 5). Allowed differences: logs, BAM `@PG`/`@CO`, first line of
    `genomeParameters.txt`, the Step 0 content-varying items (example read in
    `feature_sequences.txt`, EmptyDrops tie order), and fields that record the
    binary or version (report.json `binary_sha256`/`version`/`source_revision`,
    sidecar metadata). Anything else is a failure to investigate.
-3. G-S3: `cd $G && nohup bash run_gs3.sh > $G/../logs/gs3.log 2>&1 &` after
-   both G-S1 runs; summarize medians from `time.txt` (Elapsed, Maximum
-   resident set size) and `timed/HOST_LOAD.json` verdicts.
-4. Fill the validation section of `docs/RELEASE_NOTES_v1.10.0.md`, add the
-   1.10.0 entry to `docs/Star-binary-distribution.md`, commit, then
-   `git tag -a v1.10.0-rc1 -m "STAR Suite v1.10.0-rc1"`. No push.
+3. G-S3 is on hold. Resolve the invalid Flex recipe below and obtain explicit
+   owner approval for identical timing repeats. The question has been asked;
+   no approval has been received. Do not run the existing driver unchanged:
+   it overwrites runs and continues after failures. The 100K GEX workload has
+   already run during G-S1, so timing it again also requires repeat approval.
+4. Complete the output comparisons and disposition the failures before an RC
+   tag. Keep release notes and distribution docs explicitly pending until
+   gates are satisfied. Commit locally only; no tag, merge or push yet.
+
+## Baseline failures requiring disposition
+
+All findings below come from the clean, container-built baseline, not from
+stale objects. Matching failures on 1.10 would establish that they predate
+this refactor, not prove the affected workflow works.
+
+| Row | Observed baseline failure | Required follow-up |
+|---|---|---|
+| `cbq-ocm-composite-local` | STAR exits 111: Velocyto's gene-like source did not populate per-read CB/UMI storage | Already reproduced on 1.10; investigate OCM/Velocyto coverage separately |
+| `pf-dynamic-permit-100k` | Validator requires acquires == workUnits (7,264 vs 369,546); assignment now reports batched work, up to 64 records per permit | Correct the telemetry invariant with unit coverage; do not change the batching to satisfy an obsolete assertion |
+| `flex-hash-screen-replay` | Flat and tiered agree, but both differ from pinned truth on 2,024/800,000 reads, all Pass -> Deny (negative codes 6: 1,873; 4: 136; 8: 15) | Establish the intended negative-cache contract before updating a golden fixture; do not overwrite the pinned truth |
+| `flex-hash-screen-100k` | Exits 102 before mapping: legacy expected-cell tuning with default tag-aware caller | Explicit legacy caller is missing from the legacy test recipe; this also invalidates the planned G-S3 Flex timing command |
+| `slam-cbq-divergence` | FASTQ vs CBQ SAM body order differs | Exact multiset is identical (113,516 records), and staged sorted-SAM, diagnostics and pre-NTR checks pass; decide whether record-order parity is required |
+| `slam-cbq-divergence-pe` | Same exact-order failure | Staged sorted-SAM, junctions, diagnostics, transitions and pre-NTR checks pass |
+
+Additional coverage notes:
+
+- UCSF smoke exits zero by design when CellBender fails and writes a fallback
+  H5AD (`tests/run_ucsf_corrected_production_100k_smoke.sh:112`). It did request
+  `--cuda`; the 100K fixture has only 5,584 observed barcodes and CellBender did
+  not produce its H5. This tests the fallback, not denoising. The failure
+  marker is under `run195/ucsf/samples/EBs2_2/`
+  `downstream_genefull_velocyto_cellbender/cellbender/`.
+- The CBQ aggregate skips two network subtests with `RUN_NETWORK=0`; their
+  separate manifest rows did run successfully. The auditor surfaces nested
+  skips for review rather than silently ignoring them.
+- `python3 scripts/release/validate_official_snapshots.py` passed: 11 recipes,
+  10 public evidence records. It does not validate recipe executable routing.
+- Baseline `4824548` differs from the published `v1.9.5.a` tag `f0d9f27` only
+  in `AGENTS.md`; biological code is identical.
 
 ## Deviations from the design
 

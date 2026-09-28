@@ -4,6 +4,18 @@ This file tracks where **test outputs and artifacts** should live and what is
 expected to be **untracked** in git. If you add a new smoke/regression test,
 update this file with its output location.
 
+## Host API 1.10 Release Gates (2026-09-28)
+
+- Local gate binaries, captured outputs, status tables, and comparisons belong
+  under `/mnt/pikachu/star_suite_v1100_gates_20260928/`, not in git. The initial
+  session scratch location is recorded in the 1.10 host-API handoff.
+- `tests/host_api/audit_gate_batch.py` reads an existing G-S1 batch and writes
+  an optional, new JSON report via `--report`. It never runs a workload and
+  refuses to overwrite a report. Passing this execution audit is not a claim
+  of output parity or passing performance gates.
+- `tests/host_api/test_audit_gate_batch.py` uses temporary
+  `/tmp/star-host-gate-audit-*` fixtures, removed automatically.
+
 ## Source Build Regressions (2026-09-27)
 
 - `tests/test_htslib_build_discovery.py`: temporary `star-htslib-build-test-*`
