@@ -4,6 +4,24 @@
 
 Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction install and clear provenance.
 
+## Pending 1.10.0 Candidate (2026-09-28)
+
+- Local branch: `dev-release-v1.10.0`; intended tag `v1.10.0-rc1` is not yet
+  created or published. No 1.10 packages or container images are announced.
+- `make core` now uses bundled HTSlib without Chromap or RapidMACS;
+  `core-portable` is a compatibility alias. Hosts that share HTSlib with other
+  libraries can build with `HTSLIB=external`.
+- `make star-host-lib` builds the static embedding archive and its link
+  dependencies. See [Host API](HOST_API.md); the multiome executable belongs
+  to Multiomics Suite, not the standalone STAR release.
+- Version metadata is `1.10.0` / Debian `1.10.0-1`; existing genome-index
+  compatibility is unchanged. Local partial-build and host-API tests passed,
+  but production-output/performance gates and release-artifact validation
+  remain pending. Do not equate a local build with a published package.
+- Release evidence and blockers are recorded in the
+  [1.10 handoff](handoffs/HANDOFF_STAR_1_10_0_HOST_API_20260928.md).
+  The final stable tag also requires validation by Multiomics Suite.
+
 ## Implementation Status (2026-02-14)
 
 - Phase 1 (Packaging Foundation): **implemented (initial)**

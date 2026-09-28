@@ -68,9 +68,15 @@ that tag only in `AGENTS.md`; it is code-equivalent, not the same Git commit.
 
 ## Gate tooling
 
-All under `/mnt/pikachu/star_suite_v1100_gates_20260928/tools/`; working
-copies and outputs are in the session scratchpad
-`/tmp/claude-1000/-mnt-pikachu-chromap-suite-paper/53e97281-48e6-45f8-90f8-a4913b843536/scratchpad/gate/` (`$G`).
+All tools are under `/mnt/pikachu/star_suite_v1100_gates_20260928/tools/`.
+The commands below record the original execution layout: `$G` was
+`/tmp/claude-1000/-mnt-pikachu-chromap-suite-paper/53e97281-48e6-45f8-90f8-a4913b843536/scratchpad/gate/`.
+Both batches are complete; these are not instructions to restart them.
+Verified durable copies are now under
+`/mnt/pikachu/star_suite_v1100_gates_20260928/gate/`. Logs, fixtures and
+selected external diagnostic directories are alongside it; see
+`preservation.tsv` and `PRESERVATION_COMPLETE_UTC`. Original scratch paths
+and symlinks are retained in the archive; no source outputs were removed.
 
 1. Gate container (same toolchain for both builds; Ubuntu 22.04, g++-12
    12.3.0 as on the host, so binaries also run on the host):
@@ -85,22 +91,27 @@ copies and outputs are in the session scratchpad
    invocation's outputs to `$G/run<tree>/capture/<n>`. Row status:
    `$G/run<tree>/manifest_status.tsv`; Tier A: `$G/run<tree>/tierA/status.tsv`.
    Rows print `SKIP` and exit 0 when a prerequisite is missing: check stdout.
-5. Compare: `python3 compare_outputs.py $G/run195/capture $G/run110/capture --roots-a '<T>=$G/src195' '<R>=$G/run195' --roots-b '<T>=$G/src110' '<R>=$G/run110' --report <json>`,
-   and likewise the kept per-test output trees.
+5. Compare using `env GATE_ROOT="$G" COMPARE_OUT=<fresh-report-directory>
+   bash /mnt/pikachu/star_suite_v1100_gates_20260928/tools/compare_gs1.sh`
+   under the shared host lock. Captures must be paired by unique normalized
+   `argv.txt`, not by invocation number: held cases change subsequent
+   numbering. This driver requires completion markers and propagates missing
+   pairs, differing exit status and comparator failures. It does not implement
+   every Step 0 semantic normalization; its differences require review.
 6. CI partial builds: `run_partial_builds.sh` (both trees, under the lock).
-7. G-S3: `nohup bash $G/run_gs3.sh &` after G-S1 finishes (run_timed refuses
-   while another STAR runs). Records in `$G/gs3/<workload>/<tree>/rep<n>/`
-   (`time.txt`, `timed/HOST_LOAD.json`).
+7. G-S3: **held**, not launched. Repair and review the driver before use;
+   completion of G-S1 alone is insufficient authorization. Intended records:
+   `$G/gs3/<workload>/<tree>/rep<n>/` (`time.txt`, `timed/HOST_LOAD.json`).
 
 ## Gate audit and current hold
 
-Before using a completed batch as evidence, run the read-only execution audit
-from this checkout, using a new report path each time:
+The read-only execution audit is available from this checkout. For a future
+changed batch use its root and a new report path:
 
 ```bash
 python3 tests/host_api/audit_gate_batch.py "$G/run195" \
   --manifest tests/production_module_regression_manifest.tsv \
-  --report /mnt/pikachu/star_suite_v1100_gates_20260928/gs1_baseline_execution_audit.json
+  --report <fresh-report-path.json>
 ```
 
 Use `run110` and a different report name for the candidate. Nonzero is expected
@@ -111,6 +122,33 @@ establish output parity or performance. Unit coverage:
 ```bash
 python3 -m unittest discover -s tests/host_api -p 'test_audit_gate_batch.py' -v
 ```
+
+Completed on 2026-09-28 (12 auditor unit tests passed):
+
+| Arm | Production PASS | FAIL | SKIP | Tier A |
+|---|---:|---:|---:|---:|
+| 1.9.5.a baseline | 18 | 6 | 0 | 13/13 |
+| 1.10.0 candidate | 18 | 4 | 2 | 13/13 |
+
+Reports in `/mnt/pikachu/star_suite_v1100_gates_20260928/`:
+`gs1_baseline_execution_audit_v2.json`,
+`gs1_candidate_execution_audit.json`, `compare/`,
+`selected_output_differences.json`, and `BINARY_PROVENANCE.json`.
+The four candidate failures also occur on the baseline. Two candidate SLAM
+rows are held for explicit approval because they repeat identical FASTQ
+executions internally; their gate-local manifest requires
+`IDENTICAL_REPEATS_APPROVED` in that artifact root. Do not create this marker
+without recording actual owner approval.
+
+Selected comparisons establish equal PBMC matrices and keyed A375 feature
+counts. UCSF `counts.h5ad` dataset values differ only in source-path provenance,
+but downstream doublet identities and scores differ. The executed canonical
+`morphic-recipes` R caller lacks the seed present in STAR's unused copy.
+Resolve this external recipe reproducibility gap with its owner; do not
+waive annotation parity. Both UCSF runs also fall back after CellBender
+fails during prior estimation, so GPU denoising is not validated.
+See the [handoff](../handoffs/HANDOFF_STAR_1_10_0_HOST_API_20260928.md)
+for precise failures, comparison limits and remaining actions.
 
 **Do not launch the current G-S3 driver unchanged.** The baseline batch exposed
 an invalid legacy Flex invocation: `run_flex_hash_screen_internal_100k.sh`

@@ -111,10 +111,16 @@ batch as approval to tag or publish this candidate.
 
 - Previously completed: clean no-Chromap build, bundled/external HTSlib host
   API tests, and partial builds (baseline 8/8; candidate 11/11).
-- The G-S1 baseline completed all 24 production rows and 13 Tier A tests.
-  Tier A passed; six production rows failed. The UCSF row additionally
-  continued after CellBender failed, so its successful wrapper exit does not
-  establish CellBender coverage. Candidate comparison is pending.
+- Both G-S1 arms completed. Tier A passed 13/13 on each. Production results:
+  baseline 18 PASS / 6 FAIL; candidate 18 PASS / 4 FAIL / 2 SKIP. The four
+  candidate failures also occur on the baseline; two SLAM determinism tests
+  remain held for repeat approval. These results do not satisfy G-S1.
+- Selected PBMC matrices and keyed A375 feature counts match. UCSF
+  `counts.h5ad` dataset values differ only in provenance paths. Downstream
+  doublet identities/scores differ; the external canonical recipe does not
+  set the seed used in STAR's local R script. Output parity remains open.
+- Both UCSF rows continued after CellBender failed during prior estimation;
+  the successful smoke wrapper exits validate fallback, not GPU denoising.
 - G-S3 is on hold: the legacy Flex recipe fails before mapping, and the
   repeated timing runs require explicit owner approval.
 - Official snapshot digest/count validation passed (11 recipes, 10 evidence
