@@ -15,9 +15,10 @@ if (length(args) != 1) {
 
 h5ad_file <- args[1]
 output_dir <- dirname(h5ad_file)
-scdblfinder_seed <- suppressWarnings(as.integer(Sys.getenv("SCDBLFINDER_SEED", "1")))
-if (is.na(scdblfinder_seed)) {
-  stop("SCDBLFINDER_SEED must be an integer")
+seed_text <- Sys.getenv("SCDBLFINDER_SEED", "1")
+scdblfinder_seed <- suppressWarnings(as.integer(seed_text))
+if (!grepl("^[+-]?[0-9]+$", seed_text) || is.na(scdblfinder_seed)) {
+  stop("SCDBLFINDER_SEED must be a representable R integer")
 }
 
 ad <- read_h5ad(h5ad_file)
@@ -55,11 +56,12 @@ barcode_order <- colnames(sce)
 
 set.seed(scdblfinder_seed)
 message("scDblFinder seed: ", scdblfinder_seed)
-sce <- scDblFinder(sce)
+sce <- scDblFinder(sce, BPPARAM = BiocParallel::SerialParam(RNGseed = scdblfinder_seed))
 result <- list(
   class = stats::setNames(as.character(sce$scDblFinder.class), colnames(sce)),
   score = stats::setNames(as.numeric(sce$scDblFinder.score), colnames(sce))
 )
+writeLines(as.character(scdblfinder_seed), file.path(output_dir, "scdblfinder_seed.txt"))
 
 doublet_results <- data.frame(
   Barcode = barcode_order,

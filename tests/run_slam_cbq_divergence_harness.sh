@@ -4,9 +4,11 @@ set -euo pipefail
 # SLAM FASTQ-vs-CBQ divergence harness.
 #
 # This is intentionally stricter than the GRAND-SLAM correlation smoke. It first
-# proves the FASTQ path is deterministic, then compares ordered CBQ input against
+# proves the FASTQ record content is deterministic, then compares ordered CBQ input against
 # the same FASTQ at progressively later boundaries:
-#   input payload -> SAM body/SJ/log metrics -> SLAM diagnostics -> pre-NTR stats.
+#   input payload -> SAM record multiset/SJ/log metrics -> SLAM diagnostics -> pre-NTR stats.
+# Default outSAMorder=Paired does not promise global read order. Keep order-only
+# differences visible, while requiring exact fields and record multiplicities.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
@@ -240,6 +242,7 @@ fi
 [[ -x "${REQ_BIN}" ]] || skip "slam_requant binary not found: ${REQ_BIN}"
 [[ -f "${SCRIPT_DIR}/slam/compare_star_outputs.py" ]] || die "Missing compare_star_outputs.py"
 
+[[ ! -e "${OUT_BASE}" ]] || die "Refusing to overwrite output root: ${OUT_BASE}"
 mkdir -p "${OUT_BASE}/inputs" "${OUT_BASE}/logs" "${OUT_BASE}/compare" "${OUT_BASE}/stages"
 REPORT="${OUT_BASE}/DIVERGENCE_REPORT.txt"
 STAGE_TSV="${OUT_BASE}/stage_status.tsv"
@@ -326,6 +329,19 @@ compare_star_stage() {
     record_stage "${stage}" "${role}" 0 "exact pre-NTR/NTR match; see ${out}"
   else
     record_stage "${stage}" "${role}" 1 "pre-NTR/NTR mismatch; see ${out}"
+  fi
+}
+
+compare_sam_stage() {
+  local stage="$1" role="$2" ref="$3" test="$4"
+  local report="${OUT_BASE}/compare/${stage}.json"
+  if cmp -s "${ref}" "${test}"; then
+    record_stage "${stage}" "${role}" 0 "exact match"
+  elif python3 "${SCRIPT_DIR}/slam/compare_sam_records.py" "${ref}" "${test}" > "${report}"; then
+    printf '%s\tORDER_ONLY\t%s\tunsorted SAM record multiset exact; see %s\n' \
+      "${stage}" "${role}" "${report}" | tee -a "${STAGE_TSV}" >> "${REPORT}"
+  else
+    record_stage "${stage}" "${role}" 1 "alignment record content differs; see ${report}"
   fi
 }
 
@@ -510,7 +526,7 @@ if [[ "${RUN_THREAD_CONTROL}" == "1" ]]; then
   run_requant fastq_control
 fi
 
-cmp_stage fastq_repeat_sam_body_exact fastq-control \
+compare_sam_stage fastq_repeat_sam_body_exact fastq-control \
   "${OUT_BASE}/stages/fastq_a.sam.body" \
   "${OUT_BASE}/stages/fastq_b.sam.body"
 cmp_stage fastq_repeat_sam_body_sorted fastq-control \
@@ -557,7 +573,7 @@ compare_star_stage cbq_a_weight_replay_pre_ntr internal-replay \
   "${OUT_BASE}/cbq_a/star_SlamQuant.out" \
   "${OUT_BASE}/cbq_a/requant_weight_SlamQuant.out"
 
-cmp_stage fastq_vs_cbq_sam_body_exact cbq-specific \
+compare_sam_stage fastq_vs_cbq_sam_body_exact cbq-specific \
   "${OUT_BASE}/stages/fastq_a.sam.body" \
   "${OUT_BASE}/stages/cbq_a.sam.body"
 cmp_stage fastq_vs_cbq_sam_body_sorted cbq-specific \
@@ -584,7 +600,7 @@ compare_star_stage fastq_vs_cbq_pre_ntr cbq-specific \
   if [[ -z "${FIRST_STAGE}" ]]; then
     printf 'first_divergence=none\n'
     printf 'classification=pass\n'
-    printf 'interpretation=FASTQ controls, CBQ input payload, alignment surfaces, SLAM diagnostics, and pre-NTR stats are exact within configured tolerance.\n'
+    printf 'interpretation=FASTQ controls, CBQ input payload, alignment record multisets, SLAM diagnostics, and pre-NTR stats pass. Unsorted SAM order-only differences are recorded separately.\n'
   elif [[ "${FASTQ_CONTROL_FAILED}" == "1" ]]; then
     printf 'first_divergence=%s\n' "${FIRST_STAGE}"
     printf 'classification=not_cbq_specific\n'

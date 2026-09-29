@@ -2,6 +2,35 @@
 
 Date: 2026-05-15
 
+## Velocyto Compatibility Fix (2026-09-28)
+
+The clean 1.9.5.a and initial 1.10.0 candidate failed the no-BAM OCM composite
+workflow with exit 111:
+`Velocyto's gene-like source did not populate per-read CB/UMI storage.`
+This was an allocation-guard bug, not an inherent OCM/Velocyto limitation:
+inline CB correction skipped per-read storage even when the selected feature
+explicitly required it for Velocyto. The local 1.10.0 branch now honors that
+requirement. The missing-storage guard remains; velocity layers are not omitted.
+
+After a clean rebuild, exact-count synthetic tests pass for plain scRNA,
+inline CB correction and native OCM, in both normal and low-memory modes.
+The real 1,000-read CBQ and FASTQ OCM runs also complete: GeneFull is byte-identical to
+the pre-fix output, and spliced/unspliced/ambiguous counts are 367/106/55, with
+identical gene/barcode axes and all molecules routed across the four samples.
+CBQ and FASTQ `Solo.out`, `outs`, and per-sample output trees are byte-identical.
+The original wrapper then failed an obsolete expectation that CBQ/Y-removal
+preparation must be rejected. That check now validates native CBQ output flags;
+the saved plan passes, without repeating alignment. See the handoff for the
+separate wrapper and post-run validation outcomes.
+
+This fix is local and unreleased, not a claim that the published 1.9.5.a
+binary supports this invocation. Tests: `tests/test_inline_cb_velocyto.py`
+(Tier A) and `tests/run_cbq_ocm_composite_smoke.sh` (local fixtures required).
+Build provenance, results and remaining release gates:
+[1.10 handoff](handoffs/HANDOFF_STAR_1_10_0_HOST_API_20260928.md).
+
+## Historical Workflow
+
 Status: production path implemented for STAR Suite v1.0.0. Use
 `--ocmMultiBarcodeMode flex` for new OCM production; `posthoc` is retained for
 historical comparison and rematerialization only. Current production uses the

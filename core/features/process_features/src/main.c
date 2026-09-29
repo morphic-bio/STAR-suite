@@ -100,10 +100,12 @@ static void print_usage(const char *prog){
     fprintf(stderr, "      --adt-mex                     Alias for --output-mode adt_mex\n");
     fprintf(stderr, "      --hash-demux <yes|no|auto>    Hash demux from hash feature counts (default auto)\n");
     fprintf(stderr, "      --hash-feature-selector SPEC  Select hash rows (feature_type:HTO, id_prefix:hashtag)\n");
-    fprintf(stderr, "      --hash-demux-method <ratio>   Hash demux classifier (default ratio)\n");
+    fprintf(stderr, "      --hash-demux-method <ratio|pair>   Hash demux classifier (default ratio)\n");
     fprintf(stderr, "      --hash-min-total N            Min total hash UMIs (default 3)\n");
     fprintf(stderr, "      --hash-min-top N              Min top hash UMI count (default 3)\n");
     fprintf(stderr, "      --hash-min-ratio X            Singlet top/second ratio (default 2.0)\n\n");
+    fprintf(stderr, "      --hash-sample-table PATH      Pair sample/hash_a/hash_b TSV\n");
+    fprintf(stderr, "      --hash-min-pair-ratio X       Pair second/third ratio (default 2.0)\n");
 
     fprintf(stderr, "Namespace & Compatibility:\n");
     fprintf(stderr, "      --translate_NXT               Complement positions 8 and 9 of cell barcodes at output/filter stages\n");
@@ -282,6 +284,8 @@ int main(int argc, char *argv[])
         {"hash-min-total", required_argument, 0, 48},
         {"hash-min-top", required_argument, 0, 49},
         {"hash-min-ratio", required_argument, 0, 50},
+        {"hash-sample-table", required_argument, 0, 54},
+        {"hash-min-pair-ratio", required_argument, 0, 55},
         {"readFilesBgzfMode", required_argument, 0, 51},
         {"bgzfReaderThreads", required_argument, 0, 52},
         {"bgzfCrcCheck", required_argument, 0, 53},
@@ -471,6 +475,16 @@ int main(int argc, char *argv[])
             case 50:
                 hash_min_ratio = atof(optarg);
                 break;
+            case 54:
+                if (strlen(optarg) >= sizeof(hash_sample_table)) return 1;
+                strcpy(hash_sample_table, optarg);
+                break;
+            case 55: {
+                char *end = NULL;
+                hash_min_pair_ratio = strtod(optarg, &end);
+                if (end == optarg || *end) return 1;
+                break;
+            }
             case 'h': print_usage(argv[0]); return 0;
             default: print_usage(argv[0]); return 1;
         }
@@ -843,6 +857,8 @@ int main(int argc, char *argv[])
             args.hash_min_total = hash_min_total;
             args.hash_min_top = hash_min_top;
             args.hash_min_ratio = hash_min_ratio;
+            args.hash_sample_table = hash_sample_table;
+            args.hash_min_pair_ratio = hash_min_pair_ratio;
             args.error_out = &child_error;
             struct chem_detect_state chem_detect_buf;
             if (autodetect_chemistry_cli) {

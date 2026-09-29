@@ -10,7 +10,7 @@ REMOTE_ROOT="${REMOTE_ROOT:-/home/lhhung/ucsf_remote_cellbender_smoke}"
 SOURCE_DOWNSTREAM_DIR="${SOURCE_DOWNSTREAM_DIR:-${REPO_ROOT}/tests/ucsf_corrected_production_100k_output_20260329_171919/samples/EBs2_2/downstream_genefull_velocyto_cellbender}"
 CELLBENDER_IMAGE="${CELLBENDER_IMAGE:-biodepot/cellbender:0.3.2}"
 CELLBENDER_CPU_CORES="${CELLBENDER_CPU_CORES:-8}"
-CELLBENDER_GPU="${CELLBENDER_GPU:-0}"
+CELLBENDER_GPU="${CELLBENDER_GPU:-1}"
 CELLBENDER_GPU_DEVICE="${CELLBENDER_GPU_DEVICE:-}"
 NO_SYNC_IMAGE="${NO_SYNC_IMAGE:-1}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
@@ -19,6 +19,7 @@ LOG_FILE="${REPO_ROOT}/tests/remote_cellbender_100k_smoke_${STAMP}.log"
 
 [[ -x "${RUNNER}" ]] || { echo "ERROR: missing runner ${RUNNER}" >&2; exit 1; }
 [[ -d "${SOURCE_DOWNSTREAM_DIR}" ]] || { echo "ERROR: missing source downstream dir ${SOURCE_DOWNSTREAM_DIR}" >&2; exit 1; }
+[[ "${CELLBENDER_GPU}" == "1" ]] || { echo "ERROR: this CellBender smoke requires CUDA" >&2; exit 1; }
 
 mkdir -p "${SMOKE_DIR}"
 for rel in \
@@ -64,8 +65,8 @@ fi
 "${RUNNER}" \
   "${RUNNER_ARGS[@]}"
 
-if [[ ! -f "${SMOKE_DIR}/cellbender/cellbender_counts.h5" && ! -f "${SMOKE_DIR}/cellbender/CELLBENDER_FAILED.txt" ]]; then
-  echo "ERROR: expected remote CellBender output or failure note in ${SMOKE_DIR}/cellbender" >&2
+if [[ -f "${SMOKE_DIR}/cellbender/CELLBENDER_FAILED.txt" || ! -s "${SMOKE_DIR}/cellbender/cellbender_counts.h5" ]]; then
+  echo "ERROR: remote CellBender failed; fallback output is not a passing smoke" >&2
   exit 1
 fi
 

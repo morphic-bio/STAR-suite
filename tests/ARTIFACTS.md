@@ -4,6 +4,50 @@ This file tracks where **test outputs and artifacts** should live and what is
 expected to be **untracked** in git. If you add a new smoke/regression test,
 update this file with its output location.
 
+## Host API 1.10 Release Gates (2026-09-28)
+
+- Local rc1 source handoff:
+  `/mnt/pikachu/star_suite_v1100_gates_20260928/releases/v1.10.0-rc1/`.
+  `LOCAL_RC.json` pins tag/commit/tree and gate evidence; source archive and
+  `SHA256SUMS` remain untracked. This is not a binary release or publication.
+- September 29 follow-up: `acceptance_20260928/` under the gate root holds
+  the fresh container build, SLAM repeats, seeded H5AD comparisons, repaired
+  UCSF fixture, host-API/Tier A checks and TranscriptVB repeatability controls.
+  One-off command drivers are in the root's `tools/`. See
+  `docs/VALIDATION_STAR_1_10_0_20260929.md` and `VALIDATION_STATUS_v3.json`
+  for current G-S1/G-S2/G-S3 acceptance. Original failures and superseded
+  diagnostic reports remain.
+- `tests/host_api/compare_h5ad_values.py` writes a new `--report` JSON and
+  refuses overwrites. Its unit tests use automatically removed temporary
+  HDF5 files. `tests/slam/compare_sam_records.py` prints a read-only comparison
+  report; its unit tests use in-memory byte strings.
+- Local gate binaries, captured outputs, status tables, and comparisons belong
+  under `/mnt/pikachu/star_suite_v1100_gates_20260928/`, not in git. The initial
+  session scratch location is recorded in the 1.10 host-API handoff.
+- `tests/host_api/audit_gate_batch.py` reads an existing G-S1 batch and writes
+  an optional, new JSON report via `--report`. It never runs a workload and
+  refuses to overwrite a report. Passing this execution audit is not a claim
+  of output parity or passing performance gates.
+- `tests/host_api/test_audit_gate_batch.py` uses temporary
+  `/tmp/star-host-gate-audit-*` fixtures, removed automatically.
+- The follow-up tools and outputs remain under the same artifact root:
+  `followup_20260928/` preserves saved-telemetry validation, historical Flex
+  replay builds, and the explicit-legacy-caller E2E runs. Original gate
+  results are not overwritten or retrospectively relabeled as passing.
+- `tests/test_pf_dynamic_permit_validation.py` uses temporary
+  `/tmp/pf_permit_validation_*` fixtures, removed automatically, without STAR.
+- `tests/test_inline_cb_velocyto.py` writes its synthetic reference, FASTQs,
+  commands, and counts to `--outdir` or `/tmp/star-inline-velo-*`. For the
+  storage-fix investigation, see `ocm_storage_before*` and
+  `ocm_storage_fix_validation/` under the gate artifact root. The initial
+  control fixture needed CR multimapper rescue for transcript annotations
+  and a filtered-barcode source; that failed setup is preserved separately.
+- `ocm_storage_fix_validation/` also retains `STAR.tested`, the completed CBQ
+  and FASTQ outputs, the ordinary-GEX control and the original wrapper's
+  stale Y-removal rejection failure. Read-only `--validate-yremove-plan`
+  checks the saved preparation scripts without overwriting or running STAR.
+  Individual validation outcomes are recorded in the 1.10 host-API handoff.
+
 ## Source Build Regressions (2026-09-27)
 
 - `tests/test_htslib_build_discovery.py`: temporary `star-htslib-build-test-*`
@@ -1847,10 +1891,75 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
 - Packed-count unit binary: `core/legacy/test/test_flex_probe_region`;
   generated binaries, matrices, caches and logs are not committed.
 
+## DOGMA-plex pair demux (2026-09-26)
+
+- `tests/multi_feature/test_hash_pair_demux_pf_multi.sh` creates synthetic
+  native count/output and pf-multi config fixtures under `/tmp/hash_pair_test.*`
+  and removes them on exit. No biological data required.
+- Local build, regression and composition validation logs live under
+  `/mnt/pikachu/dogmaplex_gse309834/`, outside git.
+
+- `tests/test_ambient_fdr_feature_type.sh` creates and removes
+  `/tmp/celltag_ambient_test.*`, testing CellTag selection alongside real guides.
+
+## Host interface tests (1.10.0)
+
+- `tests/test_reproducible_library_builds.py` creates isolated
+  `/tmp/star-library-build-test-*` compiler probes and dry-run build inputs;
+  they are removed on exit.
+- `/mnt/pikachu/star_suite_v1100_gates_20260928/deterministic_build_fix_20260929/`:
+  fresh source export, strict compiler launchers, build log and targeted
+  EmptyDrops/host API/TranscriptVB validation for the post-rc1 build fixes.
+
+- `tests/host_api/run_host_api_tests.sh` (`make host-api-tests`) writes the
+  test host, the synthetic scRNA fixtures and all STAR/host outputs under a
+  fresh `/tmp/star-host-api.*`, or under `HOST_API_TEST_OUT` when set. It does
+  not remove them; nothing is committed.
+# STAR 1.10.0 gate follow-up (2026-09-28)
+
+- `/mnt/pikachu/star_suite_v1100_gates_20260928/acceptance_20260928/`:
+  clean same-container candidate, host/Tier A checks, corrected UCSF fixture,
+  seeded downstream and strict ordered single-thread TranscriptVB controls.
+  `single_thread_acceptance/ordered_parity.json` records all 27 exact checks;
+  `binseq_single_thread/` keeps exact one-thread decoded mates/probe records;
+  `kept_output_disposition_v2.json` closes the earlier output audit.
+  Original failures and multi-thread diagnostics are preserved, not overwritten.
+- `/mnt/pikachu/star_suite_v1100_gates_20260928/{gs3_acceptance,gs3_remaining}/`: authorized
+  serialized three-repeat performance executions, host-load records and GNU
+  time logs. The eighteen output signatures match and all medians meet limits.
+  `acceptance_20260928/gs3_report.json` preserves the original strict-policy hold;
+  `acceptance_20260928/gs3_report_v2.json` records acceptance under the owner's clarified policy
+  that host flags are diagnostic within tolerance. No benchmarks were rerun.
+  `G_S3_ACCEPTED.json` and `acceptance_20260928/VALIDATION_STATUS_v3.json` record
+  current acceptance. One-off saved-evidence logic and ten synthetic tests:
+  `tools/{reassess_gs3,test_reassess_gs3}.py` under the same gate artifact root.
+  `gs3_remaining/BATCH_EXIT_DISPOSITION.md` records the trailing shell-driver
+  error; `gs3_round3/` records a cancelled resume with no data execution.
+  `driver_snapshots/` holds read-only driver/helper copies for future approved
+  runs. Completion is not an acceptance verdict.
+- `tests/run_transcriptvb_scatter_gather_smoke.sh` accepts `THREADS` (default
+  4; use 1 for order-sensitive cross-version controls) and `OUT_ROOT` (must
+  not exist). Explicit output roots are retained; default temporary outputs
+  are removed on exit.
+
+- `/mnt/pikachu/star_suite_v1100_gates_20260928/fixes_20260928/`: permit stress,
+  clean-build logs, historical policy-versioned replay, modern H0/H1X2 100K
+  comparison, seeded saved-MEX downstream and five-epoch CUDA/layer smoke.
+  Experimental legacy-routing code/binary and failed matrices are retained here,
+  not in the release source. See the 1.10.0 handoff for disposition.
+- `/mnt/pikachu/star_suite_v1100_gates_20260928/flex_modern_reference_v195a/`:
+  preserved completed 1.9.5.a JAX 8 x 100K half-probe reference output; original
+  `/tmp/star-flex-removal-20260927/jax-parity/B`. Not a new reference execution.
+- `/tmp/star_cellbender_cuda_*/`, `/tmp/star_flex_half_probe_100k_*/`,
+  `/tmp/downstream_contract_*/`, `/tmp/flex_mex_compare_*/`: default isolated
+  smoke/unit outputs. CUDA smoke outputs are not production denoising releases.
+
 ## Launchpad portability (2026-09-29)
 
 - `tests/launchpad_portability_output/`: ignored build/test logs and installed
-  Chromium UI screenshot for the 1.9.5.b candidate.
+  Chromium UI screenshots for the 1.9.5.b candidate and its 1.10 merge.
+  The 1.10 merge also records `build-v110.log`, `merge-tests-v110.log` and
+  `native-v110-check.json` here.
 - Pytest temporary directories contain relocated payloads, synthetic reference
   files, tiny fixture executables, recipe previews, and job records. No biological
   dataset was processed by these tests.

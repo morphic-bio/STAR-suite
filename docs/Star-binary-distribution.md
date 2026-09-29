@@ -4,6 +4,30 @@
 
 Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction install and clear provenance.
 
+## Minor Release v1.10.0 (2026-09-29)
+
+- Release tag: `v1.10.0`; notes: `docs/RELEASE_NOTES_v1.10.0.md`. The tag is
+  the validated `v1.10.0-rc2` source plus one documentation-only commit.
+- Debian source version: `1.10.0-1`; Ubuntu binaries:
+  `1.10.0-1~ubuntu22.04.1` and `1.10.0-1~ubuntu24.04.1`.
+- Scope: remove every dependency on other suites (STAR no longer links
+  Chromap Suite or RapidMACS; the multiome binary moves to Multiomics Suite);
+  add the generic host interface and `make star-host-lib`; add paired hashtag
+  demultiplexing and per-library ambient-FDR feature calling.
+- `make core` builds with bundled HTSlib and without Chromap or RapidMACS;
+  `core-portable` remains an alias and `HTSLIB=external` selects an installed
+  HTSlib. Hosted tarballs, Debian packages and the Docker image were already
+  built without Chromap.
+- `STAR --version` reports `1.10.0`; upstream and genome compatibility remain
+  `2.7.11b` and `2.7.4a`. Existing indexes do not need rebuilding.
+- The bundled catalog is still the pinned 1.9.5 snapshot. Its six multiome
+  recipes need the Multiomics Suite executable and are not supported with
+  standalone STAR 1.10. Snapshot integrity passes (11 recipes, 10 evidence
+  records).
+- Gate evidence: [validation](VALIDATION_STAR_1_10_0_20260929.md), the
+  [1.10 handoff](handoffs/HANDOFF_STAR_1_10_0_HOST_API_20260928.md) and the
+  release notes.
+
 ## Implementation Status (2026-02-14)
 
 - Phase 1 (Packaging Foundation): **implemented (initial)**

@@ -1,5 +1,5 @@
 #include "BAMfunctions.h"
-#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#if defined(STAR_EXTERNAL_HTSLIB) && STAR_EXTERNAL_HTSLIB
 #include <htslib/kstring.h>
 #else
 #include "htslib/htslib/kstring.h"

@@ -10,7 +10,7 @@ def read_lines(path):
         return [line.rstrip("\n") for line in handle]
 
 
-def read_mex(directory):
+def read_mex(directory, matrix_name="matrix.mtx"):
     directory = Path(directory)
     features = read_lines(directory / "features.tsv")
     barcodes = read_lines(directory / "barcodes.tsv")
@@ -22,7 +22,7 @@ def read_mex(directory):
 
     counts = {}
     dimensions = None
-    with open(directory / "matrix.mtx", "r", encoding="utf-8") as handle:
+    with open(directory / matrix_name, "r", encoding="utf-8") as handle:
         for line in handle:
             if line.startswith("%"):
                 continue
@@ -109,7 +109,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("baseline")
     parser.add_argument("current")
-    parser.add_argument("--samples", default="BC004,BC006,BC007,BC008")
+    parser.add_argument("--samples", default="auto",
+                        help="Comma-separated required sample names, or auto to compare the emitted sample set")
     parser.add_argument("--max-mismatch-fraction", type=float, default=0.002)
     parser.add_argument("--max-count-delta-fraction", type=float, default=0.002)
     parser.add_argument("--max-barcode-difference-fraction", type=float, default=0.001)
@@ -122,7 +123,18 @@ def main():
         Path(args.current) / "Solo.out/Gene/raw",
         args,
     )
-    for sample in (value for value in args.samples.split(",") if value):
+    if args.samples == "auto":
+        sample_sets = []
+        for root in (args.baseline, args.current):
+            sample_sets.append({path.name for path in (Path(root) / "per_sample").glob("*")
+                               if path.is_dir()})
+        if sample_sets[0] != sample_sets[1]:
+            raise AssertionError(f"emitted per-sample sets differ: {sample_sets}")
+        samples = sorted(sample_sets[0])
+        print(f"emitted_samples={','.join(samples) or '<none>'}")
+    else:
+        samples = [value for value in args.samples.split(",") if value]
+    for sample in samples:
         compare_one(
             sample,
             Path(args.baseline) / f"per_sample/{sample}/Gene/filtered",

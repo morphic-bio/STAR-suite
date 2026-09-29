@@ -57,6 +57,7 @@ int main(int argc, char** argv) {
             "  --summary                 print summary stats\n"
             "  --stats                   print tier composition from cache\n"
             "  --h2-scan                 estimate H2 coverage for PASS reads\n"
+            "  --legacy-negative-policy  replay pre-September-2026 alignment fallback\n"
             "  --diff <out.tsv>          write per-read mismatch details\n",
             argv[0]);
         return 1;
@@ -67,6 +68,7 @@ int main(int argc, char** argv) {
     enum { ModeFlat, ModeTiered, ModeBoth } mode = ModeBoth;
     bool showStats = false;
     bool h2Scan = false;
+    bool legacyNegativePolicy = false;
     const char* diffPath = nullptr;
 
     for (int i = 3; i < argc; ++i) {
@@ -82,6 +84,8 @@ int main(int argc, char** argv) {
             showStats = true;
         } else if (strcmp(argv[i], "--h2-scan") == 0) {
             h2Scan = true;
+        } else if (strcmp(argv[i], "--legacy-negative-policy") == 0) {
+            legacyNegativePolicy = true;
         } else if (strcmp(argv[i], "--diff") == 0 && i + 1 < argc) {
             diffPath = argv[++i];
         }
@@ -98,6 +102,9 @@ int main(int argc, char** argv) {
 
     FlatCache flat;
     TieredCache tiered;
+    flat.setLegacyNegativePolicy(legacyNegativePolicy);
+    tiered.setLegacyNegativePolicy(legacyNegativePolicy);
+    printf("Negative policy: %s\n", legacyNegativePolicy ? "legacy-alignment" : "certified-cache");
 
     bool runFlat   = (mode == ModeFlat || mode == ModeBoth);
     bool runTiered = (mode == ModeTiered || mode == ModeBoth);

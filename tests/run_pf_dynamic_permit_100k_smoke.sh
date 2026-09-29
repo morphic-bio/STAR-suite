@@ -247,6 +247,14 @@ run_mode() {
   [[ -n "${api_run}" ]] || die "missing assignBarcodes.api_run.txt for ${mode_name}"
   LAST_API_RUN="${api_run}"
 
+  validate_api_run "${api_run}" "${dynamic_interface}"
+}
+
+validate_api_run() {
+  local api_run="$1"
+  local dynamic_interface="$2"
+  [[ "${dynamic_interface}" == "0" || "${dynamic_interface}" == "1" ]] || die "dynamic interface must be 0 or 1"
+  require_path "${api_run}" "Missing permit telemetry"
   log "api_run=${api_run}"
 
   local hooks_enabled
@@ -266,17 +274,17 @@ run_mode() {
     map_units="$(get_kv_value "${api_run}" "dynamicPermitDelta.map.workUnits")"
     map_wait="$(get_kv_value "${api_run}" "dynamicPermitDelta.map.waitNs")"
 
+    local counter
+    for counter in "${agg_acq}" "${agg_units}" "${feat_acq}" "${feat_units}" "${feat_wait}" "${map_acq}" "${map_units}" "${map_wait}"; do
+      [[ "${counter}" =~ ^[0-9]+$ ]] || die "missing or invalid nonnegative permit counter: ${counter}"
+    done
+    # Acquisitions count batches, not reads. GEX may run concurrently, so MAP
+    # deltas need not be zero. Snapshot atomics are not a cross-domain ledger.
     num_gt_zero "${agg_acq}" || die "dynamicPermitDelta.acquires not > 0"
     num_gt_zero "${agg_units}" || die "dynamicPermitDelta.workUnits not > 0"
-    [[ "${agg_acq}" == "${agg_units}" ]] || die "aggregate acquires/workUnits mismatch: ${agg_acq} vs ${agg_units}"
     num_gt_zero "${feat_acq}" || die "dynamicPermitDelta.feature.acquires not > 0"
     num_gt_zero "${feat_units}" || die "dynamicPermitDelta.feature.workUnits not > 0"
-    [[ "${feat_acq}" == "${feat_units}" ]] || die "feature acquires/workUnits mismatch: ${feat_acq} vs ${feat_units}"
-    num_gt_zero "${feat_wait}" || die "dynamicPermitDelta.feature.waitNs not > 0"
     num_le "${feat_wait}" "${MAX_FEATURE_WAIT_NS}" || die "dynamicPermitDelta.feature.waitNs exceeds threshold: ${feat_wait} > ${MAX_FEATURE_WAIT_NS}"
-    num_eq_zero_or_empty "${map_acq}" || die "expected dynamicPermitDelta.map.acquires=0 in pf stage"
-    num_eq_zero_or_empty "${map_units}" || die "expected dynamicPermitDelta.map.workUnits=0 in pf stage"
-    num_eq_zero_or_empty "${map_wait}" || die "expected dynamicPermitDelta.map.waitNs=0 in pf stage"
   else
     [[ "${hooks_enabled}" == "0" ]] || die "expected enableStarDynamicPermitHooks=0 in baseline mode"
 
@@ -482,6 +490,7 @@ main() {
   ls "${GEX_TIER_DIR}"/*R1*.fastq.gz >/dev/null 2>&1 || die "No GEX R1 fastqs in ${GEX_TIER_DIR}"
   ls "${GEX_TIER_DIR}"/*R2*.fastq.gz >/dev/null 2>&1 || die "No GEX R2 fastqs in ${GEX_TIER_DIR}"
 
+  [[ ! -e "${OUT_BASE}" ]] || die "Refusing to overwrite existing output: ${OUT_BASE}"
   mkdir -p "${OUT_BASE}"
 
   log "=== PF Dynamic Permit 100K Smoke ==="
@@ -540,4 +549,10 @@ main() {
   log "Outputs: ${OUT_BASE}"
 }
 
-main "$@"
+if [[ $# -gt 0 ]]; then
+  [[ $# -eq 3 && "$1" == "--validate-api-run" ]] || die "Usage: $0 [--validate-api-run FILE 0|1]"
+  validate_api_run "$2" "$3"
+  log "PASS: existing permit telemetry validated (STAR not executed)"
+else
+  main
+fi

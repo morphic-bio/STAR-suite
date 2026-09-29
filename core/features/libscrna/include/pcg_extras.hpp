@@ -610,10 +610,9 @@ public:
 };
 
 /*
- * Sometimes you might want a distinct seed based on when the program
- * was compiled.  That way, a particular instance of the program will
- * behave the same way, but when recompiled it'll produce a different
- * value.
+ * STAR Suite modification: keep this compatibility helper deterministic
+ * across compilation times and source locations. The scientific samplers
+ * supply explicit seeds and do not use this arbitrary-seed helper.
  */
 
 template <typename IntType>
@@ -627,7 +626,7 @@ private:
 
 public:
     static constexpr IntType value = fnv(IntType(2166136261U ^ sizeof(IntType)),
-                        __DATE__ __TIME__ __FILE__);
+                        "STAR Suite PCG seed v1");
 };
 
 // Sometimes, when debugging or testing, it's handy to be able print the name

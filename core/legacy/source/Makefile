@@ -46,63 +46,36 @@ LIBSCRNA_DIR := $(ROOT_DIR)/core/features/libscrna
 LIBSCRNA_INC := $(LIBSCRNA_DIR)/include
 LIBSCRNA_LIB := $(LIBSCRNA_DIR)/libscrna.a
 
-# In-process Chromap is the default STAR-suite build because production
-# multiome workflows depend on it. Use WITH_CHROMAP=0 only for explicit
-# portable/no-Chromap compatibility builds.
-WITH_CHROMAP ?= 1
-CHROMAP_ORCH_CPP_REAL := star_chromap_orchestration.cpp
-CHROMAP_ORCH_CPP_STUB := star_chromap_orchestration_stub.cpp
-LIBCHROMAP_CONTRACT_DIR := $(ROOT_DIR)/core/features/libchromap_contract
-LIBCHROMAP_CONTRACT_INC := $(LIBCHROMAP_CONTRACT_DIR)/include
-LIBCHROMAP_CONTRACT_LIB := $(LIBCHROMAP_CONTRACT_DIR)/libstar_chromap_contract.a
-CHROMAP_SUITE_DIR ?= $(abspath $(ROOT_DIR)/../Chromap-suite)
-CHROMAP_LIB := $(CHROMAP_SUITE_DIR)/libchromap.a
-CHROMAP_RAPIDMACS_LIB ?= $(CHROMAP_SUITE_DIR)/third_party/rapidmacs/lib/librapidmacs.a
+# HTSlib selection.
+#   HTSLIB=bundled  (default) compile and link STAR's vendored HTSlib.
+#   HTSLIB=external compile against and link an installed HTSlib found with
+#                   pkg-config (override with HTSLIB_CFLAGS / HTSLIB_LIBS).
+# A host program that links libstar_suite.a together with other libraries
+# built against an installed HTSlib should use HTSLIB=external so that one
+# HTSlib ABI is used throughout the executable.
+HTSLIB ?= bundled
 PKG_CONFIG ?= pkg-config
-# Keep external HTSlib headers and linking paired; do not fall back to STAR's
-# older bundled headers when linking Chromap/system HTSlib.
-CHROMAP_HTSLIB_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags htslib 2>/dev/null)
-CHROMAP_SYS_HTS ?= $(shell $(PKG_CONFIG) --libs htslib 2>/dev/null || printf '%s' '-lhts')
-CHROMAP_EXTRA_LIBS := -lbz2 -llzma -lcurl -ldeflate -lm
-CHROMAP_DEP_STAMP := .depend.with_chromap_$(WITH_CHROMAP)
+HTSLIB_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags htslib 2>/dev/null)
+HTSLIB_LIBS ?= $(shell $(PKG_CONFIG) --libs htslib 2>/dev/null || printf '%s' '-lhts')
+HTSLIB_DEP_STAMP := .depend.htslib_$(HTSLIB)
 
-ifeq ($(WITH_CHROMAP),1)
-CHROMAP_CXXFLAGS := -I$(LIBCHROMAP_CONTRACT_INC) -DWITH_CHROMAP=1
-CHROMAP_ORCH_OBJ := star_chromap_orchestration.o
-CHROMAP_LINK_LINE := $(LIBCHROMAP_CONTRACT_LIB) $(CHROMAP_LIB) $(CHROMAP_RAPIDMACS_LIB) $(LIBSCRNA_LIB) $(CHROMAP_SYS_HTS) $(CHROMAP_EXTRA_LIBS)
-CHROMAP_STAR_DEPS := $(LIBCHROMAP_CONTRACT_LIB) $(CHROMAP_LIB) $(CHROMAP_RAPIDMACS_LIB)
-STAR_HTSLIB_INC := $(CHROMAP_HTSLIB_CFLAGS)
-STAR_HTSLIB_LINK :=
-STAR_HTSLIB_DEPS :=
-STAR_BUILD_CHECK := check-core-dependencies
-CHROMAP_SOURCE_REQUIRED := $(filter STAR$(SFX) STARstatic$(SFX) gdb check-core-dependencies,$(MAKECMDGOALS))
-else
-CHROMAP_CXXFLAGS := -DWITH_CHROMAP=0
-CHROMAP_ORCH_OBJ := star_chromap_orchestration_stub.o
-CHROMAP_LINK_LINE :=
-CHROMAP_STAR_DEPS :=
+ifeq ($(HTSLIB),bundled)
+STAR_HTSLIB_CXXFLAGS := -DSTAR_EXTERNAL_HTSLIB=0
 STAR_HTSLIB_INC := -Ihtslib
 STAR_HTSLIB_LINK := -Lhtslib -Bstatic -lhts -Bdynamic
 STAR_HTSLIB_DEPS := htslib/libhts.a
 STAR_BUILD_CHECK :=
-endif
-
-ifeq ($(WITH_CHROMAP),1)
-CHROMAP_UNSUPPORTED_TARGET := chromap-unsupported-target
+else ifeq ($(HTSLIB),external)
+STAR_HTSLIB_CXXFLAGS := -DSTAR_EXTERNAL_HTSLIB=1
+STAR_HTSLIB_INC := $(HTSLIB_CFLAGS)
+STAR_HTSLIB_LINK := $(HTSLIB_LIBS)
+STAR_HTSLIB_DEPS :=
+STAR_BUILD_CHECK := check-external-htslib
 else
-CHROMAP_UNSUPPORTED_TARGET :=
+$(error HTSLIB must be 'bundled' or 'external', got '$(HTSLIB)')
 endif
 
-.PHONY: FORCE
-FORCE:
-
-# Dependency scan must not preprocess the Chromap .cpp when building stub-only STAR.
 SRC_CPP_ROOT := $(wildcard *.cpp)
-ifeq ($(WITH_CHROMAP),1)
-SRC_CPP_ROOT := $(filter-out $(CHROMAP_ORCH_CPP_STUB),$(SRC_CPP_ROOT))
-else
-SRC_CPP_ROOT := $(filter-out $(CHROMAP_ORCH_CPP_REAL),$(SRC_CPP_ROOT))
-endif
 
 VPATH := $(FLEX_SRC_DIR) $(SLAM_SRC_DIR) $(SLAM_LIBEM_DIR) $(VBEM_SRC_DIR) $(BAMSORT_SRC_DIR)
 
@@ -185,7 +158,7 @@ endif
 # Include flex (klib/libflex), vbem (libtrim/libem), slam, and process_features headers
 # Include current directory for IncludeDefine.h and other source headers
 PROCESS_FEATURES_INC := $(ROOT_DIR)/core/features/process_features/include
-CXXFLAGS_common := -std=c++11 -fopenmp -I. $(STAR_HTSLIB_INC) -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(CHROMAP_CXXFLAGS) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF) $(STAR_SUITE_SOURCE_REVISION)
+CXXFLAGS_common := -std=c++11 -fopenmp -I. $(STAR_HTSLIB_INC) -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(STAR_HTSLIB_CXXFLAGS) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF) $(STAR_SUITE_SOURCE_REVISION)
 CXXFLAGS_main := -O3 $(CXXFLAGS_common)
 CXXFLAGS_gdb := -O0 -g3 $(CXXFLAGS_common)
 
@@ -229,7 +202,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	SpliceGraph_findSuperTr.o sjAlignSplit.o \
 	GTF.o GTF_transcriptGeneSJ.o GTF_superTranscript.o SuperTranscriptome.o TranscriptomeFasta.o \
 	ReadAlign_outputAlignments.o ReadAlign_resolveAmbiguousCBs.o ReadAlign_slamQuant.o \
-		ReadAlign.o STAR.o TranscriptQuantEC.o TranscriptVBSidecar.o LibFormatDetection.o TranscriptQuantOutput.o SlamQuant.o SlamSolver.o slam_vb_overdisp.o SlamCompat.o SlamVarianceAnalysis.o SlamReadBuffer.o SlamDump.o SlamQcOutput.o TrimQc.o TrimQcOutput.o TrimQcShard.o SnpMaskBuild.o \
+		ReadAlign.o STARmain.o STAR.o StarHost.o TranscriptQuantEC.o TranscriptVBSidecar.o LibFormatDetection.o TranscriptQuantOutput.o SlamQuant.o SlamSolver.o slam_vb_overdisp.o SlamCompat.o SlamVarianceAnalysis.o SlamReadBuffer.o SlamDump.o SlamQcOutput.o TrimQc.o TrimQcOutput.o TrimQcShard.o SnpMaskBuild.o \
 	SharedMemory.o PackedArray.o SuffixArrayFuns.o Parameters.o Parameters_samAttributes.o InOutStreams.o SequenceFuns.o Genome.o ParametersGenome.o Stats.o \
 	Transcript.o Transcript_alignScore.o Transcript_generateCigarP.o Chain.o \
 	Transcript_variationAdjust.o Variation.o ReadAlign_waspMap.o \
@@ -259,7 +232,6 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	ProbeListIndex.o \
 	SampleDetector.o \
 	SoloBamParsing.o \
-	$(CHROMAP_ORCH_OBJ) \
 	ZGZXTags.o \
 	FlexProbeIndex.o \
 	CellRangerFormatter.o \
@@ -268,7 +240,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	CbUbTagInjector.o
 
 # Unit tests for CR-compat regression components (built as a single binary)
-OBJECTS_NO_MAIN := $(filter-out STAR.o,$(OBJECTS))
+OBJECTS_NO_MAIN := $(filter-out STAR.o STARmain.o,$(OBJECTS))
 COMPAT_UNIT_TEST_SRC := $(ROOT_DIR)/tests/compat/test_cr_compat_components.cpp
 
 .PHONY: compat-unit-tests
@@ -281,15 +253,15 @@ OCM_UNIT_TEST_SRC := $(ROOT_DIR)/tests/test_ocm_multi_unit.cpp
 .PHONY: ocm-multi-unit-tests
 ocm-multi-unit-tests : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 ocm-multi-unit-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-ocm-multi-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features_integrated $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS) $(OCM_UNIT_TEST_SRC)
-	$(CXX) -o ocm_multi_unit_tests $(CXXFLAGS) $(OCM_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
+ocm-multi-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features_integrated $(LIBSCRNA_LIB) $(OCM_UNIT_TEST_SRC)
+	$(CXX) -o ocm_multi_unit_tests $(CXXFLAGS) $(OCM_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
 SLAM_FIT_TEST_SRC := $(ROOT_DIR)/tests/slam/test_slam_fit_reuse.cpp
 .PHONY: slam-fit-reuse-tests
 slam-fit-reuse-tests : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 slam-fit-reuse-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-slam-fit-reuse-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features_integrated $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS) $(SLAM_FIT_TEST_SRC)
-	$(CXX) -o slam_fit_reuse_tests $(CXXFLAGS) $(SLAM_FIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
+slam-fit-reuse-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features_integrated $(LIBSCRNA_LIB) $(SLAM_FIT_TEST_SRC)
+	$(CXX) -o slam_fit_reuse_tests $(CXXFLAGS) $(SLAM_FIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
 # Standalone sidecar gather parity harness. Links only the sidecar reader and
 # libem: no Genome, no suffix array, no STAR index. Demonstrates the gather half
@@ -444,17 +416,9 @@ cbq-star-adapter-harness : CbqInputModule.o CbqStarAdapter.o SequenceFuns.o Clip
 # in-memory record API without routing CBQ through temporary FASTQ files.
 .PHONY: cbq-pf-adapter-harness
 cbq-pf-adapter-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
-cbq-pf-adapter-harness : LDFLAGS_PF := $(LDFLAGSextra) -L$(PROCESS_FEATURES_DIR) -lprocess_features -L$(LIBSCRNA_DIR) -lscrna $(CHROMAP_SYS_HTS) -lm -lpthread -lz -fopenmp -ldl
+cbq-pf-adapter-harness : LDFLAGS_PF := $(LDFLAGSextra) -L$(PROCESS_FEATURES_DIR) -lprocess_features -L$(LIBSCRNA_DIR) -lscrna $(HTSLIB_LIBS) -lm -lpthread -lz -fopenmp -ldl
 cbq-pf-adapter-harness : CbqInputModule.o libprocess_features $(LIBSCRNA_LIB) input/cbq_pf_adapter_harness.cpp
 	$(CXX) -o cbq_pf_adapter_harness $(CXXFLAGS) input/cbq_pf_adapter_harness.cpp CbqInputModule.o $(LDFLAGS_PF)
-
-# Standalone Chromap input adapter harness. Chromap's current contract accepts
-# FASTQ paths, so this materializes synchronized R1/R2/barcode FASTQs from CBQ.
-.PHONY: cbq-chromap-adapter-harness
-cbq-chromap-adapter-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
-cbq-chromap-adapter-harness : LDFLAGS := $(LDFLAGSextra) -ldl
-cbq-chromap-adapter-harness : CbqInputModule.o CbqChromapAdapter.o input/cbq_chromap_adapter_harness.cpp
-	$(CXX) -o cbq_chromap_adapter_harness $(CXXFLAGS) input/cbq_chromap_adapter_harness.cpp CbqChromapAdapter.o CbqInputModule.o $(LDFLAGS)
 
 # Standalone star_feature_call tool for perturb-seq processing
 # Requires libprocess_features.a to be built first
@@ -528,8 +492,8 @@ test_autocksum: CellRangerFormatter.o
 # Once the loader abstraction is introduced, consider extracting a smaller test lib to reduce build time.
 test_SoloReadInfoBaseline: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_SoloReadInfoBaseline: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/SoloReadInfoBaseline_test.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/solo_readinfo_baseline
+test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/SoloReadInfoBaseline_test.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/solo_readinfo_baseline
 	../test/solo_readinfo_baseline
 
 .PHONY: test
@@ -621,9 +585,9 @@ test_complex_barcode_whitelist_lookup:
 .PHONY: test_MinimalSink
 test_MinimalSink: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_MinimalSink: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-test_MinimalSink: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
+test_MinimalSink: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
 ifeq ($(STAR_TEST_SKIP_TXOME),)
-	$(CXX) $(CXXFLAGS) ../test/MinimalSink_test.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/minimal_sink_test
+	$(CXX) $(CXXFLAGS) ../test/MinimalSink_test.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/minimal_sink_test
 	../test/minimal_sink_test
 else
 	@echo "Skipping MinimalSink_test due to STAR_TEST_SKIP_TXOME=1 or missing STAR_TXOME_DIR"
@@ -632,16 +596,16 @@ endif
 .PHONY: test_SoloReadInfoLoader
 test_SoloReadInfoLoader: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_SoloReadInfoLoader: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-test_SoloReadInfoLoader: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/SoloReadInfoLoader_test.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/solo_readinfo_loader
+test_SoloReadInfoLoader: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/SoloReadInfoLoader_test.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/solo_readinfo_loader
 	../test/solo_readinfo_loader
 
 # Parity test (loader minimal vs counting)
 .PHONY: test_SoloReadInfoParity
 test_SoloReadInfoParity: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_SoloReadInfoParity: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-test_SoloReadInfoParity: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/SoloReadInfoParity_test.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/solo_readinfo_parity
+test_SoloReadInfoParity: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/SoloReadInfoParity_test.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/solo_readinfo_parity
 	../test/solo_readinfo_parity
 
 # CbCorrector unit test
@@ -665,29 +629,29 @@ test_CbBayesianResolverPhase2: solo/CbBayesianResolver.o
 .PHONY: test_inline_hash_record_capture
 test_inline_hash_record_capture: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -DINLINE_HASH_STANDALONE=0
 test_inline_hash_record_capture: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-test_inline_hash_record_capture: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_record_capture.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/test_inline_hash_record_capture
+test_inline_hash_record_capture: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_record_capture.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/test_inline_hash_record_capture
 	../test/test_inline_hash_record_capture
 
 .PHONY: test_inline_hash_resolver
 test_inline_hash_resolver: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -DINLINE_HASH_STANDALONE=0
 test_inline_hash_resolver: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-test_inline_hash_resolver: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_resolver.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/test_inline_hash_resolver
+test_inline_hash_resolver: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_resolver.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/test_inline_hash_resolver
 	../test/test_inline_hash_resolver
 
 .PHONY: test_inline_hash_clique
 test_inline_hash_clique: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -DINLINE_HASH_STANDALONE=0
 test_inline_hash_clique: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-test_inline_hash_clique: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_clique.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/test_inline_hash_clique
+test_inline_hash_clique: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_clique.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/test_inline_hash_clique
 	../test/test_inline_hash_clique
 
 .PHONY: test_inline_hash_parity
 test_inline_hash_parity: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -DINLINE_HASH_STANDALONE=0
 test_inline_hash_parity: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-test_inline_hash_parity: Depend.list parametersDefault.xxd $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_parity.cpp $(filter-out STAR.o,$(OBJECTS)) $(LDFLAGS) -o ../test/test_inline_hash_parity
+test_inline_hash_parity: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/test_inline_hash_parity.cpp $(OBJECTS_NO_MAIN) $(LDFLAGS) -o ../test/test_inline_hash_parity
 	../test/test_inline_hash_parity
 
 .PHONY: test_gene_resolver
@@ -699,8 +663,8 @@ test_gene_resolver: GeneResolver.o
 .PHONY: test_SamtoolsSorter
 test_SamtoolsSorter: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_SamtoolsSorter: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-test_SamtoolsSorter: Depend.list parametersDefault.xxd libflex libtrim libem $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/SamtoolsSorter_test.cpp $(filter-out STAR.o,$(OBJECTS)) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS) -o ../test/samtools_sorter_test
+test_SamtoolsSorter: Depend.list parametersDefault.xxd libflex libtrim libem $(OBJECTS_NO_MAIN)
+	$(CXX) $(CXXFLAGS) ../test/SamtoolsSorter_test.cpp $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS) -o ../test/samtools_sorter_test
 	../test/samtools_sorter_test
 
 .PHONY: test_trim_parity
@@ -758,9 +722,6 @@ CbqWriter.o: input/CbqWriter.cpp input/CbqWriter.h
 CbqYNoYWriter.o: input/CbqYNoYWriter.cpp input/CbqYNoYWriter.h input/CbqWriter.h input/CbqStarAdapter.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
-CbqChromapAdapter.o: input/CbqChromapAdapter.cpp input/CbqChromapAdapter.h input/CbqInputModule.h input/InputContract.h
-	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
-
 opal/opal.o : opal/opal.cpp opal/opal.h
 	cd opal && \
 	$(CXX) -c -I./ -std=c++11 $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGSextra) $(CXXFLAGS_SIMD) opal.cpp
@@ -775,7 +736,7 @@ solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_S
 
 .PHONY: clean
 clean:
-	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call transcriptvb_finalize trim_qc_fastq trim_qc_merge trim_qc_replay fastx_input_harness bgzf_input_harness cb_bucket_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness cbq_chromap_adapter_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
+	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong libstar_suite.a libstar_suite.link star_feature_call transcriptvb_finalize trim_qc_fastq trim_qc_merge trim_qc_replay fastx_input_harness bgzf_input_harness cb_bucket_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness Depend.list parametersDefault.xxd .depend.htslib_*
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean
@@ -803,41 +764,29 @@ ifneq ($(MAKECMDGOALS),clean_solo)
 ifneq ($(MAKECMDGOALS),print-simd-config)
 ifneq ($(MAKECMDGOALS),STARforMac)
 ifneq ($(MAKECMDGOALS),STARforMacGDB)
-.PHONY: chromap-unsupported-target
-chromap-unsupported-target:
-	@echo "ERROR: WITH_CHROMAP=1 is supported only for STAR/STARstatic/gdb targets in this integration gate. Re-run this target with WITH_CHROMAP=0." >&2
-	@exit 2
-
-$(CHROMAP_DEP_STAMP):
-	@'rm' -f .depend.with_chromap_*
+$(HTSLIB_DEP_STAMP):
+	@'rm' -f .depend.htslib_*
 	@touch $@
 
 # Check before regenerating the included makefile. An order-only check does
 # not invalidate cached dependencies.
-.PHONY: check-core-dependencies
-check-core-dependencies:
+.PHONY: check-external-htslib
+check-external-htslib:
 	@set -eu; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
 	if ! printf '%s\n' '#include <htslib/khash.h>' '#include <htslib/sam.h>' \
 	    'int main() { return hts_version() ? 0 : 1; }' | \
 	    $(CXX) $(CPPFLAGS) $(CXXFLAGSextra) $(CXXFLAGS_common) -x c++ - \
-	    -o "$$tmp/htslib-check" -x none $(LDFLAGSextra) $(LDFLAGS) $(CHROMAP_SYS_HTS) \
+	    -o "$$tmp/htslib-check" -x none $(LDFLAGSextra) $(LDFLAGS) $(HTSLIB_LIBS) \
 	    >"$$tmp/htslib.log" 2>&1; then \
 	    cat "$$tmp/htslib.log" >&2; \
-	    echo 'ERROR: Chromap-enabled STAR requires external HTSlib headers and library.' >&2; \
+	    echo 'ERROR: HTSLIB=external requires installed HTSlib headers and library.' >&2; \
 	    echo 'Install libhts-dev (Debian/Ubuntu), or set PKG_CONFIG_PATH for your HTSlib installation.' >&2; \
-	    echo 'Without pkg-config, set CHROMAP_HTSLIB_CFLAGS and CHROMAP_SYS_HTS to matching headers/library.' >&2; \
-	    echo 'For an explicit no-Chromap build, use make core-portable (WITH_CHROMAP=0).' >&2; \
-	    exit 2; \
-	fi; \
-	if [ -n "$(CHROMAP_SOURCE_REQUIRED)" ] && \
-	    { [ ! -f "$(CHROMAP_SUITE_DIR)/Makefile" ] || [ ! -f "$(CHROMAP_SUITE_DIR)/src/libchromap.h" ]; }; then \
-	    echo 'ERROR: Chromap-suite source not found at $(CHROMAP_SUITE_DIR).' >&2; \
-	    echo 'Set CHROMAP_SUITE_DIR to a Chromap-suite checkout with initialized submodules; see docs/compile_instructions.md.' >&2; \
-	    echo 'For an explicit no-Chromap build, use make core-portable (WITH_CHROMAP=0).' >&2; \
+	    echo 'Without pkg-config, set HTSLIB_CFLAGS and HTSLIB_LIBS to matching headers/library.' >&2; \
+	    echo 'For a build with STAR'"'"'s bundled HTSlib, omit HTSLIB or set HTSLIB=bundled.' >&2; \
 	    exit 2; \
 	fi
 
-Depend.list: $(SOURCES) parametersDefault.xxd $(STAR_HTSLIB_DEPS) $(CHROMAP_DEP_STAMP) | $(STAR_BUILD_CHECK)
+Depend.list: $(SOURCES) parametersDefault.xxd $(STAR_HTSLIB_DEPS) $(HTSLIB_DEP_STAMP) | $(STAR_BUILD_CHECK)
 	@set -eu; tmp=$$(mktemp Depend.list.XXXXXX); \
 	trap 'rm -f "$$tmp"' EXIT HUP INT TERM; \
 	$(CXX) $(CPPFLAGS) $(CXXFLAGSextra) $(CXXFLAGS_common) -MM $(SOURCES) > "$$tmp"; \
@@ -899,61 +848,79 @@ libscrna:
 
 $(LIBSCRNA_LIB): libscrna
 
-$(LIBCHROMAP_CONTRACT_LIB): FORCE
-	$(MAKE) -C $(LIBCHROMAP_CONTRACT_DIR) \
-		CHROMAP_DIR=$(CHROMAP_SUITE_DIR) \
-		RAPIDMACS_LIB=$(CHROMAP_RAPIDMACS_LIB) \
-		libstar_chromap_contract.a
-
-$(CHROMAP_LIB): FORCE
-	$(MAKE) -C $(CHROMAP_SUITE_DIR) libchromap.a
-
-$(CHROMAP_RAPIDMACS_LIB): FORCE
-	$(MAKE) -C $(CHROMAP_SUITE_DIR) librapidmacs
-
 STAR$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STAR$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(GLIB_LIBS_SHARED)
-STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features_integrated $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
-	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
+STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features_integrated $(LIBSCRNA_LIB)
+	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
+
+# Host library (star::host, docs/HOST_API.md). libstar_suite.a holds every
+# STAR object except STARmain.o (the executable's main); the eight OBJECTS
+# entries that STAR compiles as .cpp at link time are compiled to objects
+# here. libstar_suite.link lists, on one line, what a host must link after
+# the archive: STAR's dependent archives, HTSlib and system libraries.
+# Headers for hosts: host/StarHost.h (includes host/PermitTypes.h) and
+# host/SaturationPermitController.h. Build with HTSLIB=external when the
+# host links other code built against an installed HTSlib.
+STAR_HOST_LIB := libstar_suite.a
+STAR_HOST_LINKFILE := libstar_suite.link
+STAR_HOST_OBJECTS := $(patsubst %.cpp,%.o,$(filter-out STARmain.o,$(OBJECTS)))
+ifeq ($(HTSLIB),bundled)
+STAR_HOST_HTSLIB_LINK := $(abspath htslib/libhts.a)
+else
+STAR_HOST_HTSLIB_LINK := $(HTSLIB_LIBS)
+endif
+STAR_HOST_LINK_ARGS := $(abspath $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB)) \
+	$(STAR_HOST_HTSLIB_LINK) -fopenmp -pthread -lz -lssl -lcrypto -ldl $(GLIB_LIBS_SHARED)
+
+.PHONY: libstar_suite $(STAR_HOST_LINKFILE)
+libstar_suite : $(STAR_HOST_LIB) $(STAR_HOST_LINKFILE)
+
+$(STAR_HOST_LIB) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+$(STAR_HOST_LIB) : Depend.list parametersDefault.xxd $(STAR_HOST_OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features_integrated $(LIBSCRNA_LIB)
+	'rm' -f $@
+	$(AR) rcs $@ $(STAR_HOST_OBJECTS)
+
+$(STAR_HOST_LINKFILE) :
+	@printf '%s\n' '$(strip $(STAR_HOST_LINK_ARGS))' > $@.tmp && mv -f $@.tmp $@
 
 STARstatic$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STARstatic$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS) $(GLIB_LIBS_STATIC)
-STARstatic$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features_integrated $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
-	$(CXX) -o STAR$(SFX) $(filter-out -fopenmp,$(CXXFLAGS)) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
+STARstatic$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features_integrated $(LIBSCRNA_LIB)
+	$(CXX) -o STAR$(SFX) $(filter-out -fopenmp,$(CXXFLAGS)) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
 STARlong$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) -D'COMPILE_FOR_LONG_READS' $(CXXFLAGS)
 STARlong$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-STARlong$(SFX) : $(CHROMAP_UNSUPPORTED_TARGET) Depend.list parametersDefault.xxd $(OBJECTS)
+STARlong$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS)
 	$(CXX) -o STARlong$(SFX) $(CXXFLAGS) $(OBJECTS) $(LDFLAGS)
 
 STARlongStatic$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) -D'COMPILE_FOR_LONG_READS' $(CXXFLAGS)
 STARlongStatic$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS)
-STARlongStatic$(SFX) : $(CHROMAP_UNSUPPORTED_TARGET) Depend.list parametersDefault.xxd $(OBJECTS)
+STARlongStatic$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS)
 	$(CXX) -o STARlong$(SFX) $(filter-out -fopenmp,$(CXXFLAGS)) $(OBJECTS) $(LDFLAGS)
 
 
 
 POSIXSHARED : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) -DPOSIX_SHARED_MEM $(CXXFLAGS)
 POSIXSHARED : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-POSIXSHARED : $(CHROMAP_UNSUPPORTED_TARGET) Depend.list parametersDefault.xxd $(OBJECTS)
+POSIXSHARED : Depend.list parametersDefault.xxd $(OBJECTS)
 	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LDFLAGS)
 
 gdb : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_gdb) $(CXXFLAGS)
 gdb : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-gdb : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features_integrated $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
-	$(CXX) -o STAR $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
+gdb : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features_integrated $(LIBSCRNA_LIB)
+	$(CXX) -o STAR $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_INTEGRATED_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
 gdb-long : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_gdb) -D'COMPILE_FOR_LONG_READS' $(CXXFLAGS)
 gdb-long : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-gdb-long : $(CHROMAP_UNSUPPORTED_TARGET) Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem
+gdb-long : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem
 	$(CXX) -o STARlong $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS)
 
 STARforMacStatic : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) -D'COMPILE_FOR_MAC' $(CXXFLAGS)
 STARforMacStatic : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_Mac_static) $(LDFLAGS)
-STARforMacStatic : $(CHROMAP_UNSUPPORTED_TARGET) Depend.list parametersDefault.xxd $(OBJECTS)
+STARforMacStatic : Depend.list parametersDefault.xxd $(OBJECTS)
 	$(CXX) -o STAR $(CXXFLAGS) $(OBJECTS) $(LDFLAGS)
 
 STARlongForMacStatic : CXXFLAGS := -D'COMPILE_FOR_LONG_READS' $(CXXFLAGSextra) $(CXXFLAGS_main) -D'COMPILE_FOR_MAC' $(CXXFLAGS)
 STARlongForMacStatic : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_Mac_static) $(LDFLAGS)
-STARlongForMacStatic : $(CHROMAP_UNSUPPORTED_TARGET) Depend.list parametersDefault.xxd $(OBJECTS)
+STARlongForMacStatic : Depend.list parametersDefault.xxd $(OBJECTS)
 	$(CXX) -o STARlong $(CXXFLAGS) $(OBJECTS) $(LDFLAGS)

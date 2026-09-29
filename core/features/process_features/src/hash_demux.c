@@ -128,6 +128,87 @@ static const char *feature_label(feature_arrays *features, int idx) {
     return features->feature_names[idx];
 }
 
+
+/* Pair tables use feature IDs, never feature positions. Rows may have extra columns. */
+typedef struct {
+    char *sample;
+    int a, b;
+    int n_singlet;
+} hash_pair_sample;
+
+static void free_pair_samples(hash_pair_sample *pairs, int n) {
+    for (int i = 0; i < n; ++i) free(pairs[i].sample);
+    free(pairs);
+}
+
+static int pair_feature_index(feature_arrays *features, const unsigned char *mask, const char *id) {
+    int found = -1;
+    for (int i = 0; i < features->number_of_features; ++i) {
+        if (mask[i] && strcmp(feature_label(features, i), id) == 0) {
+            if (found >= 0) return -1;
+            found = i;
+        }
+    }
+    return found;
+}
+
+static int load_pair_samples(const pf_hash_mex_config *config, const unsigned char *mask,
+                             hash_pair_sample **out, int *n_out) {
+    if (!config->hash_sample_table || !config->hash_sample_table[0]) return -1;
+    FILE *fp = fopen(config->hash_sample_table, "r");
+    if (!fp) return -1;
+    char *line = NULL;
+    size_t capacity = 0;
+    int sample_col = -1, a_col = -1, b_col = -1, n = 0, header = 1;
+    hash_pair_sample *pairs = NULL;
+    while (getline(&line, &capacity, fp) >= 0) {
+        line[strcspn(line, "\r\n")] = '\0';
+        if (!line[0]) continue;
+        char *rest = line, *field, *sample = NULL, *a = NULL, *b = NULL;
+        int col = 0;
+        while ((field = strsep(&rest, "\t")) != NULL) {
+            if (header) {
+                if (strcmp(field, "sample") == 0) { if (sample_col >= 0) goto fail; sample_col = col; }
+                if (strcmp(field, "hash_a") == 0) { if (a_col >= 0) goto fail; a_col = col; }
+                if (strcmp(field, "hash_b") == 0) { if (b_col >= 0) goto fail; b_col = col; }
+            } else {
+                if (col == sample_col) sample = field;
+                if (col == a_col) a = field;
+                if (col == b_col) b = field;
+            }
+            ++col;
+        }
+        if (header) {
+            if (sample_col < 0 || a_col < 0 || b_col < 0) goto fail;
+            header = 0;
+            continue;
+        }
+        if (!sample || !sample[0] || !a || !b) goto fail;
+        int ai = pair_feature_index(config->base.features, mask, a);
+        int bi = pair_feature_index(config->base.features, mask, b);
+        if (ai < 0 || bi < 0 || ai == bi) goto fail;
+        if (ai > bi) { int t = ai; ai = bi; bi = t; }
+        for (int i = 0; i < n; ++i) {
+            if ((pairs[i].a == ai && pairs[i].b == bi) || strcmp(pairs[i].sample, sample) == 0) goto fail;
+        }
+        hash_pair_sample *next = realloc(pairs, (size_t)(n + 1) * sizeof(*pairs));
+        if (!next) goto fail;
+        pairs = next;
+        pairs[n].sample = strdup(sample);
+        if (!pairs[n].sample) goto fail;
+        pairs[n].a = ai; pairs[n].b = bi; pairs[n].n_singlet = 0;
+        ++n;
+    }
+    if (ferror(fp) || n == 0) goto fail;
+    free(line); fclose(fp);
+    *out = pairs; *n_out = n;
+    return 0;
+fail:
+    fprintf(stderr, "Error: invalid hash pair table '%s' (IDs must be in the hash mask; samples and unordered pairs must be unique)\n", config->hash_sample_table);
+    free(line); fclose(fp); free_pair_samples(pairs, n);
+    return -1;
+}
+
 static int write_hash_demux_outputs(const pf_hash_mex_config *config,
                                     const unsigned char *hash_mask,
                                     int n_hash,
@@ -135,11 +216,17 @@ static int write_hash_demux_outputs(const pf_hash_mex_config *config,
     if (!config || !config->base.counts || !config->base.features) return -1;
     const char *method = (config->hash_demux_method && config->hash_demux_method[0])
         ? config->hash_demux_method : PF_HASH_DEMUX_METHOD_RATIO;
-    if (strcmp(method, PF_HASH_DEMUX_METHOD_RATIO) != 0) {
+    const int pair_method = strcmp(method, PF_HASH_DEMUX_METHOD_PAIR) == 0;
+    if (!pair_method && strcmp(method, PF_HASH_DEMUX_METHOD_RATIO) != 0) {
         fprintf(stderr, "Error: unsupported hash demux method '%s'\n", method);
         return -1;
     }
 
+    if (pair_method && (config->hash_min_total < 0 || config->hash_min_top < 1 ||
+                        !isfinite(config->hash_min_pair_ratio) || config->hash_min_pair_ratio < 1.0 || n_hash > 256)) {
+        fprintf(stderr, "Error: invalid pair thresholds or more than 256 hash features\n");
+        return -1;
+    }
     char out_dir[4096];
     snprintf(out_dir, sizeof(out_dir), "%s", config->base.mex_output_dir);
 
@@ -173,7 +260,17 @@ static int write_hash_demux_outputs(const pf_hash_mex_config *config,
         return -1;
     }
 
-    fprintf(assign_fp,
+    hash_pair_sample *pairs = NULL;
+    int n_pairs = 0;
+    if (pair_method && load_pair_samples(config, hash_mask, &pairs, &n_pairs) != 0) {
+        fclose(bc_in); fclose(assign_fp); fclose(singlet_fp); fclose(doublet_fp); fclose(negative_fp);
+        return -1;
+    }
+    if (pair_method) {
+        fprintf(assign_fp, "barcode\thash_assignment\thash_classification\thash_total_umis\t"
+                "hash_top_feature\thash_top_count\thash_second_feature\thash_second_count\t"
+                "hash_top_ratio\thash_third_feature\thash_third_count\thash_pair\thash_sample\thash_pair_ratio\n");
+    } else fprintf(assign_fp,
             "barcode\thash_assignment\thash_classification\thash_total_umis\t"
             "hash_top_feature\thash_top_count\thash_second_feature\thash_second_count\t"
             "hash_top_ratio\n");
@@ -233,6 +330,45 @@ static int write_hash_demux_outputs(const pf_hash_mex_config *config,
         if (n_ranked > 1) {
             second_feat = feature_label(features, ranked[1].feature_idx);
             second_count = ranked[1].count;
+        }
+
+        if (pair_method) {
+            const char *third_feat = n_ranked > 2 ? feature_label(features, ranked[2].feature_idx) : "";
+            uint32_t third_count = n_ranked > 2 ? ranked[2].count : 0;
+            double pair_ratio = (double)second_count / (third_count ? third_count : 1);
+            double top_ratio = second_count ? (double)top_count / second_count : (top_count ? INFINITY : 0.0);
+            const char *classification = "negative", *sample = "";
+            char pair[1024] = "";
+            int match = -1;
+            if (n_ranked >= 2) {
+                const char *a = top_feat, *b = second_feat;
+                if (strcmp(a, b) > 0) { const char *t = a; a = b; b = t; }
+                snprintf(pair, sizeof(pair), "%s|%s", a, b);
+                int ai = ranked[0].feature_idx, bi = ranked[1].feature_idx;
+                if (ai > bi) { int t = ai; ai = bi; bi = t; }
+                for (int i = 0; i < n_pairs; ++i) if (pairs[i].a == ai && pairs[i].b == bi) { match = i; break; }
+            }
+            if (total < (uint32_t)config->hash_min_total || second_count < (uint32_t)config->hash_min_top) {
+                ++stats.n_negative;
+                fprintf(negative_fp, "%s\n", line);
+            } else if (pair_ratio < config->hash_min_pair_ratio) {
+                classification = "multiplet";
+                ++stats.n_multiplet;
+                fprintf(doublet_fp, "%s\n", line);
+            } else if (match < 0) {
+                classification = "unknown_pair";
+                ++stats.n_unknown_pair;
+            } else {
+                classification = "singlet";
+                sample = pairs[match].sample;
+                ++pairs[match].n_singlet;
+                ++stats.n_singlet;
+                fprintf(singlet_fp, "%s\n", line);
+            }
+            fprintf(assign_fp, "%s\t%s\t%s\t%u\t%s\t%u\t%s\t%u\t%.6f\t%s\t%u\t%s\t%s\t%.6f\n",
+                    line, sample, classification, total, top_feat, top_count, second_feat, second_count,
+                    top_ratio, third_feat, third_count, pair, sample, pair_ratio);
+            continue;
         }
 
         const char *classification = "negative";
@@ -303,6 +439,20 @@ static int write_hash_demux_outputs(const pf_hash_mex_config *config,
         fprintf(summary_fp, "  \"hash_min_total\": %d,\n", config->hash_min_total);
         fprintf(summary_fp, "  \"hash_min_top\": %d,\n", config->hash_min_top);
         fprintf(summary_fp, "  \"hash_min_ratio\": %.3f,\n", config->hash_min_ratio);
+        if (pair_method) {
+            fprintf(summary_fp, "  \"hash_sample_table\": ");
+            pf_fprint_json_string(summary_fp, config->hash_sample_table);
+            fprintf(summary_fp, ",\n  \"hash_min_pair_ratio\": %.6f,\n", config->hash_min_pair_ratio);
+            fprintf(summary_fp, "  \"n_multiplet\": %d,\n  \"n_unknown_pair\": %d,\n", stats.n_multiplet, stats.n_unknown_pair);
+            fprintf(summary_fp, "  \"per_sample\": {");
+            for (int i = 0; i < n_pairs; ++i) {
+                if (i) fprintf(summary_fp, ",");
+                fprintf(summary_fp, "\n    ");
+                pf_fprint_json_string(summary_fp, pairs[i].sample);
+                fprintf(summary_fp, ": %d", pairs[i].n_singlet);
+            }
+            fprintf(summary_fp, "\n  },\n");
+        }
         fprintf(summary_fp, "  \"n_hash_features\": %d,\n", n_hash);
         fprintf(summary_fp, "  \"n_singlet\": %d,\n", stats.n_singlet);
         fprintf(summary_fp, "  \"n_doublet\": %d,\n", stats.n_doublet);
@@ -329,6 +479,9 @@ static int write_hash_demux_outputs(const pf_hash_mex_config *config,
     snprintf(command_path, sizeof(command_path), "%s/hash_demux_command.txt", out_dir);
     FILE *cmd_fp = fopen(command_path, "w");
     if (cmd_fp) {
+        if (pair_method) {
+            fprintf(cmd_fp, "hash_sample_table=%s\nhash_min_pair_ratio=%.6f\n", config->hash_sample_table, config->hash_min_pair_ratio);
+        }
         fprintf(cmd_fp, "hash_demux=yes\n");
         fprintf(cmd_fp, "hash_demux_method=%s\n", method);
         if (config->hash_feature_selector && config->hash_feature_selector[0]) {
@@ -341,6 +494,7 @@ static int write_hash_demux_outputs(const pf_hash_mex_config *config,
         fclose(cmd_fp);
     }
 
+    free_pair_samples(pairs, n_pairs);
     if (stats_out) *stats_out = stats;
     return 0;
 }

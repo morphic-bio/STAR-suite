@@ -312,3 +312,12 @@ Update these docs when implementation lands:
   `hash` outputs and optional singlet barcode list.
 - Existing ADT/protein, CRISPR, LARRY/custom, and table-backed pf-multi tests
   remain green.
+
+## DOGMA-plex pair extension (2026-09-26, development)
+
+For libraries in which two hashtags intentionally label one sample, use the
+`pair` method and an explicit `sample/hash_a/hash_b` table. See
+`docs/feature_barcodes.md` for the rule and output schema. Do not use the
+single-hash `ratio` classification for DOGMA-plex. The focused test is
+`tests/multi_feature/test_hash_pair_demux_pf_multi.sh`; it covers pair calls,
+malformed tables, both pf-multi config syntaxes and legacy output headers.

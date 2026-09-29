@@ -31,53 +31,54 @@ sudo apt-get install -y --no-install-recommends \
 
 Notes:
 - Python is not required for compiling core suite binaries.
-- `libhts-dev` is needed by the default Chromap-enabled core build and standalone
-  feature barcode tooling (`demux_bam` includes HTSlib headers). The explicit
-  `make core-portable` target uses STAR's bundled HTSlib instead.
+- `libhts-dev` is needed only by standalone feature barcode tooling
+  (`demux_bam` includes HTSlib headers) and by `make core HTSLIB=external`.
+  `make core` uses STAR's bundled HTSlib.
 
-## Chromap and HTSlib Discovery
+## HTSlib Selection
 
-`make core` remains Chromap-enabled; it does not silently disable ATAC when a
-dependency is missing. It expects Chromap Suite (with initialized submodules) at
-`../Chromap-suite`, or at the path supplied with `CHROMAP_SUITE_DIR`:
+`make core` builds STAR with its bundled HTSlib and needs no other checkout;
+STAR Suite links no other suite. `make core-portable` is kept as an alias.
 
 ```bash
-git clone --recursive https://github.com/morphic-bio/Chromap-suite.git ../Chromap-suite
-make -j8 core CHROMAP_SUITE_DIR="$(realpath ../Chromap-suite)"
+make core-clean
+make -j8 core
+core/legacy/source/STAR --version
 ```
 
-The core build uses `pkg-config --cflags/--libs htslib` for external HTSlib.
-For a custom installation, set `PKG_CONFIG_PATH=/path/to/htslib/lib/pkgconfig`.
-Without a `.pc` file, supply both sides explicitly:
+`HTSLIB=external` compiles and links against an installed HTSlib found with
+`pkg-config --cflags/--libs htslib`. Programs that embed STAR together with
+other libraries built against an installed HTSlib use this setting so that one
+HTSlib ABI is used throughout the executable. For a custom
+installation, set `PKG_CONFIG_PATH=/path/to/htslib/lib/pkgconfig`. Without a
+`.pc` file, supply both sides explicitly:
 
 ```bash
-make -j8 core CHROMAP_HTSLIB_CFLAGS=-I/path/to/htslib/include \
-  CHROMAP_SYS_HTS=/path/to/htslib/lib/libhts.so
+make -j8 core HTSLIB=external HTSLIB_CFLAGS=-I/path/to/htslib/include \
+  HTSLIB_LIBS=/path/to/htslib/lib/libhts.so
 ```
 
 `CPPFLAGS` and `CXXFLAGSextra` are honored during dependency scanning as well as
 compilation. Set the runtime library search path separately when installing a
 shared HTSlib outside the system loader's paths. Never mix the older bundled
-STAR HTSlib headers with the external library used by Chromap.
+STAR HTSlib headers with an external library.
 
-The build checks external HTSlib before scanning source dependencies and reports
-missing prerequisites explicitly. A failed scan leaves any existing `Depend.list`
-intact instead of retaining partially generated dependencies.
+With `HTSLIB=external` the build checks the installed HTSlib before scanning
+source dependencies and reports missing prerequisites explicitly. A failed scan
+leaves any existing `Depend.list` intact instead of retaining partially
+generated dependencies.
 
-For RNA/Flex/SLAM without Chromap, including STARsolo poly-G trimming:
-
-```bash
-make core-clean
-make -j8 core-portable
-core/legacy/source/STAR --version
-```
-
-Use a clean build when changing HTSlib installations or `WITH_CHROMAP` mode.
+Use a clean build when changing HTSlib installations or the `HTSLIB` setting.
 Release installer archives and `.deb` packages contain prebuilt binaries and
 do not require compilation.
 
-For the native ATAC peak-matrix helper, runtime capability checks, and the
-Launchpad UI, follow [Multiome source build and launch](LAUNCHPAD_MULTIOME.md).
+Before 1.10.0, `make core` linked Chromap Suite for multiome runs. That
+integration, including the `--chromapAtac*` and `--multiomeAtac*` parameters,
+moved to Multiomics Suite, which builds the multiome binary.
+
+For the portable browser launcher and the legacy 1.9 compatibility recipe,
+see [Launchpad and Multiome ownership](LAUNCHPAD_MULTIOME.md). STAR 1.10 itself
+builds no Chromap integration.
 
 ## Parallel Jobs
 
@@ -154,14 +155,8 @@ The repository Docker builder stage validates compilation in a clean Ubuntu 24.0
 docker build --no-cache --target builder -f docker/Dockerfile --build-arg MAKE_JOBS=8 .
 ```
 
-The builder stage runs with `STAR_WITH_CHROMAP=0` by default because the
-single-repo Docker context does not include the sibling Chromap-suite checkout.
-Local builds use the Chromap-enabled multiome binary by default with
-`make core`; use `make core-portable` or `make core WITH_CHROMAP=0` only for an
-explicit no-Chromap compatibility build.
-
 The builder stage validates:
-- `make core WITH_CHROMAP=${STAR_WITH_CHROMAP}`
+- `make core`
 - `make flex`
 - `make slam`
 - `make feature-barcodes-tools`

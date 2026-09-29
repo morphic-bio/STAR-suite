@@ -21,7 +21,7 @@ def stage(prefix):
     # Installed packages expose executable workflows, not checkout-only tests.
     kinds = {w["id"]: yaml.safe_load((payload / w["schema_file"]).read_text()).get("kind")
              for w in config["workflows"]}
-    config["workflows"] = [w for w in config["workflows"] if kinds[w["id"]] == "star_cli" or w["id"] == "morphic_multiome"]
+    config["workflows"] = [w for w in config["workflows"] if kinds[w["id"]] == "star_cli"]
     config["scripts"] = []
     config["test_suites"] = []
     config["required_binaries"] = []

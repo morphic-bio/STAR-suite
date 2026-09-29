@@ -1,6 +1,6 @@
 #include "BgzfRateController.h"
 #include "ThreadControl.h"
-#include "SaturationPermitController.h"
+#include "host/SaturationPermitController.h"
 #include "WorkloadDrainEstimate.h"
 #include <atomic>
 #include <cassert>
@@ -17,7 +17,7 @@ using D = ThreadControl::PermitDomain;
 using W = ThreadControl::PermitWork;
 
 static void exerciseOuterPolicy() {
-    using C = star::multiome::SaturationPermitController;
+    using C = star::permits::SaturationPermitController;
     for (unsigned mask : {1U, 2U, 3U}) {
         C::Config c;
         c.configuredPermits = 4; c.activeMask = mask; c.startFromFloors = true;
@@ -29,7 +29,7 @@ static void exerciseOuterPolicy() {
         o.mapUnitsDelta = mask & 1U ? 10 : 0;
         o.featureUnitsDelta = mask & 2U ? 10 : 0;
         const auto d = controller.observe(o);
-        assert(d.atacFloor == 0 && d.mapFloor + d.featureFloor <= 4);
+        assert(d.externalFloor == 0 && d.mapFloor + d.featureFloor <= 4);
         if (mask == 3) assert(d.mapFloor == 3 && d.featureFloor == 1);
     }
     C::Config c;

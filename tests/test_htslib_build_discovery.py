@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test real core Makefile rules using a tiny external HTSlib fixture."""
+"""Test the core Makefile HTSLIB=bundled|external selection with a tiny HTSlib fixture."""
 import os
 from pathlib import Path
 import subprocess
@@ -37,10 +37,6 @@ class HtslibBuildTests(unittest.TestCase):
             "Name: htslib\nDescription: build discovery fixture\nVersion: 1.0\n"
             f"Cflags: -I{self.prefix}/include\nLibs: {self.lib}\n"
         )
-        self.chromap = self.root / "Chromap-suite"
-        (self.chromap / "src").mkdir(parents=True)
-        (self.chromap / "Makefile").write_text("# fixture, no build needed\n")
-        (self.chromap / "src/libchromap.h").write_text("// fixture\n")
         (self.root / "parametersDefault").write_text("fixture default\n")
         (self.root / "test.cpp").write_text(
             "#include <htslib/khash.h>\n"
@@ -50,11 +46,12 @@ class HtslibBuildTests(unittest.TestCase):
         for name in ("CPATH", "CPLUS_INCLUDE_PATH", "C_INCLUDE_PATH", "MAKEFLAGS"):
             self.env.pop(name, None)
 
-    def make(self, *args, ok=True, target="Depend.list"):
+    def make(self, *args, ok=True, target="Depend.list", selection="external"):
+        selection_args = [f"HTSLIB={selection}"] if selection else []
         result = subprocess.run(
             ["make", "--no-print-directory", "-f", str(MAKEFILE),
-             f"ROOT_DIR={REPO}", f"CHROMAP_SUITE_DIR={self.chromap}",
-             "SOURCES=test.cpp", target, *args],
+             f"ROOT_DIR={REPO}", "SOURCES=test.cpp", *selection_args,
+             target, *args],
             cwd=self.root, env=self.env, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30,
         )
@@ -76,7 +73,7 @@ class HtslibBuildTests(unittest.TestCase):
     def test_cppflags_and_extra_flags_reach_scan(self):
         for name in ("CPPFLAGS", "CXXFLAGSextra"):
             with self.subTest(name=name):
-                self.make("CHROMAP_HTSLIB_CFLAGS=", f"CHROMAP_SYS_HTS={self.lib}",
+                self.make("HTSLIB_CFLAGS=", f"HTSLIB_LIBS={self.lib}",
                           f"{name}=-I{self.prefix}/include", "-W", "test.cpp")
 
     def test_custom_prefix_compiles_after_dependency_scan(self):
@@ -93,25 +90,33 @@ class HtslibBuildTests(unittest.TestCase):
                       (self.root / "Depend.list").read_text())
 
     def test_missing_headers_are_actionable(self):
-        result = self.make("CHROMAP_HTSLIB_CFLAGS=-nostdinc", ok=False)
-        self.assertIn("requires external HTSlib headers and library", result.stdout)
+        result = self.make("HTSLIB_CFLAGS=-nostdinc", ok=False)
+        self.assertIn("HTSLIB=external requires installed HTSlib headers and library", result.stdout)
         self.assertIn("libhts-dev", result.stdout)
-        self.assertIn("core-portable", result.stdout)
+        self.assertIn("HTSLIB=bundled", result.stdout)
         self.assertFalse((self.root / "Depend.list").exists())
 
     def test_missing_library_is_actionable(self):
-        result = self.make(f"CHROMAP_SYS_HTS={self.root}/absent.so", ok=False)
-        self.assertIn("requires external HTSlib headers and library", result.stdout)
+        result = self.make(f"HTSLIB_LIBS={self.root}/absent.so", ok=False)
+        self.assertIn("HTSLIB=external requires installed HTSlib headers and library", result.stdout)
         self.assertFalse((self.root / "Depend.list").exists())
 
-    def test_missing_chromap_is_actionable(self):
-        result = self.make(f"CHROMAP_SUITE_DIR={self.root}/absent",
-                           "CHROMAP_SOURCE_REQUIRED=1", ok=False)
-        self.assertIn("Chromap-suite source not found", result.stdout)
+    def test_unknown_selection_is_rejected(self):
+        result = self.make(ok=False, selection="system")
+        self.assertIn("HTSLIB must be 'bundled' or 'external'", result.stdout)
         self.assertFalse((self.root / "Depend.list").exists())
 
-    def test_non_chromap_partial_target_does_not_require_chromap_checkout(self):
-        self.make(f"CHROMAP_SUITE_DIR={self.root}/absent")
+    def test_switching_selection_rescans_dependencies(self):
+        bundled = self.root / "htslib/htslib"
+        bundled.mkdir(parents=True)
+        (bundled / "khash.h").write_text("#define TEST_EXTERNAL_HTSLIB 1\n")
+        (bundled.parent / "libhts.a").touch()
+        self.make()
+        dep = self.root / "Depend.list"
+        self.assertIn(str(self.prefix / "include/htslib/khash.h"), dep.read_text())
+        self.make("PKG_CONFIG=false", "CPPFLAGS=-nostdinc", selection="bundled")
+        self.assertIn("htslib/htslib/khash.h", dep.read_text())
+        self.assertNotIn(str(self.prefix), dep.read_text())
 
     def test_scan_failure_keeps_previous_dependencies(self):
         self.make()
@@ -122,14 +127,12 @@ class HtslibBuildTests(unittest.TestCase):
         self.assertEqual(dep.read_bytes(), good)
         self.assertFalse(list(self.root.glob("Depend.list.*")))
 
-    def test_portable_uses_bundled_headers_without_external_dependencies(self):
+    def test_default_uses_bundled_headers_without_external_dependencies(self):
         bundled = self.root / "htslib/htslib"
         bundled.mkdir(parents=True)
         (bundled / "khash.h").write_text("#define TEST_EXTERNAL_HTSLIB 1\n")
         (bundled.parent / "libhts.a").touch()
-        self.make("WITH_CHROMAP=0", "PKG_CONFIG=false",
-                  f"CHROMAP_SUITE_DIR={self.root}/absent",
-                  "CPPFLAGS=-nostdinc")
+        self.make("PKG_CONFIG=false", "CPPFLAGS=-nostdinc", selection=None)
         self.assertIn("htslib/htslib/khash.h", (self.root / "Depend.list").read_text())
 
 

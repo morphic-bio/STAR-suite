@@ -3,7 +3,7 @@
 #include "ReadAlign.h"
 #include "Transcriptome.h"
 #include "ErrorWarning.h"
-#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#if defined(STAR_EXTERNAL_HTSLIB) && STAR_EXTERNAL_HTSLIB
 #include <htslib/bgzf.h>
 #include <htslib/tbx.h>
 #else

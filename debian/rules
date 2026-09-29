@@ -10,7 +10,7 @@ export STAR_SUITE_COMMIT_SHA
 	dh $@
 
 override_dh_auto_build:
-	$(MAKE) -j$(NUM_JOBS) core-portable
+	$(MAKE) -j$(NUM_JOBS) core
 	$(MAKE) -j$(NUM_JOBS) star-feature-call
 	$(MAKE) -j$(NUM_JOBS) -C flex/tools/flexfilter
 	$(MAKE) -j$(NUM_JOBS) -C flex/tools/molecule_first_resolver

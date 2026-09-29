@@ -1,4 +1,24 @@
-# Run 10x Multiome v1 with STAR Launchpad
+# Multiome Launchpad: 1.10 ownership and 1.9 compatibility
+
+STAR Suite **1.10** builds no Multiome engine. Use Multiomics Suite for current
+RNA + ATAC processing; its binary embeds STAR through the host API described in
+[the handover](HANDOVER_MULTIOMICS_1.10.md). Do not attempt to add Chromap back to
+this branch with `WITH_CHROMAP=1`.
+
+The Launchpad portability, installed launcher, validation and job-management
+fixes from 1.9.5.b are merged here. The built-in `morphic_multiome` workflow
+remains removed. The pinned official catalog still exposes its legacy
+`starsuite.official/multiome` recipe under **Include test & other recipes**.
+That recipe requires explicitly selected external 1.9.5.b executables; it is not
+a standalone STAR 1.10 workflow. The capability check rejects STAR 1.10 before
+creating run outputs.
+
+For the 1.10 UI itself, run `python3 scripts/launchpad_cli.py --setup`, then
+`python3 scripts/launchpad_cli.py`, or use the installed `star-suite-launchpad`.
+The instructions below are retained for a **separate 1.9.5.b source checkout**
+and its compatibility runtime.
+
+## STAR 1.9.5.b compatibility instructions
 
 **Version scope:** STAR Suite 1.9.x is the last line that hosts the integrated
 RNA + ATAC engine. From **STAR Suite 1.10 onward**, Multiome support is maintained

@@ -209,7 +209,7 @@ make -C core/legacy/source binseq-probe-harness
 To build STAR plus FASTX and BINSEQ comparison harnesses:
 
 ```bash
-make -C core/legacy/source STAR fastx-input-harness binseq-probe-harness cbq-reader-harness cbq-ordered-encoder cbq-star-adapter-harness cbq-pf-adapter-harness cbq-chromap-adapter-harness
+make -C core/legacy/source STAR fastx-input-harness binseq-probe-harness cbq-reader-harness cbq-ordered-encoder cbq-star-adapter-harness cbq-pf-adapter-harness
 ```
 
 ## Run The Smokes
@@ -435,3 +435,11 @@ normal mapper path for the modes that have been validated.
 - CBQ module regression suite: `tests/run_cbq_e2e_module_regression.sh`
 - Upstream fixture smoke: `tests/run_binseq_upstream_fixture_smoke.sh`
 - Artifact policy: `tests/ARTIFACTS.md`
+
+## Note for 1.10.0
+
+The Chromap CBQ adapter (`CbqChromapAdapter`, `cbq_chromap_adapter_harness`,
+`tests/run_cbq_chromap_adapter_smoke.sh`) and the libchromap CBQ options
+(`--chromapAtac*`) described above moved to Multiomics Suite with the multiome
+binary. The sections that mention them are kept as history; see
+`docs/HANDOVER_MULTIOMICS_1.10.md`.

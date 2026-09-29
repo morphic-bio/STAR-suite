@@ -10,6 +10,7 @@ extern "C" {
 
 #define PF_HASH_FEATURE_TYPE_DEFAULT "Multiplexing Capture"
 #define PF_HASH_DEMUX_METHOD_RATIO "ratio"
+#define PF_HASH_DEMUX_METHOD_PAIR "pair"
 
 #define PF_HASH_DEMUX_AUTO (-1)
 #define PF_HASH_DEMUX_NO 0
@@ -24,6 +25,8 @@ typedef struct {
     int hash_min_total;
     int hash_min_top;
     double hash_min_ratio;
+    const char *hash_sample_table;
+    double hash_min_pair_ratio;
 } pf_hash_mex_config;
 
 typedef struct {
@@ -32,6 +35,8 @@ typedef struct {
     int n_singlet;
     int n_doublet;
     int n_negative;
+    int n_multiplet;
+    int n_unknown_pair;
 } pf_hash_demux_stats;
 
 int pf_is_hash_like_feature_type(const char *feature_type);

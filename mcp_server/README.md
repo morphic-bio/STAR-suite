@@ -38,10 +38,13 @@ Open `http://<host>:<port>/launchpad/` in a browser for **STAR Launchpad** (reci
 
 #### Launchpad quick start / stop
 
-For the 1.9.5.b source tree, use `python3 scripts/launchpad_cli.py --setup` once,
+For this source tree, use `python3 scripts/launchpad_cli.py --setup` once,
 then `python3 scripts/launchpad_cli.py`. Installed packages provide
 `star-suite-launchpad --setup` and `star-suite-launchpad`.
-See [Multiome setup and execution](../docs/LAUNCHPAD_MULTIOME.md).
+See [Multiome ownership and legacy compatibility](../docs/LAUNCHPAD_MULTIOME.md).
+STAR 1.10 delegates the engine to Multiomics Suite; the old built-in
+`morphic_multiome` workflow remains removed. The pinned catalog recipe requires
+an explicitly selected external 1.9.5.b runtime and rejects STAR 1.10.
 
 
 Start in the background (writes a pidfile + log under the user state directory, keyed by checkout):
@@ -230,7 +233,6 @@ Current public workflows:
 | `star_flex_fixed_rna` | STAR-Flex Fixed RNA command on the 1.9.4 half-probe route: count-only, no genome index loaded, tag-aware cell calling. | Caller-supplied Fixed RNA FASTQs (probe read R2 first), whitelist, sample probes and the required half-probe (H1X2) cache; alignment-based routes need `flex_legacy yes`. |
 | `star_flex_fixed_rna_cbq` | STAR-Flex Fixed RNA command with CBQ input on the same half-probe, count-only route. | `--readFilesType Binseq PE --flex yes` with paired CBQ files in Flex mate order and the required half-probe (H1X2) cache. |
 | `star_perturb_cr_compat` | Perturb-seq CR-compatible STAR command with the option set used for the 1.9.4 A375 and MSK benchmarks. | Gene-expression FASTQs and whitelist, `--pfMultiConfig` feature libraries, CR-compatible threading defaults; `solo_strand` is required (Reverse for 5' R2-only libraries such as A375). |
-| `morphic_multiome` | Bundled official 10x Multiome v1 recipe. | Validated RNA + ATAC inputs; local execution through peak matrices, status/logs/cancel, and a Chromap-enabled runtime check. See [Multiome guide](../docs/LAUNCHPAD_MULTIOME.md). |
 
 Current local/private SLAM workflows:
 

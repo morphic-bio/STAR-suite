@@ -42,6 +42,7 @@ Log.out
 *.o
 Depend.list
 .depend.with_chromap_*
+.depend.htslib_*
 /source/*.d
 /source/Depend.list
 /source/STAR
@@ -195,3 +196,8 @@ AGENTS_local.md
 /SJ.out.tab
 /test_slam_qc_output.json
 **/Aligned.out.sam
+/core/legacy/source/libstar_suite.a
+/core/legacy/source/libstar_suite.link
+# Standalone replay executables (source and historical oracle stay tracked).
+/flex/tools/hash_screen_replay/hash_screen_replay
+/flex/tools/hash_screen_replay/test_hash_screen

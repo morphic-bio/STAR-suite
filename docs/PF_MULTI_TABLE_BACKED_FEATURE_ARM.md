@@ -97,18 +97,6 @@ bash tests/multi_feature/test_table_gex_pf_multi_star_smoke.sh
 The fast STAR smoke runs GEX plus a table-backed Custom arm and asserts nonzero
 table counts in the per-library MEX, merged raw MEX, and merged filtered MEX.
 
-The HIV DOGMA four-arm smoke exercises the proof-of-concept composition:
-
-```text
-GEX + ATAC + protein/ADT FASTQ + HIV table-backed Custom arm
-```
-
-Run:
-
-```bash
-bash tests/multi_feature/test_hiv_dogma_four_arm_table_smoke.sh
-```
-
-That smoke materializes `HIV_DNA`/`HIV_RNA` table rows from the local DOGMA
-assignment files and asserts nonzero HIV counts in the per-library, raw merged,
-and filtered merged MEX outputs.
+The HIV DOGMA four-arm smoke (GEX + ATAC + protein/ADT FASTQ + HIV
+table-backed Custom arm) needs the ATAC arm, so it moved to Multiomics Suite
+with the multiome binary in 1.10.0.

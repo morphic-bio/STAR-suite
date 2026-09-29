@@ -385,12 +385,28 @@ Config parseConfig(const string& configPath) {
                             if (!value.empty()) entry.starHashMinTotal = std::atoi(value.c_str());
                         } else if (header == "star_hash_min_top" || header == "starhashmintop") {
                             if (!value.empty()) entry.starHashMinTop = std::atoi(value.c_str());
+                        } else if (header == "star_hash_sample_table") {
+                            entry.starHashSampleTable = value;
+                        } else if (header == "star_hash_min_pair_ratio") {
+                            if (!value.empty()) {
+                                size_t consumed = 0;
+                                entry.starHashMinPairRatio = std::stod(value, &consumed);
+                                if (consumed != value.size() || !std::isfinite(entry.starHashMinPairRatio) || entry.starHashMinPairRatio < 1.0)
+                                    throw runtime_error("star_hash_min_pair_ratio must be finite and >= 1");
+                            }
                         } else if (header == "star_hash_min_ratio" || header == "starhashminratio") {
                             if (!value.empty()) entry.starHashMinRatio = std::atof(value.c_str());
                         } else if (header == "star_feature_caller" || header == "starfeaturecaller") {
                             entry.starFeatureCaller = value;
                             std::transform(entry.starFeatureCaller.begin(), entry.starFeatureCaller.end(),
                                            entry.starFeatureCaller.begin(), ::tolower);
+                        } else if (header == "star_feature_call_fdr") {
+                            if (!value.empty()) {
+                                size_t consumed = 0;
+                                entry.starFeatureCallFdr = std::stod(value, &consumed);
+                                if (consumed != value.size() || !std::isfinite(entry.starFeatureCallFdr) || entry.starFeatureCallFdr <= 0.0 || entry.starFeatureCallFdr > 1.0)
+                                    throw runtime_error("star_feature_call_fdr must be in (0, 1]");
+                            }
                         } else if (header == "star_feature_call_min_umi" || header == "starfeaturecallminumi") {
                             if (!value.empty()) {
                                 size_t consumed = 0;
@@ -602,13 +618,29 @@ Config parseConfig(const string& configPath) {
                         if (!value.empty()) entry.starHashMinTotal = std::atoi(value.c_str());
                     } else if (header == "star_hash_min_top" || header == "starhashmintop") {
                         if (!value.empty()) entry.starHashMinTop = std::atoi(value.c_str());
-                    } else if (header == "star_hash_min_ratio" || header == "starhashminratio") {
+                    } else if (header == "star_hash_sample_table") {
+                            entry.starHashSampleTable = value;
+                        } else if (header == "star_hash_min_pair_ratio") {
+                            if (!value.empty()) {
+                                size_t consumed = 0;
+                                entry.starHashMinPairRatio = std::stod(value, &consumed);
+                                if (consumed != value.size() || !std::isfinite(entry.starHashMinPairRatio) || entry.starHashMinPairRatio < 1.0)
+                                    throw runtime_error("star_hash_min_pair_ratio must be finite and >= 1");
+                            }
+                        } else if (header == "star_hash_min_ratio" || header == "starhashminratio") {
                         if (!value.empty()) entry.starHashMinRatio = std::atof(value.c_str());
                     } else if (header == "star_feature_caller" || header == "starfeaturecaller") {
                         entry.starFeatureCaller = value;
                         std::transform(entry.starFeatureCaller.begin(), entry.starFeatureCaller.end(),
                                        entry.starFeatureCaller.begin(), ::tolower);
-                    } else if (header == "star_feature_call_min_umi" || header == "starfeaturecallminumi") {
+                    } else if (header == "star_feature_call_fdr") {
+                            if (!value.empty()) {
+                                size_t consumed = 0;
+                                entry.starFeatureCallFdr = std::stod(value, &consumed);
+                                if (consumed != value.size() || !std::isfinite(entry.starFeatureCallFdr) || entry.starFeatureCallFdr <= 0.0 || entry.starFeatureCallFdr > 1.0)
+                                    throw runtime_error("star_feature_call_fdr must be in (0, 1]");
+                            }
+                        } else if (header == "star_feature_call_min_umi" || header == "starfeaturecallminumi") {
                         if (!value.empty()) {
                             size_t consumed = 0;
                             entry.starFeatureCallMinUmi = std::stoi(value, &consumed);
@@ -765,11 +797,11 @@ Config parseConfig(const string& configPath) {
                 + "' for library_id=" + lib.starLibraryId
                 + "; must be auto, yes, no, or empty");
         }
-        if (!lib.starFeatureCaller.empty() && lib.starFeatureCaller != "dominant") {
+        if (!lib.starFeatureCaller.empty() && lib.starFeatureCaller != "dominant" && lib.starFeatureCaller != "ambient-fdr") {
             throw runtime_error("Invalid star_feature_caller '" + lib.starFeatureCaller
-                + "' for library_id=" + lib.starLibraryId + "; must be dominant or empty");
+                + "' for library_id=" + lib.starLibraryId + "; must be dominant, ambient-fdr, or empty");
         }
-        if (lib.starFeatureCaller == "dominant") {
+        if (!lib.starFeatureCaller.empty()) {
             const string norm = lib.normalizedFeatureType();
             if (norm == "geneexpression" || norm == "gex") {
                 throw runtime_error("star_feature_caller is not valid for GEX library_id="
@@ -787,6 +819,16 @@ Config parseConfig(const string& configPath) {
         } else if (lib.starFeatureCallMinUmi != -1 || lib.starFeatureCallMinRatio != -1.0) {
             throw runtime_error("star_feature_call thresholds require star_feature_caller=dominant for library_id="
                 + lib.starLibraryId);
+        }
+        if (!lib.starHashDemuxMethod.empty() && lib.starHashDemuxMethod != "ratio" && lib.starHashDemuxMethod != "pair")
+            throw runtime_error("star_hash_demux_method must be ratio or pair");
+        if (lib.starHashDemuxMethod == "pair" && lib.starHashSampleTable.empty())
+            throw runtime_error("star_hash_demux_method=pair requires star_hash_sample_table");
+        if (!lib.starHashSampleTable.empty()) {
+            if (lib.starHashSampleTable[0] != '/') lib.starHashSampleTable = configDir + "/" + lib.starHashSampleTable;
+            struct stat st;
+            if (stat(lib.starHashSampleTable.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+                throw runtime_error("Invalid star_hash_sample_table: " + lib.starHashSampleTable);
         }
         if (!lib.starBarcodeOutputMap.empty()) {
             if (lib.starBarcodeOutputMap[0] != '/') {

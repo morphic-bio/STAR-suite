@@ -1,6 +1,6 @@
 #include "ThreadControl.h"
 #include "BgzfRateController.h"
-#include "SaturationPermitController.h"
+#include "host/SaturationPermitController.h"
 #include "WorkloadDrainEstimate.h"
 #include <stdexcept>
 #include <algorithm>
@@ -28,16 +28,18 @@ inline int normalizePermitCount(int configuredPermits, int totalThreads) {
 inline size_t permitDomainIndex(ThreadControl::PermitDomain domain) {
     switch (domain) {
         case ThreadControl::PermitDomain::FEATURE: return 1;
-        case ThreadControl::PermitDomain::ATAC:    return 2;
+        case ThreadControl::PermitDomain::EXTERNAL: return 2;
         case ThreadControl::PermitDomain::MAP:
         default:                                   return 0;
     }
 }
 
+const char* g_externalDomainLabel = "external";
+
 inline const char* permitDomainName(ThreadControl::PermitDomain domain) {
     switch (domain) {
         case ThreadControl::PermitDomain::FEATURE: return "feature";
-        case ThreadControl::PermitDomain::ATAC:    return "atac";
+        case ThreadControl::PermitDomain::EXTERNAL: return g_externalDomainLabel;
         case ThreadControl::PermitDomain::MAP:
         default:                                   return "map";
     }
@@ -80,6 +82,14 @@ bool readProcStatCpuTotals(uint64_t &idleAll, uint64_t &totalAll) {
     totalAll = user + nice + system + idle + iowait + irq + softirq + steal + guest + guestNice;
     return totalAll >= idleAll;
 }
+}
+
+void ThreadControl::setExternalDomainLabel(const char* label) {
+    g_externalDomainLabel = (label != nullptr && label[0] != '\0') ? label : "external";
+}
+
+const char* ThreadControl::externalDomainLabel() {
+    return g_externalDomainLabel;
 }
 
 ThreadControl::ThreadControl() {
@@ -427,7 +437,7 @@ void ThreadControl::mapPermitHierarchyLoop() {
     const auto start = previousTime;
     auto outerTime = start;
     WorkloadDrainEstimate estimators[2];
-    using Outer = star::multiome::SaturationPermitController;
+    using Outer = star::permits::SaturationPermitController;
     Outer::Config config;
     const auto initial = mapPermitSnapshot();
     config.configuredPermits = initial.configuredPermits;
@@ -1238,7 +1248,7 @@ ThreadControl::MapPermitSnapshot ThreadControl::mapPermitSnapshot() const {
         snapshot.cpuBusyEma = mapPermitCpuBusyEma;
         cpuLastSampleNs = mapPermitCpuLastSampleNs;
         PermitDomainSnapshot *domainSnapshots[mapPermitDomainCount] = {
-            &snapshot.mapDomain, &snapshot.featureDomain, &snapshot.atacDomain};
+            &snapshot.mapDomain, &snapshot.featureDomain, &snapshot.externalDomain};
         for (size_t domain = 0; domain < mapPermitDomainCount; ++domain) {
             domainSnapshots[domain]->decode = mapPermitDecode[domain];
             domainSnapshots[domain]->completedReadPairs = mapPermitCompletedPairs[domain];
@@ -1312,12 +1322,12 @@ ThreadControl::MapPermitSnapshot ThreadControl::mapPermitSnapshot() const {
     snapshot.featureDomain.workBytesTotal = mapPermitWorkBytesTotalByDomain[permitDomainIndex(PermitDomain::FEATURE)].load(std::memory_order_relaxed);
     snapshot.featureDomain.workNsTotal = mapPermitWorkNsTotalByDomain[permitDomainIndex(PermitDomain::FEATURE)].load(std::memory_order_relaxed);
     snapshot.featureDomain.workNsMax = mapPermitWorkNsMaxByDomain[permitDomainIndex(PermitDomain::FEATURE)].load(std::memory_order_relaxed);
-    snapshot.atacDomain.acquireCalls = mapPermitAcquireCallsByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
-    snapshot.atacDomain.waitNsTotal = mapPermitWaitNsTotalByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
-    snapshot.atacDomain.waitNsMax = mapPermitWaitNsMaxByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
-    snapshot.atacDomain.workUnitsTotal = mapPermitWorkUnitsTotalByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
-    snapshot.atacDomain.workBytesTotal = mapPermitWorkBytesTotalByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
-    snapshot.atacDomain.workNsTotal = mapPermitWorkNsTotalByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
-    snapshot.atacDomain.workNsMax = mapPermitWorkNsMaxByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
+    snapshot.externalDomain.acquireCalls = mapPermitAcquireCallsByDomain[permitDomainIndex(PermitDomain::EXTERNAL)].load(std::memory_order_relaxed);
+    snapshot.externalDomain.waitNsTotal = mapPermitWaitNsTotalByDomain[permitDomainIndex(PermitDomain::EXTERNAL)].load(std::memory_order_relaxed);
+    snapshot.externalDomain.waitNsMax = mapPermitWaitNsMaxByDomain[permitDomainIndex(PermitDomain::EXTERNAL)].load(std::memory_order_relaxed);
+    snapshot.externalDomain.workUnitsTotal = mapPermitWorkUnitsTotalByDomain[permitDomainIndex(PermitDomain::EXTERNAL)].load(std::memory_order_relaxed);
+    snapshot.externalDomain.workBytesTotal = mapPermitWorkBytesTotalByDomain[permitDomainIndex(PermitDomain::EXTERNAL)].load(std::memory_order_relaxed);
+    snapshot.externalDomain.workNsTotal = mapPermitWorkNsTotalByDomain[permitDomainIndex(PermitDomain::EXTERNAL)].load(std::memory_order_relaxed);
+    snapshot.externalDomain.workNsMax = mapPermitWorkNsMaxByDomain[permitDomainIndex(PermitDomain::EXTERNAL)].load(std::memory_order_relaxed);
     return snapshot;
 }

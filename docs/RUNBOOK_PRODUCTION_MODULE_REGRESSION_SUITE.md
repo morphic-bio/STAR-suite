@@ -79,7 +79,6 @@ developer smoke unless requested:
 - `feature-tools / pf-dynamic-permit-100k`
 - `flex / flex-hash-screen-100k`
 - `slam / slam-pe-100k`
-- `multiome / chromap-macs3-100k`
 
 The manifest is the source of truth for required fixture paths, tools, and
 per-case environment fallbacks. If a path moves, update the manifest rather than

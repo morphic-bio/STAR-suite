@@ -11,7 +11,7 @@
 #include "GlobalVariables.h"
 #include "ErrorWarning.h"
 #include "InlineCBCorrection.h"
-#include "SaturationPermitController.h"
+#include "host/StarHost.h"
 #include "TimeFunctions.h"
 #include "streamFuns.h"
 #include "systemFunctions.h"
@@ -258,8 +258,9 @@ bool flexNoGenomeCountOnlyActivationGuard(Parameters &P, std::string *reason) {
     if (P.var.yes || P.wasp.yes || P.trimQcEnabled) {
         return reject("variant/WASP/trim-QC mode is enabled");
     }
-    if (P.chromapAtac.enabled != 0 || !unsetToken(P.multiomeAtacPeakMex.inlineMode)) {
-        return reject("Chromap/multiome ATAC output is enabled");
+    if (P.hostHooks != nullptr && P.hostHooks->externalActive != nullptr &&
+        P.hostHooks->externalActive(P.hostHooks->ctx)) {
+        return reject("host external work is enabled");
     }
     if (!unsetToken(P.pfMulti.pfMultiConfig) || !unsetToken(P.pfMulti.ocmMultiEnable)) {
         return reject("pf-multi/OCM post-processing is enabled");
@@ -922,21 +923,22 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     const bool interfaceEnabled = (P.dynamicThreadInterface == 1) || bool(P.bgzfPipes);
     const bool telemetryEnabled = (P.dynamicThreadTelemetry == 1);
     const bool variableThreadsEnabled = (P.variableThreads == 1);
-    // Permit-pool budget. With chromapAtac concurrent the pool spans STAR's
-    // GEX MAP/FEATURE workers AND chromap's ATAC workers, so the budget is
-    // runThreadN + chromapAtac.threads (a separate thread budget than runThreadN
-    // alone). When chromapAtac is off, pool stays at runThreadN. The user can
-    // override via --dynamicThreadConstMapPermits, which is now honored as-is
-    // (no clamp to runThreadN); pass 0 for the auto-sized default.
-    const int permitTotalThreads = (P.chromapAtac.enabled == 1)
-        ? (P.runThreadN + std::max(0, P.chromapAtac.threads))
-        : P.runThreadN;
+    // Permit-pool budget: STAR's runThreadN plus the threads a host program
+    // runs in the EXTERNAL domain (star::host). The user can override via
+    // --dynamicThreadConstMapPermits, which is honored as-is (no clamp to
+    // runThreadN); pass 0 for the auto-sized default.
+    const star::host::Hooks* hostHooks = P.hostHooks;
+    const int hostExtraThreads =
+        (hostHooks != nullptr && hostHooks->extraPermitThreads != nullptr)
+        ? std::max(0, hostHooks->extraPermitThreads(hostHooks->ctx))
+        : 0;
+    const int permitTotalThreads = P.runThreadN + hostExtraThreads;
     const int configuredPermits = (P.dynamicThreadConstMapPermits > 0)
         ? P.dynamicThreadConstMapPermits
         : permitTotalThreads;
     int configuredMapFloor = std::max(0, P.dynamicThreadMapFloor);
     int configuredFeatureFloor = std::max(0, P.dynamicThreadFeatureFloor);
-    int configuredAtacFloor = std::max(0, P.dynamicThreadAtacFloor);
+    int configuredExternalFloor = 0;
     if (!g_threadChunks.mapPermitHierarchyEnabled()) {
     g_threadChunks.mapPermitConfigure(interfaceEnabled, permitTotalThreads, configuredPermits, telemetryEnabled, variableThreadsEnabled);
     g_threadChunks.mapPermitConfigureCpuAware(
@@ -947,35 +949,25 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     g_threadChunks.mapPermitConfigureRetunePlan(P.variableThreadsPermitSequence, P.variableThreadsRetuneEveryAcquires);
 
     // Per-domain borrowable floors (Step 5a). Index order must match
-    // ThreadControl::permitDomainIndex(): MAP=0, FEATURE=1, ATAC=2.
-    if (interfaceEnabled && P.chromapAtac.enabled == 1 &&
-        P.dynamicThreadAtacController == 2) {
-        const bool featureActive = P.dynamicThreadFeatureWorkEstimate > 0;
-        if (featureActive && configuredPermits < 3) {
-            ostringstream errOut;
-            errOut << "EXITING because of FATAL ERROR: three-domain saturation "
-                   << "control requires at least 3 configured permits, got "
-                   << configuredPermits;
-            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, 1, P);
+    // ThreadControl::permitDomainIndex(): MAP=0, FEATURE=1, EXTERNAL=2.
+    // A host program may replace the initial floors (star::host).
+    if (hostHooks != nullptr && hostHooks->initialFloors != nullptr) {
+        int floors[3] = {configuredMapFloor, configuredFeatureFloor, configuredExternalFloor};
+        std::string hostError;
+        if (!hostHooks->initialFloors(hostHooks->ctx, configuredPermits, floors, &hostError)) {
+            exitWithError("EXITING because of FATAL ERROR: "
+                              + (hostError.empty() ? std::string("host initial permit floors failed") : hostError),
+                          std::cerr, P.inOut->logMain, 1, P);
         }
-        star::multiome::SaturationPermitController::Config controllerConfig;
-        controllerConfig.configuredPermits = configuredPermits;
-        controllerConfig.fixedFeatureFloor = configuredFeatureFloor;
-        controllerConfig.featureActive = featureActive;
-        controllerConfig.workEstimates.map = P.dynamicThreadMapWorkEstimate;
-        controllerConfig.workEstimates.feature = P.dynamicThreadFeatureWorkEstimate;
-        controllerConfig.workEstimates.atac = P.dynamicThreadAtacWorkEstimate;
-        const star::multiome::SaturationPermitController controller(controllerConfig);
-        const auto initial = controller.initialDecision();
-        configuredMapFloor = initial.mapFloor;
-        configuredFeatureFloor = initial.featureFloor;
-        configuredAtacFloor = initial.atacFloor;
+        configuredMapFloor = floors[0];
+        configuredFeatureFloor = floors[1];
+        configuredExternalFloor = floors[2];
     }
     {
         std::vector<int> domainFloors(3, 0);
         domainFloors[0] = configuredMapFloor;
         domainFloors[1] = configuredFeatureFloor;
-        domainFloors[2] = configuredAtacFloor;
+        domainFloors[2] = configuredExternalFloor;
         g_threadChunks.mapPermitConfigureDomainFloors(domainFloors);
     }
     // FIFO waiter queue (Step 7). When enabled, ThreadControl serves
@@ -986,9 +978,10 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
         const auto initial = g_threadChunks.mapPermitSnapshot();
         configuredMapFloor = initial.mapDomain.floor;
         configuredFeatureFloor = initial.featureDomain.floor;
-        configuredAtacFloor = initial.atacDomain.floor;
+        configuredExternalFloor = initial.externalDomain.floor;
     }
 
+    const std::string externalLabel = ThreadControl::externalDomainLabel();
     if (interfaceEnabled) {
         pthread_mutex_lock(&g_threadChunks.mutexLogMain);
         P.inOut->logMain << "Dynamic thread interface enabled: map permits=" << configuredPermits
@@ -1000,11 +993,10 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
                          << ", cpuEmaAlpha=" << P.dynamicThreadPfControllerCpuEmaAlpha
                          << ", retuneEveryAcquires=" << P.variableThreadsRetuneEveryAcquires
                          << ", retuneSequenceLength=" << P.variableThreadsPermitSequence.size()
-                         << ", floors(map/feature/atac)="
+                         << ", floors(map/feature/" << externalLabel << ")="
                          << configuredMapFloor << "/"
                          << configuredFeatureFloor << "/"
-                         << configuredAtacFloor
-                         << ", atacController=" << P.dynamicThreadAtacController
+                         << configuredExternalFloor
                          << ", fifo=" << ((P.dynamicThreadFifoWaiters == 1) ? "on" : "off")
                          << ")\n" << flush;
         pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
@@ -1069,8 +1061,8 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
             ? snapshot.mapDomain.inUsePermitNs / elapsedNs : 0.0;
         const double featureOccupancy = elapsedNs > 0.0
             ? snapshot.featureDomain.inUsePermitNs / elapsedNs : 0.0;
-        const double atacOccupancy = elapsedNs > 0.0
-            ? snapshot.atacDomain.inUsePermitNs / elapsedNs : 0.0;
+        const double externalOccupancy = elapsedNs > 0.0
+            ? snapshot.externalDomain.inUsePermitNs / elapsedNs : 0.0;
         const double idlePermitAverage = elapsedNs > 0.0
             ? snapshot.availablePermitNs / elapsedNs : 0.0;
 
@@ -1102,19 +1094,19 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
                          << ", floorsActive=" << (snapshot.floorsActive ? "yes" : "no")
                          << ", fifo=" << (snapshot.fifoEnabled ? "on" : "off")
                          << ", fifoDepth=" << snapshot.fifoQueueDepth
-                         << ", occupancyAvg(map/feature/atac/idle)="
+                         << ", occupancyAvg(map/feature/" << externalLabel << "/idle)="
                          << mapOccupancy << "/" << featureOccupancy << "/"
-                         << atacOccupancy << "/" << idlePermitAverage
+                         << externalOccupancy << "/" << idlePermitAverage
                          << ", contendedIdlePermitMs="
                          << (snapshot.contendedIdlePermitNs / 1.0e6)
                          << ", noAdmissibleGrants="
                          << snapshot.noAdmissibleGrantEvents
                          << ", floorChanges=" << snapshot.floorChangeCalls
-                         << ", domainWork(mapUnits,mapBytes,atacUnits,atacBytes)="
+                         << ", domainWork(mapUnits,mapBytes," << externalLabel << "Units," << externalLabel << "Bytes)="
                          << snapshot.mapDomain.workUnitsTotal << ","
                          << snapshot.mapDomain.workBytesTotal << ","
-                         << snapshot.atacDomain.workUnitsTotal << ","
-                         << snapshot.atacDomain.workBytesTotal
+                         << snapshot.externalDomain.workUnitsTotal << ","
+                         << snapshot.externalDomain.workBytesTotal
                          << ", mapState(floor,inUse,maxInUse,waiters,maxWaiters,blocked,fast,queued,releases)="
                          << snapshot.mapDomain.floor << ","
                          << snapshot.mapDomain.inUse << ","
@@ -1125,16 +1117,16 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
                          << snapshot.mapDomain.fastAcquireCalls << ","
                          << snapshot.mapDomain.queuedGrantCalls << ","
                          << snapshot.mapDomain.releaseCalls
-                         << ", atacState(floor,inUse,maxInUse,waiters,maxWaiters,blocked,fast,queued,releases)="
-                         << snapshot.atacDomain.floor << ","
-                         << snapshot.atacDomain.inUse << ","
-                         << snapshot.atacDomain.maxInUse << ","
-                         << snapshot.atacDomain.currentWaiters << ","
-                         << snapshot.atacDomain.maxWaiters << ","
-                         << snapshot.atacDomain.blockedAcquireCalls << ","
-                         << snapshot.atacDomain.fastAcquireCalls << ","
-                         << snapshot.atacDomain.queuedGrantCalls << ","
-                         << snapshot.atacDomain.releaseCalls
+                         << ", " << externalLabel << "State(floor,inUse,maxInUse,waiters,maxWaiters,blocked,fast,queued,releases)="
+                         << snapshot.externalDomain.floor << ","
+                         << snapshot.externalDomain.inUse << ","
+                         << snapshot.externalDomain.maxInUse << ","
+                         << snapshot.externalDomain.currentWaiters << ","
+                         << snapshot.externalDomain.maxWaiters << ","
+                         << snapshot.externalDomain.blockedAcquireCalls << ","
+                         << snapshot.externalDomain.fastAcquireCalls << ","
+                         << snapshot.externalDomain.queuedGrantCalls << ","
+                         << snapshot.externalDomain.releaseCalls
                          << "\n" << flush;
         pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
     }

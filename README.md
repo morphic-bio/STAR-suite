@@ -42,7 +42,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 - **Transcriptome Output** (`--quantTranscriptomeSAMoutput`): Replaces the former `--quantTranscriptomeBan` with more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
 - **Reference Automation** (`--autoIndex Yes`): Automated reference download/build with `--cellrangerStyleIndex Yes` formatting and `--genomeGenerateTranscriptome Yes` for transcript-level quant workflows.
 - **Native Gzip FASTQ Handling**: Automatic detection of `.gz` FASTQ inputs with internal zlib streaming — no `--readFilesCommand zcat` needed for correctness. FLEX FASTQ production recipes use this path by default; legacy external helper mode remains available via `--readFilesLegacyZcat Yes`.
-- **CBQ/BINSEQ Input** (`--readFilesType Binseq PE|SE`): Native C++ CBQ reader plus an order-preserving FASTQ/FASTQ.gz-to-CBQ encoder for STAR mapper, STARsolo, OCM, Flex, SLAM, and process_features adapter workflows. Exact FASTQ-vs-CBQ parity smokes are registered in the production regression manifest. See [`docs/CBQ_FORMAT_AND_IMPLEMENTATION.md`](docs/CBQ_FORMAT_AND_IMPLEMENTATION.md) for the format and adapter reference. Multiome ATAC now also supports the native libchromap CBQ path with paired-read and barcode CBQs.
+- **CBQ/BINSEQ Input** (`--readFilesType Binseq PE|SE`): Native C++ CBQ reader plus an order-preserving FASTQ/FASTQ.gz-to-CBQ encoder for STAR mapper, STARsolo, OCM, Flex, SLAM, and process_features adapter workflows. Exact FASTQ-vs-CBQ parity smokes are registered in the production regression manifest. See [`docs/CBQ_FORMAT_AND_IMPLEMENTATION.md`](docs/CBQ_FORMAT_AND_IMPLEMENTATION.md) for the format and adapter reference.
 - **Cutadapt-Compatible Trimming** (`--trimCutadapt Yes`): Native cutadapt-style trimming for bulk/PE workflows. Compatibility mode: `--trimCutadaptCompat Cutadapt3`.
 - **Poly-G Trimming** (`--clip3pPolyG yes|no|auto`): Trims poly-G artifacts common on NovaSeq/NextSeq platforms. Default `auto` activates in CellRanger4 mode. Without this, poly-G reads can inflate specific genes (e.g., LINC00486) and degrade gene-level correlations.
 - **Samtools-style BAM Sorting** (`--outBAMsortMethod samtools`): Spill-to-disk sort to reduce peak RAM pressure. Works with all modes including Flex.
@@ -105,9 +105,10 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 ## Modules
 
 - **STAR-core** (`core/`): Legacy STAR (indexing, bulk, Solo) plus shared utilities.
-  Build: `make core` for the Chromap-enabled multiome-capable binary at
-  `core/legacy/source/STAR`; use `make core-portable` for an explicit
-  no-Chromap compatibility build.
+  Build: `make core` for the binary at `core/legacy/source/STAR`. STAR Suite
+  depends on no other suite. The joint RNA + ATAC (multiome) binary is built
+  by Multiomics Suite, which links STAR Suite through its host interface
+  ([`docs/HOST_API.md`](docs/HOST_API.md)).
 - **STAR-perturb** (`core/legacy/` + `core/features/process_features/`): CR-compatible perturb-seq path with integrated feature extraction/calling (`process_features` + `call_features`) and `crispr_analysis/` outputs in CR-compat mode.
   Primary run path: `STAR --pfMultiConfig ... --defaultCrCompat yes` (see STAR-perturb section below).
 - **STAR-OCM scRNA-seq** (`core/legacy/`): GEM-X OCM support on the CR-compatible
@@ -211,11 +212,11 @@ files.
 ### From source
 
 ```bash
-# Core STAR binary, including Chromap (requires Chromap-suite and external HTSlib)
+# Core STAR binary (STAR's bundled HTSlib; no other suite required)
 make core
 
-# Explicit standalone RNA/Flex/SLAM build; retains STARsolo and poly-G trimming
-make core-portable
+# Same binary compiled against an installed HTSlib (pkg-config htslib)
+make core HTSLIB=external
 
 # Module-focused builds
 make flex           # core + Flex tools
@@ -244,13 +245,17 @@ make default EXCLUDE="flex-tools"
 
 Run `make help` to see the full target list and descriptions.
 
-The default core build requires a sibling `../Chromap-suite` checkout (including
-its submodules) and HTSlib development headers/library. Set `CHROMAP_SUITE_DIR`
-for another checkout location; `PKG_CONFIG_PATH` selects a non-system HTSlib
-installation. See [source prerequisites](docs/compile_instructions.md).
-Do not copy or symlink the bundled HTSlib headers into another directory.
-When changing between Chromap-enabled and portable builds, run `make core-clean`
-first.
+`make core` uses STAR's bundled HTSlib and needs no other checkout.
+`make core-portable` is kept as an alias. `HTSLIB=external` selects an installed
+HTSlib; `PKG_CONFIG_PATH` selects a non-system installation. See
+[source prerequisites](docs/compile_instructions.md). Do not copy or symlink the
+bundled HTSlib headers into another directory. When changing the HTSlib
+selection, run `make core-clean` first.
+
+Since 1.10.0 STAR Suite no longer links Chromap Suite. The `--chromapAtac*`,
+`--multiomeAtac*` and ATAC-only permit parameters moved with the multiome binary
+to Multiomics Suite. `make star-host-lib` builds `libstar_suite.a` for host
+programs such as that binary; see [`docs/HOST_API.md`](docs/HOST_API.md).
 
 ### From release artifacts
 
@@ -772,14 +777,15 @@ instead of `127.0.0.1`.
    and a checklist of required input files.
 5. **Copy and run** -- paste the command into your terminal.
 
-On localhost, **Run in shell** starts the selected workflow. The 1.9.5.b
-Multiome flow provides **Run sample**, status, logs, cancellation, and executable
-hashes in its run record. See [Multiome setup and build commands](docs/LAUNCHPAD_MULTIOME.md).
+On localhost, **Run in shell** starts the selected workflow. The portable
+launcher and browser assets from 1.9.5.b are included here: use
+`star-suite-launchpad --setup` once, then `star-suite-launchpad`. From this
+source tree, use `python3 scripts/launchpad_cli.py` with the same options.
 
-The 1.9.5.b package includes `star-suite-launchpad --setup` (once), then
-`star-suite-launchpad`. In this source tree, use `python3 scripts/launchpad_cli.py`
-with the same options. Multiome requires a Chromap-enabled source build; the
-portable package's STAR binary omits Chromap.
+STAR 1.10 delegates the Multiome engine to Multiomics Suite. The pinned catalog's
+legacy Multiome recipe requires an external STAR 1.9.5.b runtime; its managed
+job checks reject the standalone STAR 1.10 executable. See
+[Multiome ownership and compatibility](docs/LAUNCHPAD_MULTIOME.md).
 
 Design details: [`plans/star_launchpad_v1_runbook.md`](plans/star_launchpad_v1_runbook.md)
 

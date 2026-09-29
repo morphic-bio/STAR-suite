@@ -16,8 +16,8 @@ TRIM_QC_MERGE_BIN="${TRIM_QC_MERGE_BIN:-$src/trim_qc_merge}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-[ -x "$STAR_BIN" ] || make -C "$src" STAR WITH_CHROMAP=0 >/dev/null
-[ -x "$TRIM_QC_MERGE_BIN" ] || make -C "$src" trim_qc_merge WITH_CHROMAP=0 >/dev/null
+[ -x "$STAR_BIN" ] || make -C "$src" STAR >/dev/null
+[ -x "$TRIM_QC_MERGE_BIN" ] || make -C "$src" trim_qc_merge >/dev/null
 
 READS=2000
 python3 - "$work" "$READS" <<'PY'

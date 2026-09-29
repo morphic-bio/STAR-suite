@@ -54,10 +54,12 @@ Licence facts, verified 2026-09-27 against Wayback Machine copies (the live 10x 
 
 ## Build and Smoke Tests
 
-- Core build: `make core` (binary: `core/legacy/source/STAR`) builds the
-  Chromap-enabled multiome-capable STAR by default. Use `make core-portable` or
-  `make core WITH_CHROMAP=0` only for explicit no-Chromap compatibility builds
-  (see `docs/LIBCHROMAP_CONTRACT.md`).
+- Core build: `make core` (binary: `core/legacy/source/STAR`) builds STAR with
+  its bundled HTSlib; `make core HTSLIB=external` uses an installed HTSlib.
+  STAR Suite links no other suite. Since 1.10.0 the multiome (Chromap ATAC)
+  binary and its integration code live in Multiomics Suite; do not add
+  Chromap, RapidMACS or ATAC mapping/peak code here. (The CAT-ATAC guide arm
+  is a feature-barcode feature and stays in STAR.)
 - Flex tools: `make flex` or `make flex-tools`.
 - Feature tools: `make feature-barcodes-tools`.
 - CB/UB regression: `tests/run_cbub_regression_test.sh`.
@@ -90,8 +92,6 @@ Licence facts, verified 2026-09-27 against Wayback Machine copies (the live 10x 
   binary.
 - Clean rebuild command:
   `make -C core/legacy/source clean && make -C core/legacy/source -j8 STAR`.
-  This now builds the Chromap-enabled multiome binary by default; pass
-  `WITH_CHROMAP=0` only when intentionally testing the portable stub build.
 - This applies after switching branches/commits, cherry-picking, reverting
   files, or any operation that changes source without rebuilding all objects.
 - This is especially important for Flex/Solo debugging; stale objects can
@@ -357,6 +357,7 @@ Workflow schemas: `mcp_server/workflows/`
 - `docs/Github-actions.md`
 - `docs/CBQ_FORMAT_AND_IMPLEMENTATION.md`
 - `docs/Star-binary-distribution.md`
+- `docs/HOST_API.md`
 - `docs/feature_barcodes.md`
 - `docs/RUNBOOK_REPOSITORY_SPLIT_RECIPES_PROVENANCE.md`
 - `docs/todos`

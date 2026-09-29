@@ -19,7 +19,7 @@ with tempfile.TemporaryDirectory(prefix='star-default-generation-') as tmp:
     # Suppress unrelated dependency scanning; use the real generation rule.
     (root / 'Depend.list').write_text('')
     command = ['make', '-f', str(makefile), '-o', 'Depend.list',
-               'WITH_CHROMAP=0', 'parametersDefault.xxd']
+               'parametersDefault.xxd']
     expected = subprocess.check_output(['xxd', '-i', source.name], cwd=root)
     subprocess.run(command, cwd=root, check=True, stdout=subprocess.PIPE)
     assert header.read_bytes() == expected, 'equal-mtime stale header survived'

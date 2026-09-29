@@ -49,12 +49,15 @@ struct LibraryEntry {
     string starHashDemux;              // yes | no | auto | empty (auto)
     string starHashFeatureSelector;    // feature_type:HTO, id_prefix:hashtag, ...
     string starHashDemuxMethod;        // ratio (default)
+    string starHashSampleTable;
+    double starHashMinPairRatio = 2.0;
     int starHashMinTotal = -1;
     int starHashMinTop = -1;
     double starHashMinRatio = -1.0;
 
     // Optional per-library calls from the filtered feature MEX.
     string starFeatureCaller;           // dominant | empty (disabled)
+    double starFeatureCallFdr = 0.01;
     int starFeatureCallMinUmi = -1;     // default 1 when dominant
     double starFeatureCallMinRatio = -1.0; // default 1.0 when dominant
 

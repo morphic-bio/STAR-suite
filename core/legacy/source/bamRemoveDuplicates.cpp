@@ -1,7 +1,7 @@
 #include <unordered_map>
 #include "bamRemoveDuplicates.h"
 #include <iostream>
-#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#if defined(STAR_EXTERNAL_HTSLIB) && STAR_EXTERNAL_HTSLIB
 #include <htslib/sam.h>
 #else
 #include "htslib/htslib/sam.h"

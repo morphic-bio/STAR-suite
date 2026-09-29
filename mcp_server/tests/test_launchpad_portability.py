@@ -20,7 +20,8 @@ from mcp_server.launchpad.multiome import FASTQ_GROUPS, REFERENCES, runtime_chec
 from mcp_server.tools.workflows import render_workflow_command, validate_workflow_parameters
 
 ROOT = Path(__file__).resolve().parents[2]
-API = "/launchpad/api/workflows/morphic_multiome"
+WORKFLOW_ID = "starsuite.official/multiome"
+API = "/launchpad/api/workflows/starsuite.official%2Fmultiome"
 
 
 @pytest.fixture
@@ -89,7 +90,7 @@ def test_data_roots_are_explicit_site_configuration(portable, tmp_path, monkeypa
 
 def test_labels_required_inputs_and_namespaced_route(portable, inputs):
     with TestClient(build_http_app(), base_url="http://127.0.0.1") as client:
-        for workflow in ("morphic_multiome", "starsuite.official%2Fmultiome"):
+        for workflow in ("starsuite.official%2Fmultiome",):
             response = client.get(f"/launchpad/api/workflows/{workflow}/schema")
             assert response.status_code == 200, response.text
             fields = {p["name"]: p for p in response.json()["parameters"]}
@@ -99,7 +100,7 @@ def test_labels_required_inputs_and_namespaced_route(portable, inputs):
             assert all(fields[name]["required"] and fields[name]["default"] is None for name in REFERENCES)
         assert client.get("/launchpad/").status_code == 200
         assert client.post(API + "/render", json={"params": {}}).status_code == 400
-    rendered = render_workflow_command("morphic_multiome", inputs)
+    rendered = render_workflow_command(WORKFLOW_ID, inputs)
     assert str(portable / "share/star-suite/catalogs/official/scripts") in rendered.entry_script
     assert "--dry-run" not in rendered.argv
     assert "--stop-after-local-mex" in rendered.argv
@@ -111,7 +112,7 @@ def test_labels_required_inputs_and_namespaced_route(portable, inputs):
     {"chromap_threads": 0}, {"skip_build": False}, {"stop_after_local_mex": False},
 ])
 def test_reject_bad_inputs_before_execution(portable, inputs, change):
-    result = validate_workflow_parameters("morphic_multiome", {**inputs, **change}, check_paths=True)
+    result = validate_workflow_parameters(WORKFLOW_ID, {**inputs, **change}, check_paths=True)
     assert not result.valid
 
 
@@ -122,11 +123,11 @@ def test_lane_normalization_and_real_recipe_dry_run(portable, inputs, fake_runti
     extra.touch()
     inputs["gex_r1"] += "\n" + str(extra)
     inputs["gex_r2"] += ", " + str(extra)
-    result = validate_workflow_parameters("morphic_multiome", inputs, check_paths=True)
+    result = validate_workflow_parameters(WORKFLOW_ID, inputs, check_paths=True)
     assert result.valid, result.errors
     assert "\n" not in result.normalized_params["gex_r1"]
     params = {**result.normalized_params, "dry_run": True}
-    rendered = render_workflow_command("morphic_multiome", params)
+    rendered = render_workflow_command(WORKFLOW_ID, params)
     env = {k: v for k, v in os.environ.items() if not k.startswith("STAR_MULTIOME_")}
     env.update(rendered.env_overrides)
     assert "star_bin" not in rendered.argv and "atac_peak_mex_bin" not in rendered.argv
@@ -165,7 +166,7 @@ def wait_job(client, job_id):
 
 
 def test_job_result_logs_record_and_fresh_output(portable, fake_runtime):
-    entry = portable / get_workflow_schema("morphic_multiome").entry_script
+    entry = config_module.get_workflow_root(WORKFLOW_ID) / get_workflow_schema(WORKFLOW_ID).entry_script
     entry.write_text('''#!/usr/bin/env python3
 import sys
 from pathlib import Path
@@ -184,7 +185,7 @@ print('fixture completed', flush=True)
 
 
 def test_serial_jobs_cancel_and_access_guards(portable, fake_runtime):
-    entry = portable / get_workflow_schema("morphic_multiome").entry_script
+    entry = config_module.get_workflow_root(WORKFLOW_ID) / get_workflow_schema(WORKFLOW_ID).entry_script
     entry.write_text("#!/usr/bin/env python3\nimport time\ntime.sleep(60)\n")
     with TestClient(build_http_app(), base_url="http://127.0.0.1") as client:
         for headers in ({"Host": "evil.example"}, {"Origin": "http://evil.example"}):
@@ -219,7 +220,8 @@ def test_installed_payload_resolves_without_checkout(installed):
     assert cfg.paths.repo_root == root
     assert str(prefix / "bin") in cfg.trusted_roots
     assert not cfg.scripts and not cfg.datasets
-    for workflow in ("morphic_multiome", "starsuite.official/multiome"):
+    assert config_module.get_workflow_config("morphic_multiome") is None
+    for workflow in (WORKFLOW_ID,):
         schema = get_workflow_schema(workflow)
         origin = config_module.get_workflow_root(workflow)
         assert (origin / schema.entry_script).is_file()
@@ -271,8 +273,9 @@ time.sleep(1)
             # No CDN or other external browser resource is needed.
             page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(base + "/") else route.abort())
             page.goto(base + "/launchpad/")
-            page.locator('#recipe-select option[value="morphic_multiome"]').wait_for(state="attached")
-            page.locator("#recipe-select").select_option("morphic_multiome")
+            page.get_by_label("Include test & other recipes").check()
+            page.locator(f'#recipe-select option[value="{WORKFLOW_ID}"]').wait_for(state="attached")
+            page.locator("#recipe-select").select_option(WORKFLOW_ID)
             field = lambda name: page.locator(f'[data-param="{name}"]')
             field("atac_r2").wait_for()
             assert "ATAC R3" in field("atac_r2").inner_text()
@@ -292,7 +295,7 @@ time.sleep(1)
             assert "fixture recipe started" in page.locator("#multiome-job-log").inner_text()
             page.reload()
             playwright.expect(page.locator("#multiome-job-status")).to_contain_text("succeeded", timeout=10000)
-            playwright.expect(page.locator("#recipe-select")).to_have_value("morphic_multiome")
+            playwright.expect(page.locator("#recipe-select")).to_have_value(WORKFLOW_ID)
             playwright.expect(field("gex_r1").locator("textarea:visible")).to_have_value(fake_runtime["gex_r1"])
             evidence = ROOT / "tests/launchpad_portability_output"
             evidence.mkdir(parents=True, exist_ok=True)

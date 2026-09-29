@@ -10,7 +10,7 @@ import subprocess
 import shutil
 import hashlib
 
-WORKFLOW_IDS = {"morphic_multiome", "starsuite.official/multiome"}
+WORKFLOW_IDS = {"starsuite.official/multiome"}
 FASTQ_GROUPS = [("gex_r1", "gex_r2"), ("atac_r1", "atac_barcode", "atac_r2")]
 CBQ_INPUTS = ("gex_cbq", "atac_read_pair_cbq", "atac_barcode_cbq")
 REFERENCES = ("genome_dir", "gex_whitelist", "chromap_ref", "chromap_index",
@@ -20,8 +20,8 @@ REFERENCES = ("genome_dir", "gex_whitelist", "chromap_ref", "chromap_index",
 def prepare_schema(schema):
     """Apply the same form contract to the built-in alias and pinned catalog."""
     from ..schemas.workflow import WorkflowParameterDef, WorkflowParameterGroup
-    schema.title = "10x Multiome v1 — RNA + ATAC"
-    schema.summary = "Run paired RNA and ATAC libraries to produce RNA matrices, ATAC peaks and a peak-by-cell matrix. Omit I1/I2 sample index files."
+    schema.title = "10x Multiome v1 — legacy STAR 1.9 recipe"
+    schema.summary = "Legacy catalog recipe for an external Chromap-enabled STAR 1.9.5.b runtime. STAR 1.10 cannot run it; use Multiomics Suite for the current Multiome engine. Omit I1/I2 sample index files."
     labels = {"gex_r1": "RNA R1 — cell barcode + UMI", "gex_r2": "RNA R2 — cDNA",
               "atac_r1": "ATAC R1 — genomic mate 1", "atac_barcode": "ATAC R2 — cell barcode",
               "atac_r2": "ATAC R3 — genomic mate 2", "out_dir": "New output directory",
@@ -105,9 +105,9 @@ def runtime_check(params, root):
         features = json.loads(result.stdout)
         chromap = features["chromap_atac"] is True
     except (ValueError, TypeError, KeyError):
-        raise ValueError("Select STAR Suite 1.9.5.b or newer with --build-features support and Chromap enabled.") from None
+        raise ValueError("This legacy recipe requires an external STAR Suite 1.9.5.b runtime with --build-features support and Chromap enabled. STAR 1.10 delegates Multiome to Multiomics Suite.") from None
     if result.returncode or not chromap:
-        raise ValueError("This STAR binary was built without Chromap. Select a build made with WITH_CHROMAP=1; the portable STAR package cannot run Multiome.")
+        raise ValueError("This STAR binary was built without Chromap. STAR 1.10 delegates Multiome to Multiomics Suite. For this legacy catalog recipe, explicitly select an external Chromap-enabled STAR 1.9.5.b runtime.")
     return {"binary": env["STAR_BIN"], "binary_sha256": _sha256(env["STAR_BIN"]),
             "features": features, "atac_helper": env["BUILD_ATAC_MEX_NATIVE"],
             "atac_helper_sha256": _sha256(env["BUILD_ATAC_MEX_NATIVE"]), "env": env}

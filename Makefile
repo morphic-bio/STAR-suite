@@ -32,7 +32,7 @@ DEV_RELEASE_BRANCH ?= dev-release
 DEV_RELEASE_BASE ?= master
 DEV_RELEASE_VERSION_BRANCH = $(DEV_RELEASE_BRANCH)-v$(RELEASE_VERSION)
 RC_TAG = v$(RELEASE_VERSION)-rc$(RC)
-DEV_RELEASE_CHECK_SCRIPTS := tests/run_production_module_regression_suite.sh tests/run_star_chromap_macs3_lowmem_smoke_100k.sh
+DEV_RELEASE_CHECK_SCRIPTS := tests/run_production_module_regression_suite.sh
 
 default: $(DEFAULT_BUILD)
 
@@ -44,13 +44,14 @@ build: default
 
 help:
 	@echo "STAR-suite build targets:"
-	@echo "  make core            Build Chromap-enabled STAR core binary"
-	@echo "  make core-portable   Build STAR core without libchromap"
+	@echo "  make core            Build the STAR core binary (bundled HTSlib)"
+	@echo "  make core-portable   Alias for make core"
+	@echo "  make star-host-lib   Build libstar_suite.a for host programs (docs/HOST_API.md)"
+	@echo "  make host-api-tests  Build STAR + host library and run tests/host_api"
 	@echo "  make flex            Build core + Flex tools"
 	@echo "  make slam            Build core + SLAM tools"
 	@echo "  make tools           Build all external tools"
 	@echo "  make feature-barcodes-tools  Build feature barcode tools (assignBarcodes/demux)"
-	@echo "  make star-libchromap-contract Build STAR-owned libchromap contract runner"
 	@echo "  make vbem-transcriptvb-finalize Build standalone TranscriptVB gather/finalizer"
 	@echo "  make trim-qc-tools    Build standalone trim-QC collector and shard merger"
 	@echo "  make release-companion-tools Build portable release companion executables"

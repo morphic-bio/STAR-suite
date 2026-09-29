@@ -15,6 +15,7 @@
 class TieredCache {
 public:
     void init(const std::vector<Record>& allRecords);
+    void setLegacyNegativePolicy(bool enabled) { legacyNegativePolicy_ = enabled; }
     FlexHashScreenDecision classifyRead(const char* readSeq, uint32_t readLen,
                                         uint16_t sampleIdx) const;
 
@@ -27,6 +28,7 @@ public:
     size_t crossTierDuplicates() const { return crossTierDups_; }
 
 private:
+    bool legacyNegativePolicy_ = false;
     bool findExact(const std::vector<Record>& arr,
                    uint64_t seqLo, uint64_t seqHi, uint16_t sampleIdx,
                    Record& out) const;

@@ -166,14 +166,6 @@ workflows:
     schema_file: mcp_server/workflows/star_perturb_cr_compat.yaml
     visibility: public
 
-  - id: morphic_multiome
-    title: 10x Multiome v1 — RNA + ATAC
-    summary: Public cross-repo recipe surface for morphic-recipes/scripts/run_star_multiome_lane_smoke.sh, including compose-up profiles and MACS3 q-value peak selection.
-    entry_script: share/star-suite/catalogs/official/scripts/run_star_multiome_lane_smoke.sh
-    kind: shell_workflow
-    schema_file: mcp_server/workflows/morphic_multiome.yaml
-    visibility: public
-
   - id: "jax_scrnaseq02_ocm_composite_smoke"
     title: "JAX scRNAseq02 OCM Composite Smoke"
     summary: "Native OCM flex/composite-barcode smoke harness with optional STAR run, materialization, and CR artifact comparison."

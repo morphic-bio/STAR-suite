@@ -1421,9 +1421,8 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
             // (and may be re-targeted by a deliberately-ticking controller
             // such as PfPermitController). Re-targeting from every map-worker
             // acquire is policy in the hot path and silently re-clamped the
-            // pool to runThreadN, undoing the wider chromapAtac budget.
-            // See multiomic-atac-scrna plans/2026-04-27-atac-permits-controller-followups.md
-            // Step 3.
+            // pool to runThreadN, undoing a wider pool that includes a host's
+            // external-domain threads.
             waitNs = g_threadChunks.mapPermitAcquire();
         }
         const auto workStart = std::chrono::steady_clock::now();

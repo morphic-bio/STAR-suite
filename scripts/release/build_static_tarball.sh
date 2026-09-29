@@ -317,8 +317,8 @@ Note:
     bin/star-suite-launchpad --setup
     bin/star-suite-launchpad
   Open http://127.0.0.1:8765/launchpad/ in your browser.
-  Multiome requires a separate Chromap-enabled STAR source build and its
-  star_multiome_atac_peak_mex helper. This portable binary omits Chromap.
+  STAR 1.10 delegates Multiome to Multiomics Suite. The pinned catalog's legacy
+  recipe requires external STAR 1.9.5.b executables and cannot use this binary.
   Linux decides whether a binary may run on a given system.
   If an operating system rejects a binary built for a newer runtime environment,
   use a lower-compatibility tarball or the installer bundle.
