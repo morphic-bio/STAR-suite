@@ -1904,6 +1904,13 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
 
 ## Host interface tests (1.10.0)
 
+- `tests/test_reproducible_library_builds.py` creates isolated
+  `/tmp/star-library-build-test-*` compiler probes and dry-run build inputs;
+  they are removed on exit.
+- `/mnt/pikachu/star_suite_v1100_gates_20260928/deterministic_build_fix_20260929/`:
+  fresh source export, strict compiler launchers, build log and targeted
+  EmptyDrops/host API/TranscriptVB validation for the post-rc1 build fixes.
+
 - `tests/host_api/run_host_api_tests.sh` (`make host-api-tests`) writes the
   test host, the synthetic scRNA fixtures and all STAR/host outputs under a
   fresh `/tmp/star-host-api.*`, or under `HOST_API_TEST_OUT` when set. It does

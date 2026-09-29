@@ -69,6 +69,7 @@ clean:
 	rm -f $(SIMPLEED_TOOL)
 
 # Dependency on headers
+src/EmptyDropsCRSampler.o src/OrdMagStage.o src/OccupancyGuard.o: include/pcg_extras.hpp include/pcg_uint128.hpp
 src/EmptyDropsCRSampler.o: include/EmptyDropsCRSampler.h include/scrna_types.h include/pcg_random.hpp include/ParallelTasks.h include/ThreadPermits.h
 src/EmptyDropsMultinomial.o: include/SparseCountView.h include/EmptyDropsMultinomial.h include/EmptyDropsCRSampler.h include/CRLogProb.h include/scrna_types.h include/SimpleGoodTuring/sgt.h
 src/OrdMagStage.o: include/OrdMagStage.h include/OrdMagRank.h include/ParallelTasks.h include/ThreadPermits.h include/scrna_types.h include/pcg_random.hpp

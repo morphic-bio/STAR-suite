@@ -6,6 +6,27 @@ records below are retained as history. Runbook:
 
 ## State
 
+### Deterministic library build fixes (2026-09-29)
+
+The author authorized fixing the two Multiomics strict-build blockers in STAR.
+The branch now uses a fixed literal in PCG's `static_arbitrary_seed` helper,
+preserving its interface and the vendored license notice. STAR's scientific
+samplers use explicit seeds; their code is unchanged. libem no longer adds
+`-march=native`: it uses the compiler's target baseline, with explicit target
+overrides still accepted in `CXXFLAGS`. libscrna's three PCG consumers now
+depend on the supporting headers so edits trigger recompilation.
+
+`tests/test_reproducible_library_builds.py` reproduced both original failures
+and now passes: strict date-macro compilation in two directories and with two
+epochs, the unchanged explicitly seeded PCG sequence, and libem's default and
+caller-supplied compile flags. It runs in partial-build CI, including the
+release pipeline's prerequisite job. Clean strict host-library build and
+runtime regression validation are pending at this source checkpoint.
+
+The existing v1.10.0-rc1 tag is unchanged. These are post-rc1 source fixes;
+the historical gate acceptance below applies to the earlier candidate.
+No new tag, push, master merge or gate waiver is included.
+
 ### Local release candidate (2026-09-29)
 
 After acceptance of G-S1/G-S2/G-S3, the owner asked to start 1.10 version

@@ -36,6 +36,7 @@ jobs:
         run: |
           python3 tests/test_parameters_default_generation.py
           python3 tests/test_htslib_build_discovery.py
+          python3 tests/test_reproducible_library_builds.py
           python3 tests/test_scrna_regression_report.py
       - name: Build target from a fresh source export
         env:

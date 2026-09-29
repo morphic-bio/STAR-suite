@@ -61,6 +61,20 @@ that tag only in `AGENTS.md`; it is code-equivalent, not the same Git commit.
 
 ## Steps
 
+**2026-09-29 deterministic-build repair:** the author authorized changing
+STAR to unblock the Multiomics strict build. Replace PCG's unused build-time
+seed helper input with a fixed literal, retain the explicit scientific seed
+paths, remove libem's implicit host-CPU selection, and track PCG support-header
+dependencies in libscrna. The new reproducible-library regression reproduced
+the original date-macro/native-CPU failures and passes after the fixes; it is
+part of partial-build CI. Next validate a fresh source export with strict
+compiler launchers (`-Werror=date-time`, no native CPU flags), static external
+HTSlib 1.23, `SOURCE_DATE_EPOCH=0`, fixed build place and prefix maps. Build at
+nice 10 with 12 jobs, then run EmptyDrops, host API and TranscriptVB checks.
+Keep evidence under
+`/mnt/pikachu/star_suite_v1100_gates_20260928/deterministic_build_fix_20260929/`.
+Do not move rc1 or treat these fixes as completion of the Multiomics gates.
+
 **2026-09-29 candidate creation:** following the owner's request to start
 1.10 version creation, create the local annotated `v1.10.0-rc1` tag from the
 accepted branch. No remote push or stable merge is included. Record the source

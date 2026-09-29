@@ -1,7 +1,9 @@
 # Makefile for libem - EM/VB quantification library
 
 CXX ?= g++
-CXXFLAGS_common := -std=c++11 -O3 -march=native -fopenmp -Wall -Wextra
+# Use the compiler's target baseline, independent of the build host's CPU.
+# Callers may supply explicit target flags through CXXFLAGS.
+CXXFLAGS_common := -std=c++11 -O3 -fopenmp -Wall -Wextra
 CXXFLAGS ?= -pipe
 AR ?= ar
 

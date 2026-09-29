@@ -22,11 +22,12 @@ needs would come as `v1.10.0-rc2`.
 
 ## Candidate limitations
 
-- Multiomics' strict reproducible build remains blocked by date/time macros
-  in the PCG helper header and libem's hard-coded `-march=native`. The ordinary
-  STAR builds and local regression gates pass; that does not establish the
-  stricter composed-build contract. Resolve these before stable release;
-  any source change after rc1 requires a new immutable candidate and validation.
+- The rc1 source contains date/time macros in the PCG helper header and
+  libem's hard-coded `-march=native`. Post-rc1 branch fixes replace the unused
+  arbitrary seed with a fixed literal and remove host-CPU detection, preserving
+  explicit scientific seeds. A new regression enforces both requirements.
+  Clean strict-build validation is pending; the Multiomics integration gates
+  and a new immutable candidate are still required before stable release.
 - The bundled official recipe catalog remains the pinned 1.9.5 snapshot.
   Its multiome recipes have not yet migrated to the Multiomics executable
   and must not be treated as supported standalone STAR 1.10 workflows.
