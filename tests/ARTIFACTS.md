@@ -1846,3 +1846,11 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
   It defaults to a unique `/tmp/star-flex-removal.*` directory.
 - Packed-count unit binary: `core/legacy/test/test_flex_probe_region`;
   generated binaries, matrices, caches and logs are not committed.
+
+## Launchpad portability (2026-09-29)
+
+- `tests/launchpad_portability_output/`: ignored build/test logs and installed
+  Chromium UI screenshot for the 1.9.5.b candidate.
+- Pytest temporary directories contain relocated payloads, synthetic reference
+  files, tiny fixture executables, recipe previews, and job records. No biological
+  dataset was processed by these tests.

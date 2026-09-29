@@ -7,6 +7,7 @@ Build-Depends:
  build-essential,
  xxd | vim-common,
  pkg-config,
+ python3-yaml,
  zlib1g-dev,
  libbz2-dev,
  liblzma-dev,
@@ -20,7 +21,7 @@ Homepage: https://github.com/morphic-bio/STAR-suite
 
 Package: star-suite
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
+Depends: ${shlibs:Depends}, ${misc:Depends}, python3, python3-venv
 Description: STAR-suite binary package for STAR, SLAM, Flex, and perturb tooling
  STAR-suite extends upstream STAR with integrated modules for SLAM-seq,
  Flex processing, perturb-seq compatibility, and helper tools.

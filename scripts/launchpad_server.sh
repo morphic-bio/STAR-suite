@@ -25,8 +25,12 @@ EOF
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-pidfile="${repo_root}/plans/artifacts/launchpad_server.pid"
-logfile="${repo_root}/plans/artifacts/launchpad_server.log"
+instance_id="$(printf '%s' "${repo_root}" | sha256sum | cut -c1-12)"
+state_dir="${XDG_STATE_HOME:-${HOME}/.local/state}/star-suite/launchpad/${instance_id}"
+pidfile="${state_dir}/server.pid"
+logfile="${state_dir}/server.log"
+# Invocation must work from any current directory, including installed wrappers.
+cd "${repo_root}"
 
 cmd="${1:-}"
 shift || true
@@ -225,4 +229,3 @@ case "$cmd" in
     exit 2
     ;;
 esac
-

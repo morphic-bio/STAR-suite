@@ -93,6 +93,8 @@ function launchpadApp() {
     validateResult: null,
     renderResult: null,
     launchResult: null,
+    multiomeJob: null,
+    jobError: "",
     launchSupported: false,
     serverPathCheckSupported: false,
     scriptLaneUtilsReady: false,
@@ -285,6 +287,12 @@ function launchpadApp() {
     paramRowVisible(pname) {
       const p = this.paramByName(pname);
       if (!p) return false;
+      if (p.widget_hint === "hidden") return false;
+      if (this.isMultiome()) {
+        const fastq = this.params.input_format !== "cbq";
+        if (["gex_r1", "gex_r2", "atac_r1", "atac_barcode", "atac_r2"].includes(pname)) return fastq;
+        if (["gex_cbq", "atac_read_pair_cbq", "atac_barcode_cbq"].includes(pname)) return !fastq;
+      }
       if (p.ui_gated_by && this.gateIsActive(p.ui_gated_by)) return false;
       return true;
     },
@@ -404,6 +412,7 @@ function launchpadApp() {
     collectParams() {
       const out = {};
       for (const p of this.schema.parameters) {
+        if (this.isMultiome() && p.widget_hint !== "hidden" && !this.paramRowVisible(p.name)) continue;
         let v = this.params[p.name];
         if (v === "" || v === null || v === undefined) {
           if (p.type === "bool") {
@@ -955,6 +964,20 @@ function launchpadApp() {
         this.workflowId = starDefault ? starDefault.id : this.workflows[0].id;
         await this.loadWorkflow();
       }
+      const jobId = localStorage.getItem("star-multiome-job");
+      if (jobId) {
+        await this.pollMultiomeJob(jobId);
+        const job = this.multiomeJob;
+        if (job && this.allWorkflows.some((w) => w.id === job.recipe_id)) {
+          if (!this.workflows.some((w) => w.id === job.recipe_id)) {
+            this.includeTestWorkflows = true;
+            this.applyWorkflowFilter();
+          }
+          this.workflowId = job.recipe_id;
+          await this.loadWorkflow();
+          this.params = { ...this.params, ...job.params };
+        }
+      }
     },
 
     async loadWorkflow() {
@@ -1051,6 +1074,7 @@ function launchpadApp() {
     },
 
     async doLaunch() {
+      if (this.isMultiome() && this.multiomeRunning()) return;
       const valid = await this.doValidate({ checkPaths: true });
       if (!valid) return;
       this.loading = true;
@@ -1085,9 +1109,50 @@ function launchpadApp() {
           return;
         }
         this.launchResult = data;
+        if (data.id) {
+          localStorage.setItem("star-multiome-job", data.id);
+          await this.pollMultiomeJob(data.id);
+        }
       } finally {
         this.loading = false;
       }
+    },
+
+    isMultiome() {
+      return ["morphic_multiome", "starsuite.official/multiome"].includes(this.workflowId);
+    },
+
+    multiomeRunning() {
+      return ["running", "cancelling"].includes(this.multiomeJob?.status);
+    },
+
+    async pollMultiomeJob(id) {
+      try {
+        const response = await fetch(`${launchpadApiBase()}/jobs/${encodeURIComponent(id)}`);
+        const job = await response.json();
+        if (!response.ok) {
+          if (response.status === 404) localStorage.removeItem("star-multiome-job");
+          throw new Error(job.message || response.statusText);
+        }
+        this.multiomeJob = job;
+        this.jobError = "";
+        if (this.multiomeRunning()) setTimeout(() => this.pollMultiomeJob(id), 2000);
+      } catch (error) { this.jobError = error.message || String(error); }
+    },
+
+    async cancelMultiomeJob() {
+      const response = await fetch(`${launchpadApiBase()}/jobs/${encodeURIComponent(this.multiomeJob.id)}/cancel`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      });
+      const result = await response.json();
+      if (response.ok) this.multiomeJob = result;
+      else this.jobError = result.message || response.statusText;
+    },
+
+    multiomeLogText() {
+      const job = this.multiomeJob;
+      if (!job) return "";
+      return [job.log_tail, ...Object.entries(job.stage_logs || {}).map(([name, log]) => `${name}\n${log}`)].join("\n");
     },
 
     confirmQuit() {

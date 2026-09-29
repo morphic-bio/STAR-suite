@@ -191,7 +191,7 @@ for tool in molecule_first_bam_ledger molecule_first_materialize; do
     exit 1
   fi
 done
-for tool in transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
+for tool in transcriptvb_finalize trim_qc_fastq trim_qc_merge star-suite-launchpad; do
   if [[ ! -x "$prefix/bin/$tool" ]]; then
     echo "ERROR: release companion $tool missing" >&2
     exit 1
@@ -200,6 +200,8 @@ done
 for data_file in \
   share/star-suite/SNAPSHOTS.json \
   share/star-suite/catalogs/official/catalog.yaml \
+  share/star-suite/launchpad/mcp_server/config.yaml \
+  share/star-suite/launchpad/mcp_server/launchpad/static/vendor/alpine-3.14.3.min.js \
   share/star-suite/evidence/official/schema/record-v1.schema.json
 do
   if [[ ! -f "$prefix/$data_file" ]]; then
@@ -211,6 +213,8 @@ do
     exit 1
   fi
 done
+
+"$prefix/bin/star-suite-launchpad" --help >/dev/null
 
 declare -A unique_packages=()
 declare -a lib_rows=()

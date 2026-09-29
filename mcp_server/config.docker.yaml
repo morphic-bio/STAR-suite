@@ -2,7 +2,7 @@
 # This config is designed for containerized deployment.
 # Paths are mapped via Docker volumes:
 #   /repo     -> STAR-suite repository (read-only)
-#   /storage  -> Data storage (read-only)
+#   /data     -> User-mounted data (read-only)
 #   /tmp      -> Temporary files
 
 server:
@@ -19,16 +19,13 @@ paths:
 
 trusted_roots:
   - "/repo"
-  - "/storage"
+  - "/data"
   - "/tmp"
   - "/app"
   - "/usr/bin"
   - "/usr/local/bin"
 
-datasets:
-  - id: "a375"
-    path: "/storage/A375"
-    description: "A375 cell line data (GEX + features)"
+datasets: []
 
 execution:
   default_timeout_seconds: 7200
@@ -57,7 +54,7 @@ scripts:
     module: "flex"
     description: "Flex basic smoke test"
     fixtures:
-      - "/storage/flex_fixtures"
+      - "/data/fixtures/flex"
 
   - name: "crispr_calling"
     path: "tests/test_cr_compat_crispr_calling.sh"

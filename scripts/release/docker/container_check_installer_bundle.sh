@@ -94,6 +94,8 @@ fi
 
 prefix="$workdir/prefix"
 "$workdir/unpack/install.sh" --prefix "$prefix" --force
+"$prefix/bin/star-suite-launchpad" --help >/dev/null
+test -s "$prefix/share/star-suite/launchpad/mcp_server/config.yaml"
 version_output="$($prefix/bin/STAR --version)"
 if [[ "$version_output" != "$EXPECTED_VERSION" ]]; then
   echo "ERROR: expected STAR-suite version $EXPECTED_VERSION, got $version_output" >&2

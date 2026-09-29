@@ -10,7 +10,7 @@ caveats:
   - Do not run from the active production checkout or while a benchmark job is sharing the host.
   - Full production writes large BAM/FASTQ side outputs before Globus cleanup; confirm destination endpoint and disk space first.
   - Original input FASTQs are not uploaded; only Y/noY BAM/FASTQ derivatives and per-sample result surfaces are transferred.
-default_output_layout: /mnt/pikachu/SLAM-Seq-PE-results/prod_run_<timestamp>/
+default_output_layout: "Outputs are written beneath the chosen output directory."
 
 scripts:
   - role: entry
@@ -104,8 +104,7 @@ parameters:
   - name: fastq_dir
     cli_flag: --fastq-dir
     type: directory
-    required: false
-    default: /mnt/pikachu/SLAM-Seq
+    required: true
     description: Directory containing delivered SLAM R1/R2 FASTQs.
     path_must_exist: true
     category: inputs
@@ -113,8 +112,7 @@ parameters:
   - name: star_bin
     cli_flag: --star-bin
     type: file
-    required: false
-    default: /mnt/pikachu/STAR-suite/core/legacy/source/STAR
+    required: true
     description: STAR binary to run.
     path_must_exist: true
     must_be_executable: true
@@ -123,8 +121,7 @@ parameters:
   - name: genome_dir
     cli_flag: --genome-dir
     type: directory
-    required: false
-    default: /storage/autoindex_110_44/bulk_index
+    required: true
     description: STAR genomeDir.
     path_must_exist: true
     category: inputs
@@ -132,8 +129,7 @@ parameters:
   - name: snp_mask
     cli_flag: --snp-mask
     type: file
-    required: false
-    default: /mnt/pikachu/slam_blank_artifacts_20260201/mask/snps_from_vcf.bed.gz
+    required: true
     description: SLAM SNP mask BED.GZ.
     path_must_exist: true
     category: inputs

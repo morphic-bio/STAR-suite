@@ -76,6 +76,9 @@ Use a clean build when changing HTSlib installations or `WITH_CHROMAP` mode.
 Release installer archives and `.deb` packages contain prebuilt binaries and
 do not require compilation.
 
+For the native ATAC peak-matrix helper, runtime capability checks, and the
+Launchpad UI, follow [Multiome source build and launch](LAUNCHPAD_MULTIOME.md).
+
 ## Parallel Jobs
 
 Use 8 to 16 threads for practical compile time:

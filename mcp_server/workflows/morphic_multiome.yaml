@@ -3,7 +3,7 @@ id: morphic_multiome
 title: Morphic 10x Multiome (GEX + Chromap ATAC + MACS peaks)
 summary: Public Launchpad/MCP surface for the canonical morphic-recipes multiome recipe, with compose-up profiles and optional MACS3 q-value peak selection.
 kind: shell_workflow
-entry_script: /mnt/pikachu/morphic-recipes/scripts/run_star_multiome_lane_smoke.sh
+entry_script: share/star-suite/catalogs/official/scripts/run_star_multiome_lane_smoke.sh
 supported_modes: [local, dry-run-capable]
 caveats:
   - This is a starting point. Consult morphic-provenance before non-trivial runs and reuse known-good thread/low-memory settings.
@@ -14,26 +14,26 @@ default_output_layout: Output directory contains star_sample/run, ATAC sidecar/p
 
 scripts:
   - role: entry
-    path: /mnt/pikachu/morphic-recipes/scripts/run_star_multiome_lane_smoke.sh
+    path: share/star-suite/catalogs/official/scripts/run_star_multiome_lane_smoke.sh
     description: Canonical generic 10x multiome lane recipe.
     language: bash
   - role: minimal_wrapper
-    path: /mnt/pikachu/morphic-recipes/scripts/run_multiome_minimal.sh
+    path: share/star-suite/catalogs/official/scripts/run_multiome_minimal.sh
     description: Thin wrapper equivalent to --profile matrices-peaks.
     language: bash
 
 stages:
   - name: star_chromap
     title: STAR GEX + Chromap ATAC
-    script: /mnt/pikachu/morphic-recipes/scripts/run_star_multiome_lane_smoke.sh
+    script: share/star-suite/catalogs/official/scripts/run_star_multiome_lane_smoke.sh
     description: Runs STAR GeneFull and Chromap ATAC, producing a BAM/fragments sidecar boundary.
   - name: peak_mex
     title: MACS3 Peaks + ATAC Peak MEX
-    script: /mnt/pikachu/STAR-suite/core/features/libchromap_contract/star_multiome_atac_peak_mex
+    script: share/star-suite/catalogs/official/scripts/run_star_multiome_lane_smoke.sh
     description: Calls MACS3-compatible FRAG peaks from the binary sidecar and materializes peak x cell MEX.
   - name: downstream
     title: Optional Remote Downstream
-    script: /mnt/pikachu/morphic-recipes/scripts/run_remote_multiome_post_mex_rsync.sh
+    script: share/star-suite/catalogs/official/scripts/run_remote_multiome_post_mex_rsync.sh
     description: Optional CellBender/MuData downstream for full profile runs.
     gated_by: stop_after_local_mex
 
@@ -183,7 +183,7 @@ parameters:
   - name: genome_dir
     cli_flag: --genome-dir
     type: directory
-    default: /storage/autoindex_110_44/bulk_index
+    required: true
     path_must_exist: true
     description: STAR GEX genomeDir.
     category: references
@@ -191,7 +191,7 @@ parameters:
   - name: gex_whitelist
     cli_flag: --gex-whitelist
     type: file
-    default: /mnt/pikachu/atac-seq/10xMultiome/pbmc_unsorted_3k/open_source_full_20260424_015259/refs/737K-arc-v1_gex.txt
+    required: true
     path_must_exist: true
     description: ARC GEX whitelist.
     category: references
@@ -199,7 +199,7 @@ parameters:
   - name: chromap_ref
     cli_flag: --chromap-ref
     type: file
-    default: /storage/autoindex_110_44/bulk_index/cellranger_ref/genome.fa
+    required: true
     path_must_exist: true
     description: Chromap reference FASTA.
     category: references
@@ -207,7 +207,7 @@ parameters:
   - name: chromap_index
     cli_flag: --chromap-index
     type: file
-    default: /mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/genome.index
+    required: true
     path_must_exist: true
     description: Chromap index.
     category: references
@@ -215,7 +215,7 @@ parameters:
   - name: atac_whitelist
     cli_flag: --atac-whitelist
     type: file
-    default: /mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/737K-arc-v1_atac.txt
+    required: true
     path_must_exist: true
     description: ARC ATAC whitelist.
     category: references
@@ -223,7 +223,7 @@ parameters:
   - name: atac_to_gex
     cli_flag: --atac-to-gex
     type: file
-    default: /mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/atac2gex.tsv
+    required: true
     path_must_exist: true
     description: ATAC-to-GEX barcode translation table.
     category: references

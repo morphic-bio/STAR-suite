@@ -36,9 +36,15 @@ python -m mcp_server.app
 
 Open `http://<host>:<port>/launchpad/` in a browser for **STAR Launchpad** (recipe builder). Remote browsers typically see **public** workflows only; on **loopback**, authenticated discovery can list **private** workflows too. The UI defaults to **`star_*`** recipes only; enable **Include test & other recipes** to show the full list, including the private SLAM PE recipes. MCP clients continue to use `POST /` (streamable-HTTP) or `GET /sse` + `POST /messages` (SSE).
 
-#### Launchpad quick start / stop (recommended)
+#### Launchpad quick start / stop
 
-Start in the background (writes a pidfile + log under `plans/artifacts/`):
+For the 1.9.5.b source tree, use `python3 scripts/launchpad_cli.py --setup` once,
+then `python3 scripts/launchpad_cli.py`. Installed packages provide
+`star-suite-launchpad --setup` and `star-suite-launchpad`.
+See [Multiome setup and execution](../docs/LAUNCHPAD_MULTIOME.md).
+
+
+Start in the background (writes a pidfile + log under the user state directory, keyed by checkout):
 
 ```bash
 bash scripts/launchpad_server.sh up
@@ -224,7 +230,7 @@ Current public workflows:
 | `star_flex_fixed_rna` | STAR-Flex Fixed RNA command on the 1.9.4 half-probe route: count-only, no genome index loaded, tag-aware cell calling. | Caller-supplied Fixed RNA FASTQs (probe read R2 first), whitelist, sample probes and the required half-probe (H1X2) cache; alignment-based routes need `flex_legacy yes`. |
 | `star_flex_fixed_rna_cbq` | STAR-Flex Fixed RNA command with CBQ input on the same half-probe, count-only route. | `--readFilesType Binseq PE --flex yes` with paired CBQ files in Flex mate order and the required half-probe (H1X2) cache. |
 | `star_perturb_cr_compat` | Perturb-seq CR-compatible STAR command with the option set used for the 1.9.4 A375 and MSK benchmarks. | Gene-expression FASTQs and whitelist, `--pfMultiConfig` feature libraries, CR-compatible threading defaults; `solo_strand` is required (Reverse for 5' R2-only libraries such as A375). |
-| `morphic_multiome` | Cross-repo Morphic 10x Multiome recipe from `/mnt/pikachu/morphic-recipes`. | Minimal compose-up floor (`--profile matrices-peaks --dry-run`) with low-memory Chromap and optional `chromap_macs3_frag_qvalue` for MACS3 q-value peak selection. |
+| `morphic_multiome` | Bundled official 10x Multiome v1 recipe. | Validated RNA + ATAC inputs; local execution through peak matrices, status/logs/cancel, and a Chromap-enabled runtime check. See [Multiome guide](../docs/LAUNCHPAD_MULTIOME.md). |
 
 Current local/private SLAM workflows:
 
@@ -261,8 +267,8 @@ val = client.call_tool("validate_workflow_parameters", {
         "all_samples": True,
         "threads": 16,
         "dry_run": True,
-        "dataset_root": "/mnt/pikachu/ucsf-perturb-seq-corrected",
-        "genome_dir": "/storage/autoindex_110_44/bulk_index",
+        "dataset_root": "/path/to/dataset",
+        "genome_dir": "/path/to/genome_index",
     },
     "check_paths": True,  # set False to skip file/dir existence checks
 })
@@ -496,7 +502,7 @@ docker-compose up -d
 docker build -t star-mcp-server .
 docker run -p 8765:8765 \
   -e MCP_AUTH_TOKEN="your-token" \
-  -v /mnt/pikachu/STAR-suite:/repo:ro \
+  -v /path/to/STAR-suite:/repo:ro \
   -v /storage:/storage:ro \
   star-mcp-server
 ```

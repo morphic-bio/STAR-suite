@@ -1260,6 +1260,17 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                 std::cout << STAR_SUITE_SOURCE_REVISION << std::endl;
                 exit(0);
             };
+            if (oneArg=="--build-features") {
+                std::cout << "{\"suite_version\":\"" << STAR_SUITE_VERSION
+                          << "\",\"chromap_atac\":"
+#if defined(WITH_CHROMAP) && WITH_CHROMAP
+                          << "true"
+#else
+                          << "false"
+#endif
+                          << "}" << std::endl;
+                exit(0);
+            };
             if (oneArg=="--upstream-version") {
                 std::cout << STAR_UPSTREAM_VERSION << std::endl;
                 exit(0);

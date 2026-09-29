@@ -6,7 +6,7 @@ kind: shell_workflow
 entry_script: scripts/run_slam_100k_se_pe_smoke.sh
 supported_modes: [local, dry-run-capable]
 caveats:
-  - Requires the local NW SLAM-Seq paired-end FASTQs under /mnt/pikachu/SLAM-Seq.
+  - Requires the NW SLAM-Seq paired-end FASTQ fixture selected by the user.
   - Do not run while a production STAR-SLAM or benchmark job is active on the same host.
   - The treatment NTR Pearson gate is meaningful for labeled samples, not noSU/no4SU controls.
 default_output_layout: /tmp/slam_pe_100k_smoke_<timestamp>/
@@ -71,8 +71,7 @@ parameters:
   - name: fastq_dir
     cli_flag: --fastq-dir
     type: directory
-    required: false
-    default: /mnt/pikachu/SLAM-Seq
+    required: true
     description: Directory containing the delivered R1/R2 FASTQs.
     path_must_exist: true
     category: inputs
@@ -80,8 +79,7 @@ parameters:
   - name: star_bin
     cli_flag: --star-bin
     type: file
-    required: false
-    default: /mnt/pikachu/STAR-suite/core/legacy/source/STAR
+    required: true
     description: STAR binary to use for the smoke.
     path_must_exist: true
     must_be_executable: true
@@ -90,8 +88,7 @@ parameters:
   - name: genome_dir
     cli_flag: --genome-dir
     type: directory
-    required: false
-    default: /storage/autoindex_110_44/bulk_index
+    required: true
     description: STAR genomeDir used by the SLAM PE smoke.
     path_must_exist: true
     category: inputs
@@ -99,8 +96,7 @@ parameters:
   - name: snp_mask
     cli_flag: --snp-mask
     type: file
-    required: false
-    default: /mnt/pikachu/slam_blank_artifacts_20260201/mask/snps_from_vcf.bed.gz
+    required: true
     description: SLAM SNP mask BED.GZ; pass '-' to disable outside path-checked validation.
     path_must_exist: true
     category: inputs

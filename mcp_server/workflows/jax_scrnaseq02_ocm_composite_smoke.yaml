@@ -10,7 +10,7 @@ caveats:
   - "Production OCM semantics use --ocmMultiBarcodeMode flex through STAR_OCM_BARCODE_MODE=flex."
   - "CBQ mode uses ordered per-lane paired CBQ files in STAR mate order; star_yremove_format=auto emits CBQ sidecars for CBQ input."
   - "Do not set --run-cr unless intentionally regenerating the Cell Ranger oracle; existing CR artifacts are reused by default."
-default_output_layout: /mnt/pikachu/JAX_scRNAseq02_processed/ocm_composite_smoke_<timestamp>/
+default_output_layout: "Outputs are written beneath the chosen output directory."
 
 scripts:
   - role: entry
@@ -95,8 +95,7 @@ parameters:
   - name: raw_dir
     cli_flag: RAW_DIR
     type: directory
-    required: false
-    default: /mnt/pikachu/JAX_scRNAseq02/raw
+    required: true
     path_must_exist: true
     description: Root containing JAX scRNAseq02 raw FASTQs.
     env_var: RAW_DIR
@@ -106,8 +105,7 @@ parameters:
   - name: config
     cli_flag: CONFIG
     type: file
-    required: false
-    default: /mnt/pikachu/JAX_scRNAseq02/cellranger-logs/config.csv
+    required: true
     path_must_exist: true
     description: Cell Ranger multi config with OCM sample definitions.
     env_var: CONFIG
@@ -117,8 +115,7 @@ parameters:
   - name: star_bin
     cli_flag: STAR_BIN
     type: file
-    required: false
-    default: /mnt/pikachu/STAR-suite/core/legacy/source/STAR
+    required: true
     path_must_exist: true
     must_be_executable: true
     description: STAR binary.
@@ -129,8 +126,7 @@ parameters:
   - name: genome_dir
     cli_flag: GENOME_DIR
     type: directory
-    required: false
-    default: /storage/autoindex_110_44/bulk_index
+    required: true
     path_must_exist: true
     description: STAR genomeDir matching MSK/UCSF GEX production.
     env_var: GENOME_DIR
@@ -140,8 +136,7 @@ parameters:
   - name: solo_cb_whitelist
     cli_flag: SOLO_CB_WHITELIST
     type: file
-    required: false
-    default: /storage/scRNAseq_output/whitelists/3M-3pgex-may-2023_TRU.txt
+    required: true
     path_must_exist: true
     description: GEM-X 3' v4 OCM TRU whitelist.
     env_var: SOLO_CB_WHITELIST
@@ -151,8 +146,7 @@ parameters:
   - name: cr_reference
     cli_flag: CR_REFERENCE
     type: directory
-    required: false
-    default: /mnt/pikachu/CR-references/refdata-gex-GRCh38-2024-A
+    required: true
     path_must_exist: false
     description: Cell Ranger reference path used only if --run-cr is selected.
     env_var: CR_REFERENCE
@@ -188,8 +182,7 @@ parameters:
   - name: cbq_ordered_encoder_bin
     cli_flag: CBQ_ORDERED_ENCODER_BIN
     type: file
-    required: false
-    default: /mnt/pikachu/STAR-suite/core/legacy/source/cbq_ordered_encoder
+    required: true
     path_must_exist: false
     must_be_executable: false
     description: Ordered FASTQ-to-CBQ encoder used when star_input_format=cbq; the recipe validates this only for CBQ mode.
