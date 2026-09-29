@@ -11,6 +11,7 @@
 #include "input/CbqStarAdapter.h"
 #include "input/BgzfStarAdapter.h"
 #include "SpatialR1FastqTap.h"
+#include <zlib.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -164,6 +165,32 @@ const char* inputChunkTraceSource(const Parameters& P) {
     return "legacy";
 }
 
+// STAR_INPUT_CHUNK_TRACE_DIGEST=1 adds the CRC32 of each mate's chunk text to
+// the trace, so two builds can be shown to hand mapping the same input.
+bool inputChunkTraceDigest() {
+    static const char* value = std::getenv("STAR_INPUT_CHUNK_TRACE_DIGEST");
+    return value != nullptr && std::strcmp(value, "1") == 0;
+}
+
+void writeChunkDigest(std::ofstream& out, const ReadAlignChunk& chunk, uint32 imate) {
+    const Parameters& P = chunk.P;
+    const bool textChunk = !P.bgzfCoreActive && !(P.readFilesTypeN == 20 && P.cbqInputActive);
+    if (!textChunk || imate >= P.readNends) {
+        out << '-';
+        return;
+    }
+    const uint64 size = chunk.chunkInSizeBytesTotal[imate];
+    uLong crc = crc32(0L, Z_NULL, 0);
+    const Bytef* data = reinterpret_cast<const Bytef*>(chunk.chunkIn[imate]);
+    uint64 done = 0;
+    while (done < size) {
+        const uInt step = static_cast<uInt>(std::min<uint64>(size - done, 1U << 30));
+        crc = crc32(crc, data + done, step);
+        done += step;
+    }
+    out << std::hex << crc << std::dec;
+}
+
 void writeInputChunkTrace(const ReadAlignChunk& chunk,
                           uint64 chunkIndex,
                           uint64 chunkReadStart,
@@ -184,7 +211,11 @@ void writeInputChunkTrace(const ReadAlignChunk& chunk,
     if (out.good()) {
         if (!headerWritten) {
             out << "chunk_index\tthread\tsource\tread_start\tread_end\tread_count"
-                << "\tmate1_bytes\tmate2_bytes\twork_bytes\tread_files_index\tno_reads_left\n";
+                << "\tmate1_bytes\tmate2_bytes\twork_bytes\tread_files_index\tno_reads_left";
+            if (inputChunkTraceDigest()) {
+                out << "\tmate1_crc32\tmate2_crc32";
+            }
+            out << "\n";
             headerWritten = true;
         }
         const uint64 readStart = chunkReadN == 0 ? chunkReadStart : chunkReadStart + 1;
@@ -204,7 +235,14 @@ void writeInputChunkTrace(const ReadAlignChunk& chunk,
             << mate2Bytes << '\t'
             << chunkWorkBytes << '\t'
             << readFilesIndex << '\t'
-            << (noReadsLeft ? 1 : 0) << '\n';
+            << (noReadsLeft ? 1 : 0);
+        if (inputChunkTraceDigest()) {
+            out << '\t';
+            writeChunkDigest(out, chunk, 0);
+            out << '\t';
+            writeChunkDigest(out, chunk, 1);
+        }
+        out << '\n';
     }
     pthread_mutex_unlock(&traceMutex);
 }
