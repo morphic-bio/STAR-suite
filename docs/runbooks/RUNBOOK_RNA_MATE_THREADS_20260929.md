@@ -493,9 +493,11 @@ Modes:
 The unequal-bytes check (1339-1360) cannot fire, because both mates always
 contribute the same record count per chunk.
 
-**Blank lines where a read header is expected (author decision, 29 Sep; a
-deliberate change from v1.10.0 on malformed input).** The same rule applies
-to every mate (1, 2 and 3), for FASTQ and FASTA:
+**Blank lines where a read header is expected (the author's decision of 29
+Sep, confirmed the same day; a deliberate change from v1.10.0 on malformed
+input).** A blank line must never be taken as a read header, because that is
+the safe choice. The same rule applies to every mate (1, 2 and 3), for FASTQ
+and FASTA:
 
 - A blank line is a line of only spaces, tabs or carriage returns. STAR never
   reads one as a read header.
@@ -509,7 +511,9 @@ to every mate (1, 2 and 3), for FASTQ and FASTA:
   else (another kind of line, a header in the other format, or a line that
   starts with whitespace), STAR stops with a fatal error that names the file
   and the line and says the input is malformed.
-- Implementation choices within the decision, for the author to confirm:
+- Implementation choices within the decision, still for the author to
+  confirm explicitly (a literal reading of "look at the next line" would make
+  both fatal; neither ever reads a blank line as a header):
   - a run of consecutive blank lines is treated as one gap; every line is
     counted, and the header check applies to the first non-blank line;
   - blank lines at the end of a file (followed by end of input or by the next
