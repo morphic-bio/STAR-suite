@@ -1963,3 +1963,19 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
 - Pytest temporary directories contain relocated payloads, synthetic reference
   files, tiny fixture executables, recipe previews, and job records. No biological
   dataset was processed by these tests.
+
+## Carl's fresh Multiome build and Launchpad instructions (2026-09-29)
+
+- `/mnt/pikachu/star-carl-build-20260929.0YxUk3/`: fresh HTTPS source clones of
+  STAR `4f44406`, Chromap v1.1.0 (`a47f077`) and RapidMACS `34df448`; native
+  builds, an isolated Launchpad Python environment, and synthetic inputs.
+- `evidence/` beneath that directory contains clone/build/setup logs, Python
+  package versions, rendered command, browser screenshot, job/runtime record,
+  input parameters, and `validation.json` with matrix dimensions and the
+  documentation-versus-executed-STAR option comparison.
+- `fixture/` contains the generated 120-kb reference and 4,000 RNA/4,000 ATAC
+  read pairs across two barcodes. `synthetic-run/` contains the completed native
+  Launchpad run, matrices, peak/sidecar outputs and `LOCAL_MEX_READY.txt`.
+- These are synthetic functional checks, not biological or performance evidence.
+  The user-facing instructions and validation scope are in
+  `docs/LAUNCHPAD_MULTIOME.md`.
