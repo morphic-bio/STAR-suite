@@ -80,7 +80,7 @@ class HtslibBuildTests(unittest.TestCase):
                           f"{name}=-I{self.prefix}/include", "-W", "test.cpp")
 
     def test_custom_prefix_compiles_after_dependency_scan(self):
-        # Match Carl's indirect include, with khash.h only below include/htslib.
+        # Match a reported indirect include, with khash.h only below include/htslib.
         (self.root / "ParametersSolo.h").write_text('#include "htslib/khash.h"\n')
         (self.root / "test.cpp").write_text(
             '#include "ParametersSolo.h"\n'
