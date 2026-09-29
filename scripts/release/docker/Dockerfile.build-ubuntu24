@@ -21,6 +21,7 @@ RUN apt-get update \
       liblzma-dev \
       libssl-dev \
       pkg-config \
+      python3-yaml \
       xxd \
       zlib1g-dev \
  && rm -rf /var/lib/apt/lists/*

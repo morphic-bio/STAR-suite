@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..config import (
+    get_config,
     get_workflow_config,
     get_workflow_origin,
     get_workflow_root,
@@ -477,7 +478,7 @@ def validate_workflow_parameters(
 
     # Check required params
     for p_def in schema.parameters:
-        if p_def.required and p_def.name not in params:
+        if p_def.required and (p_def.name not in params or params[p_def.name] in (None, "", [])):
             _add_error(f"Missing required parameter: {p_def.name}", field=p_def.name)
 
     # Type checks
@@ -699,6 +700,19 @@ def validate_workflow_parameters(
                         field=p_def.name,
                     )
 
+    from ..launchpad.multiome import WORKFLOW_IDS, validate_multiome
+    if workflow_id in WORKFLOW_IDS:
+        for name, message in validate_multiome(normalized, check_paths=check_paths):
+            _add_error(message, field=name)
+        if check_paths:
+            for group in (("gex_r1", "gex_r2"), ("atac_r1", "atac_barcode", "atac_r2"),
+                          ("gex_cbq", "atac_read_pair_cbq", "atac_barcode_cbq"), ("out_dir",)):
+                for name in group:
+                    value = normalized.get(name)
+                    if isinstance(value, str):
+                        for path in value.split(","):
+                            if path and not is_path_allowed(Path(path)):
+                                _add_error(f"{name} is outside trusted roots; add its data directory to STAR_SUITE_DATA_ROOTS.", field=name)
     return ValidateWorkflowResponse(
         valid=len(errors) == 0,
         normalized_params=normalized,
@@ -736,6 +750,12 @@ def render_workflow_command(
     # Build argv
     argv: list[str] = [str(entry_path)]
     env_overrides: dict[str, str] = {}
+    from ..launchpad.multiome import WORKFLOW_IDS, runtime_environment, validate_multiome
+    if workflow_id in WORKFLOW_IDS:
+        problems = validate_multiome(normalized)
+        if problems:
+            raise ValueError("; ".join(message for _, message in problems))
+        env_overrides.update(runtime_environment(normalized, get_config().paths.repo_root))
     output_root: Optional[str] = None
 
     # Build a name -> param_def lookup

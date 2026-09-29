@@ -264,12 +264,11 @@ class ProvenanceHierarchyConfig(BaseModel):
 
 
 # Site-specific paths that fill the ${...} placeholders in DEFAULT_AGENT_PROTOCOL.
-# These are morphic's values, mirrored from the canonical
-# morphic-recipes/docs/authoring/localization.example.yaml. Other sites override
+# Defaults are portable paths. Sites can override them
 # via `locations:` in config.yaml (the protocol text itself stays unchanged).
 DEFAULT_LOCATIONS = {
-    "PROVENANCE_ROOT": "/mnt/pikachu/morphic-provenance",
-    "RECIPES_ROOT": "/mnt/pikachu/morphic-recipes",
+    "PROVENANCE_ROOT": "./provenance",
+    "RECIPES_ROOT": "./share/star-suite/catalogs/official",
 }
 
 # Lab-agnostic protocol TEMPLATE. ${PROVENANCE_ROOT}/${RECIPES_ROOT} are filled at

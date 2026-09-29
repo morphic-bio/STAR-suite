@@ -9,10 +9,10 @@ entry_script: "tests/run_downsample10M_alignment_and_gedi_goalset.sh"
 supported_modes:
   - "local"
 caveats:
-  - "Input FASTQ path is hardcoded to /mnt/pikachu/NW-5-21/SLAM-Seq/ARID1A-no4su."
+  - "This historical test script needs a site-specific FASTQ fixture; configure the script before use."
   - "Requires GEDI installation with homo_sapiens_110_44.oml genome."
-  - "Output directory is auto-timestamped under /storage/."
-default_output_layout: "/storage/slam_dev_arid1a_ds<reads>_<timestamp>/"
+  - "This historical test script writes to its configured site output root."
+default_output_layout: "Outputs are written beneath the chosen output directory."
 
 stages:
   - name: "downsample"

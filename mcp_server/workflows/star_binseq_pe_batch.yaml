@@ -66,7 +66,7 @@ parameters:
     path_must_exist: true
     label: Genome directory
     description: Directory containing a STAR genome index.
-    example: /storage/autoindex_110_44/bulk_index
+    example: /path/to/genome_index
     widget_hint: path
     aliases: [genomeDir]
     display_order: 1

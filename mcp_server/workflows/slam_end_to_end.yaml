@@ -12,7 +12,7 @@ caveats:
   - "Requires GEDI installation with homo_sapiens_110_44.oml genome."
   - "Threads parameter is hardcoded at 8 in the script; override via source edit."
   - "Uses full-depth SLAM-Seq FASTQs from /storage; expect ~1h runtime."
-default_output_layout: "/storage/slam_e2e_<datestamp>/"
+default_output_layout: "Outputs are written beneath the chosen output directory."
 
 stages:
   - name: "alignment"
@@ -40,8 +40,7 @@ parameters:
   - name: "work_dir"
     cli_flag: "--work-dir"
     type: "directory"
-    required: false
-    default: "/storage/slam_e2e"
+    required: true
     description: "Working directory for all outputs."
 
   - name: "overwrite"

@@ -772,7 +772,14 @@ instead of `127.0.0.1`.
    and a checklist of required input files.
 5. **Copy and run** -- paste the command into your terminal.
 
-Launchpad does not execute anything. It generates commands; you run them.
+On localhost, **Run in shell** starts the selected workflow. The 1.9.5.b
+Multiome flow provides **Run sample**, status, logs, cancellation, and executable
+hashes in its run record. See [Multiome setup and build commands](docs/LAUNCHPAD_MULTIOME.md).
+
+The 1.9.5.b package includes `star-suite-launchpad --setup` (once), then
+`star-suite-launchpad`. In this source tree, use `python3 scripts/launchpad_cli.py`
+with the same options. Multiome requires a Chromap-enabled source build; the
+portable package's STAR binary omits Chromap.
 
 Design details: [`plans/star_launchpad_v1_runbook.md`](plans/star_launchpad_v1_runbook.md)
 

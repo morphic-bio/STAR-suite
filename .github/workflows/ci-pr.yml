@@ -3,6 +3,9 @@ name: CI PR
 on:
   pull_request:
     paths:
+      - ".github/workflows/ci-launchpad.yml"
+      - "scripts/launchpad*.py"
+      - "scripts/launchpad*.sh"
       - ".github/workflows/ci-pr.yml"
       - ".github/workflows/ci-partial-builds.yml"
       - ".github/workflows/ci-dev-release.yml"
@@ -28,6 +31,9 @@ permissions:
   contents: read
 
 jobs:
+  launchpad-checks:
+    uses: ./.github/workflows/ci-launchpad.yml
+
   partial-builds:
     uses: ./.github/workflows/ci-partial-builds.yml
 

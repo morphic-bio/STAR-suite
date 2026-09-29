@@ -168,6 +168,7 @@ run_container_build() {
           build-essential \
           xxd \
           pkg-config \
+          python3-yaml \
           zlib1g-dev \
           libbz2-dev \
           liblzma-dev \
@@ -261,6 +262,7 @@ done
 cp scripts/release/install_binary_tarball.sh "${STAGE_DIR}/install.sh"
 mkdir -p "${STAGE_DIR}/share"
 cp -a share/star-suite "${STAGE_DIR}/share/star-suite"
+python3 scripts/release/stage_launchpad.py --stage-root "${STAGE_DIR}"
 chmod 0755 "${STAGE_DIR}/bin/"* "${STAGE_DIR}/install.sh"
 
 asset_name="${ASSET_PREFIX}-${VERSION}-linux-${arch}"
@@ -302,6 +304,8 @@ ${compat_note}This tarball includes:
   - bin/transcriptvb_finalize
   - bin/trim_qc_fastq
   - bin/trim_qc_merge
+  - bin/star-suite-launchpad (browser UI launcher)
+  - share/star-suite/launchpad (UI and server)
   - share/star-suite/catalogs/official (pinned public recipe catalog)
   - share/star-suite/evidence/official (pinned public provenance evidence)
   - share/star-suite/SNAPSHOTS.json (source revisions and digests)
@@ -309,6 +313,12 @@ ${compat_note}This tarball includes:
   - release-metadata.env for compatibility metadata
 
 Note:
+  For the browser UI, install Python 3.10+ and python3-venv, then run:
+    bin/star-suite-launchpad --setup
+    bin/star-suite-launchpad
+  Open http://127.0.0.1:8765/launchpad/ in your browser.
+  Multiome requires a separate Chromap-enabled STAR source build and its
+  star_multiome_atac_peak_mex helper. This portable binary omits Chromap.
   Linux decides whether a binary may run on a given system.
   If an operating system rejects a binary built for a newer runtime environment,
   use a lower-compatibility tarball or the installer bundle.
