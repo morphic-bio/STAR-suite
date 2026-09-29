@@ -137,16 +137,16 @@ Use the `$W` builds for gates. The runbook's gate container is for M3 onward.
 
 ## For the author
 
-- **Denied command:** see "Where the work stopped".
-- **Malformed-input difference, not seen in any gate.** FASTA with
-  `--outSAMreadID Number` and a blank line before a record in mate 2 or 3:
-  - v1.10.0 takes the blank line as that mate's header, gives the record an
-    empty sequence and misaligns the mates;
-  - the new reader skips the blank line, as it does for FASTQ and for FASTA
-    without `Number`.
-
-  Recorded in runbook 3.7. Matching it exactly would need the mate-2 reader
-  to know mate 1's record format.
+- **Blank-line rule (author decision, 29 Sep): implemented** (runbook 3.7,
+  draft `docs/RELEASE_NOTES_v1.11.0.md`). Two implementation choices within
+  the decision need confirming:
+  - a run of consecutive blank lines counts as one gap: every line is
+    counted, and the header check applies to the first non-blank line;
+  - blank lines at the end of a file (then end of input or the next input
+    file) are skipped and counted, not fatal.
+- Pre-existing, unchanged: with multi-file FASTA through lane markers, the
+  FASTA loop reads the next file's `FILE` marker line as sequence, in
+  v1.10.0 and here alike.
 
 ## D6 conditions (approved)
 

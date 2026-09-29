@@ -16,6 +16,14 @@
 // order, on each mate's stream, through a stream buffer that gives back the
 // reader's compute permit while it waits for input bytes. A reader never
 // holds a permit while it waits for input or for queue space.
+//
+// Blank lines where a read header is expected (a deliberate change from
+// v1.10.0, which ended the input at such a line in mate 1 and skipped it
+// silently in mates 2 and 3): every mate skips them, with a WARNING at the
+// first one in each file and a per-file count in Log.out, provided the next
+// non-blank line is a read header in that file's format (or the file ends).
+// Anything else after a blank line is fatal. A blank line is never read as a
+// header.
 
 #include "input/BgzfRangeReader.h"  // BgzfWorkPermitHooks
 
@@ -25,6 +33,7 @@
 #include <deque>
 #include <functional>
 #include <istream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <streambuf>
@@ -78,6 +87,14 @@ struct FastxMateBatch {
     std::string errorWord;      // End::Error, mate 0: first word of the bad line
     std::string errorRest;      // End::Error, mate 0: rest of the bad line
     std::string errorText;      // End::Error: reader failure message
+    // First blank line at a record start in a file: warn before record
+    // beforeRecord of this batch.
+    struct BlankNote {
+        uint32_t beforeRecord = 0;
+        int lane = 0;
+        uint64_t line = 0;
+    };
+    std::vector<BlankNote> blankNotes;
 
     void reset(int laneIn) {
         lane = laneIn;
@@ -91,6 +108,7 @@ struct FastxMateBatch {
         errorWord.clear();
         errorRest.clear();
         errorText.clear();
+        blankNotes.clear();
     }
     uint32_t append(const char* data, size_t size) {
         const uint32_t at = static_cast<uint32_t>(arena.size());
@@ -134,10 +152,13 @@ public:
         uint64_t consumerWaitNs = 0;     // the chunk filler waited for this mate
         uint64_t permitAcquires = 0;
         uint64_t permitWaitNs = 0;
+        std::map<int, uint64_t> blankLines;  // input file index -> blank lines skipped
     };
 
+    // fileNames[i] names input file # i of this mate, for messages.
     FastxMateReader(uint32_t mate, std::istream* source, int initialLane,
-                    const BgzfWorkPermitHooks& hooks, const FastxMateLimits& limits);
+                    const BgzfWorkPermitHooks& hooks, const FastxMateLimits& limits,
+                    const std::vector<std::string>& fileNames);
     ~FastxMateReader();
     FastxMateReader(const FastxMateReader&) = delete;
     FastxMateReader& operator=(const FastxMateReader&) = delete;
@@ -153,6 +174,7 @@ public:
 
     // Valid after join().
     Stats stats() const;
+    std::string fileName(int lane) const;
 
 private:
     class InputBuf : public std::streambuf {
@@ -168,10 +190,15 @@ private:
 
     void run();
     bool fillBatch(FastxMateBatch* batch, std::istream& in);
+    // headerRest: the header text after the token when the header line was
+    // already read whole (a header line that starts with whitespace);
+    // nullptr when the stream is positioned just after the token.
     bool parseFastq(FastxMateBatch* batch, std::istream& in, FastxMateRecord* record,
-                    const std::string& token);
+                    const std::string& token, const std::string* headerRest);
     void parseFasta(FastxMateBatch* batch, std::istream& in, FastxMateRecord* record,
-                    const std::string& token);
+                    const std::string& token, bool headerRead);
+    void noteBlankLine(FastxMateBatch* batch);
+    bool failAfterBlank(FastxMateBatch* batch, uint64_t line);
     bool appendLine(FastxMateBatch* batch, std::istream& in, uint32_t* offset, uint32_t* length);
     void markLane(FastxMateBatch* batch, int nextLane);
     FastxMateBatch* takeFree();
@@ -187,7 +214,15 @@ private:
     uint64_t laneRecords_ = 0;
     BgzfWorkPermitHooks hooks_;
     FastxMateLimits limits_;
-    std::vector<char> line_;
+    std::vector<std::string> fileNames_;
+    // Per input file: lines consumed so far, the format of its first record
+    // ('@' or '>'; 0 before it), and the blank-line state.
+    uint64_t line_ = 0;
+    char laneFormat_ = 0;
+    bool afterBlank_ = false;
+    uint64_t firstBlankLine_ = 0;
+    std::map<int, bool> blankWarned_;
+    std::vector<char> lineBuffer_;
 
     std::thread thread_;
     std::atomic<bool> stop_{false};
@@ -216,8 +251,10 @@ class FastxMateReaderGroup {
 public:
     // streams[m] is mate m's input stream; it must stay open until
     // stopAndJoin() returns. initialLane is P.readFilesIndex at open.
+    // fileNames[m][i] names input file # i of mate m, for messages.
     FastxMateReaderGroup(const std::vector<std::istream*>& streams, int initialLane,
-                         const BgzfWorkPermitHooks& hooks, const FastxMateLimits& limits);
+                         const BgzfWorkPermitHooks& hooks, const FastxMateLimits& limits,
+                         const std::vector<std::vector<std::string>>& fileNames);
     ~FastxMateReaderGroup();
     FastxMateReaderGroup(const FastxMateReaderGroup&) = delete;
     FastxMateReaderGroup& operator=(const FastxMateReaderGroup&) = delete;
@@ -248,8 +285,8 @@ private:
     enum class PairStatus { Pair, Lane, End, Error };
 
     PairStatus nextPair(FastxChunkFillContext& context, int* laneOut, int* endCharOut);
-    void normalize(uint32_t mate);
-    void drainLane(uint32_t mate);
+    void normalize(uint32_t mate, FastxChunkFillContext& context);
+    void drainLane(uint32_t mate, FastxChunkFillContext& context);
     bool hasRecord(uint32_t mate) const;
     FastxMateEnd endOf(uint32_t mate) const;
     std::string laneCount(uint32_t mate) const;

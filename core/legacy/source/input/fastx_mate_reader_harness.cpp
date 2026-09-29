@@ -12,6 +12,11 @@
 // none: mates with different read counts (truncate per file, warn), lane
 // markers out of step (fatal), mates in different formats (fatal).
 //
+// Part 3 checks the deliberate change for blank lines where a read header is
+// expected, in each of three mates, for FASTQ and FASTA: a blank line before
+// a header is skipped with one WARNING per file and counted per file; a blank
+// line before anything else is fatal, naming the file and line.
+//
 // Usage: fastx_mate_reader_harness <scratch dir>
 
 #include "input/FastxMateReaders.h"
@@ -23,6 +28,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <random>
 #include <sstream>
@@ -64,6 +70,7 @@ struct Result {
     std::string fatalText;
     std::vector<std::string> warnings;
     std::vector<std::string> logs;  // "end of input stream" lines
+    std::string summary;            // FastxMateReaderGroup::summary(), new path only
     unsigned long long reads = 0;
 };
 
@@ -271,14 +278,23 @@ void poolRelease(void*, uint64_t, uint64_t, uint64_t, uint64_t) {
     g_pool.cv.notify_one();
 }
 
+// Names used in messages: "<path>#<input file index>".
+std::string laneFileName(const std::string& path, int lane) {
+    return path + "#" + std::to_string(lane);
+}
+
 Result runThreads(const std::vector<std::string>& files, const Options& options) {
     Result result;
     const size_t mates = files.size();
     std::ifstream in[3];
     std::vector<std::istream*> streams;
+    std::vector<std::vector<std::string>> names(mates);
     for (size_t m = 0; m < mates; ++m) {
         in[m].open(files[m].c_str());
         streams.push_back(&in[m]);
+        for (int lane = 0; lane < 8; ++lane) {
+            names[m].push_back(laneFileName(files[m], lane));
+        }
     }
     BgzfWorkPermitHooks hooks;
     if (options.permits) {
@@ -295,7 +311,7 @@ Result runThreads(const std::vector<std::string>& files, const Options& options)
     char* chunkIn[3] = {buffers[0].data(), buffers[1].data(), buffers[2].data()};
     bool stop = false;
     {
-        FastxMateReaderGroup group(streams, 0, hooks, limits);
+        FastxMateReaderGroup group(streams, 0, hooks, limits, names);
         FastxChunkFillContext context;
         context.chunkInSizeBytes = options.chunkInSizeBytes;
         context.chunkArrayBytes = array;
@@ -334,6 +350,7 @@ Result runThreads(const std::vector<std::string>& files, const Options& options)
             result.chunks.push_back(chunk);
         }
         group.stopAndJoin();
+        result.summary = group.summary();
     }
     result.reads = iReadAll;
     return result;
@@ -379,8 +396,12 @@ void pairedFastq(std::mt19937& rng, size_t count, size_t first, size_t len0, siz
 }
 
 struct Case {
+    Case(const std::string& nameIn, const std::vector<std::string>& matesIn)
+        : name(nameIn), mates(matesIn) {}
     std::string name;
     std::vector<std::string> mates;
+    // The new path warns here by design (D2: one mate's stream ends first).
+    bool expectWarning = false;
 };
 
 std::vector<Case> identityCases() {
@@ -456,24 +477,6 @@ std::vector<Case> identityCases() {
         cases.push_back(c);
     }
     {
-        // A blank line at a mate-0 record start ends the input.
-        Case c{"mate0_blank_line", {"", ""}};
-        pairedFastq(rng, 400, 0, 90, 28, &c.mates[0], &c.mates[1]);
-        c.mates[0] += "\n";
-        pairedFastq(rng, 200, 400, 90, 28, &c.mates[0], &c.mates[1]);
-        cases.push_back(c);
-    }
-    {
-        // Blank lines between mate-1 records are skipped.
-        Case c{"mate1_blank_lines", {"", ""}};
-        for (size_t i = 0; i < 500; ++i) {
-            const std::string name = "b" + std::to_string(i);
-            c.mates[0] += fastq(name, "1:N:0:A", bases(rng, 90));
-            c.mates[1] += (i % 50 == 7 ? "\n\n" : "") + fastq(name, "2:N:0:A", bases(rng, 28));
-        }
-        cases.push_back(c);
-    }
-    {
         Case c{"no_final_newline", {"", ""}};
         pairedFastq(rng, 300, 0, 90, 28, &c.mates[0], &c.mates[1]);
         c.mates[0].pop_back();
@@ -532,6 +535,7 @@ std::vector<Case> identityCases() {
         // A FASTA line one byte over DEF_readSeqLengthMax in mate 1 stops
         // that stream after the record, in both paths.
         Case c{"fasta_line_over_limit", {"", ""}};
+        c.expectWarning = true;
         for (size_t i = 0; i < 40; ++i) {
             const std::string name = "O" + std::to_string(i);
             c.mates[0] += fasta(name, bases(rng, i == 25 ? kSeqLengthMax + 1 : 80), 1000);
@@ -630,7 +634,10 @@ int identityPart(const std::string& dir) {
                     options.permits = (variant++ % 2) == 1;
                     const Result legacy = runLegacy(files, options);
                     const Result threads = runThreads(files, options);
-                    const std::string difference = compare(legacy, threads, files.size());
+                    std::string difference = compare(legacy, threads, files.size());
+                    if (difference.empty() && !c.expectWarning && !threads.warnings.empty()) {
+                        difference = "unexpected WARNING: " + threads.warnings.front();
+                    }
                     ++runs;
                     if (!difference.empty()) {
                         ++failures;
@@ -710,6 +717,184 @@ int behaviourPart(const std::string& dir) {
     return failures;
 }
 
+// ---- blank lines where a read header is expected (deliberate change) ---------
+
+bool contains(const std::string& text, const std::string& part) {
+    return text.find(part) != std::string::npos;
+}
+
+// Record i of each of `mates` mates, in one format.
+std::vector<std::vector<std::string>> blankRecords(std::mt19937& rng, char format, size_t count,
+                                                   size_t mates) {
+    static const size_t kLengths[3] = {90, 28, 10};
+    std::vector<std::vector<std::string>> out(mates);
+    for (size_t i = 0; i < count; ++i) {
+        const std::string name = "k" + std::to_string(i);
+        for (size_t m = 0; m < mates; ++m) {
+            out[m].push_back(format == '@'
+                ? fastq(name, std::to_string(m + 1) + ":N:0:A", bases(rng, kLengths[m]))
+                : fasta(name, bases(rng, kLengths[m]), 1000));
+        }
+    }
+    return out;
+}
+
+// Records [first, last) of one mate, with text inserted before the records
+// named (index relative to first) and after the last one.
+std::string joinRecords(const std::vector<std::string>& records, size_t first, size_t last,
+                        const std::map<size_t, std::string>& before, const std::string& tail) {
+    std::string out;
+    for (size_t i = first; i < last; ++i) {
+        const auto it = before.find(i - first);
+        if (it != before.end()) {
+            out += it->second;
+        }
+        out += records[i];
+    }
+    return out + tail;
+}
+
+std::string skippedLine(size_t mate, unsigned long long count, const std::string& file) {
+    return "mate " + std::to_string(mate + 1) + ": skipped " + std::to_string(count) +
+           " blank line(s) where a read header was expected in " + file + "\n";
+}
+
+int blankLinePart(const std::string& dir) {
+    std::mt19937 rng(11);
+    int failures = 0;
+    Options options;
+    const size_t kMates = 3;
+    const size_t kCount = 300;
+    const size_t kSplit = 150;  // two-file cases: file 0 holds reads [0, kSplit)
+    const std::map<size_t, std::string> none;
+    for (const char format : {'@', '>'}) {
+        const std::string formatName = format == '@' ? "fastq" : "fasta";
+        const unsigned long long linesPerRead = format == '@' ? 4 : 2;
+        const std::vector<std::vector<std::string>> records =
+            blankRecords(rng, format, kCount, kMates);
+
+        Case clean{"blank_clean_" + formatName, {}};
+        Case cleanTwo{"blank_clean_two_files_" + formatName, {}};
+        for (size_t m = 0; m < kMates; ++m) {
+            clean.mates.push_back(joinRecords(records[m], 0, kCount, none, ""));
+            cleanTwo.mates.push_back("FILE 0\n" + joinRecords(records[m], 0, kSplit, none, "") +
+                                     "FILE 1\n" + joinRecords(records[m], kSplit, kCount, none, ""));
+        }
+        const Result reference = runThreads(writeCase(dir, clean), options);
+        const Result referenceTwo = runThreads(writeCase(dir, cleanTwo), options);
+        failures += expect(reference.reads == kCount && reference.warnings.empty() &&
+                           !reference.fatal && !contains(reference.summary, "blank line"),
+                           clean.name);
+        // FASTA: the sequence loop reads a following FILE marker line as
+        // sequence, in v1.10.0 and here alike (identity case
+        // fasta_multiline_lanes), so the two-file cases are FASTQ only.
+        if (format == '@') {
+            failures += expect(referenceTwo.reads == kCount && referenceTwo.warnings.empty() &&
+                               referenceTwo.lanes == std::vector<int>({0, 1}), cleanTwo.name);
+        }
+
+        for (size_t mate = 0; mate < kMates; ++mate) {
+            const std::string tag = formatName + "_mate" + std::to_string(mate + 1);
+            auto variant = [&](const std::string& name, const std::map<size_t, std::string>& before,
+                               const std::string& tail) {
+                Case c{name + "_" + tag, clean.mates};
+                c.mates[mate] = joinRecords(records[mate], 0, kCount, before, tail);
+                return c;
+            };
+
+            // A blank line before a read header: skipped, one WARNING naming
+            // the file and line, counted in the summary; the chunks are those
+            // of the input without it.
+            {
+                const Case c = variant("blank_then_header", {{99, "\n"}}, "");
+                const std::vector<std::string> files = writeCase(dir, c);
+                for (int permits = 0; permits < 2; ++permits) {
+                    options.permits = permits != 0;
+                    const Result r = runThreads(files, options);
+                    failures += expect(
+                        compare(reference, r, kMates).empty() && r.warnings.size() == 1 &&
+                        contains(r.warnings[0], laneFileName(files[mate], 0) + " (mate " +
+                                 std::to_string(mate + 1) + "): blank line at line " +
+                                 std::to_string(linesPerRead * 99 + 1) + " ") &&
+                        contains(r.summary, skippedLine(mate, 1, laneFileName(files[mate], 0))),
+                        c.name + (permits ? " [permits]" : ""));
+                }
+                options.permits = false;
+            }
+
+            // A blank line before anything else is fatal, naming the file and
+            // the line; the reads before it are mapped.
+            const std::string otherFormat = format == '@' ? ">x\nACGT\n" : "@x\nACGT\n+\nIIII\n";
+            const std::pair<std::string, std::string> bad[] = {
+                {"blank_then_garbage", "garbage line\n"},
+                {"blank_then_indented_header", "  " + std::string(1, format) + "x 1:N:0:A\n"},
+                {"blank_then_other_format", otherFormat},
+            };
+            for (const auto& item : bad) {
+                const Case c = variant(item.first, {{99, "\n" + item.second}}, "");
+                const std::vector<std::string> files = writeCase(dir, c);
+                const Result r = runThreads(files, options);
+                failures += expect(
+                    r.fatal && r.reads == 99 && r.warnings.size() == 1 &&
+                    contains(r.fatalText, "malformed input in read file " +
+                             laneFileName(files[mate], 0) + " (mate " + std::to_string(mate + 1) +
+                             "): line " + std::to_string(linesPerRead * 99 + 2) +
+                             " follows a blank line (line " + std::to_string(linesPerRead * 99 + 1) +
+                             ") but is not " + (format == '@' ? "a FASTQ" : "a FASTA")),
+                    c.name);
+            }
+
+            // Several blank lines in one file, including a run of two, a line
+            // of spaces and tabs, a CRLF blank line (FASTQ; in FASTA a CRLF
+            // line after a read is an empty sequence line, as in v1.10.0) and
+            // two at the end of the file: one WARNING, every line counted.
+            {
+                std::map<size_t, std::string> before = {
+                    {10, "\n"}, {20, "\n"}, {30, " \t\n"}, {40, "\n\n"}};
+                unsigned long long expected = 5 + 2;
+                if (format == '@') {
+                    before[50] = "\r\n";
+                    ++expected;
+                }
+                const Case c = variant("several_blank_lines", before, "\n\n");
+                const std::vector<std::string> files = writeCase(dir, c);
+                const Result r = runThreads(files, options);
+                failures += expect(
+                    compare(reference, r, kMates).empty() && r.warnings.size() == 1 &&
+                    contains(r.warnings[0], "blank line at line " +
+                             std::to_string(linesPerRead * 10 + 1) + " ") &&
+                    contains(r.summary, skippedLine(mate, expected, laneFileName(files[mate], 0))),
+                    c.name);
+            }
+
+            // Two input files (FASTQ): a WARNING and a count per file; a blank
+            // line at the end of file 0 (before the next file's marker) is
+            // skipped.
+            if (format == '@') {
+                Case c{"two_files_blank_lines_" + tag, cleanTwo.mates};
+                c.mates[mate] = "FILE 0\n" + joinRecords(records[mate], 0, kSplit, {{5, "\n"}}, "\n") +
+                                "FILE 1\n" + joinRecords(records[mate], kSplit, kCount,
+                                                         {{7, "\n"}, {8, "\n"}}, "");
+                const std::vector<std::string> files = writeCase(dir, c);
+                const Result r = runThreads(files, options);
+                failures += expect(
+                    compare(referenceTwo, r, kMates).empty() && r.warnings.size() == 2 &&
+                    contains(r.warnings[0], laneFileName(files[mate], 0) + " (mate " +
+                             std::to_string(mate + 1) + "): blank line at line " +
+                             std::to_string(linesPerRead * 5 + 1) + " ") &&
+                    contains(r.warnings[1], laneFileName(files[mate], 1) + " (mate " +
+                             std::to_string(mate + 1) + "): blank line at line " +
+                             std::to_string(linesPerRead * 7 + 1) + " ") &&
+                    contains(r.summary, skippedLine(mate, 2, laneFileName(files[mate], 0))) &&
+                    contains(r.summary, skippedLine(mate, 2, laneFileName(files[mate], 1))),
+                    c.name);
+            }
+        }
+    }
+    std::cout << "blank lines: " << failures << " failures\n";
+    return failures;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -718,7 +903,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     const std::string dir = argv[1];
-    const int failures = identityPart(dir) + behaviourPart(dir);
+    const int failures = identityPart(dir) + behaviourPart(dir) + blankLinePart(dir);
     std::cout << (failures == 0 ? "PASS" : "FAIL") << " fastx_mate_reader_harness"
               << " (one-permit pool acquires: " << g_pool.acquires << ")\n";
     return failures == 0 ? 0 : 1;

@@ -455,7 +455,7 @@ void prepareFastxMateReaders(Parameters& P) {
     limits.nameSeqLineMax = DEF_readNameSeqLengthMax;
     limits.seqLineMax = DEF_readSeqLengthMax;
     P.fastxMateReaders.reset(new star::input::FastxMateReaderGroup(
-        streams, P.readFilesIndex, mapDecodePermitHooks(), limits));
+        streams, P.readFilesIndex, mapDecodePermitHooks(), limits, P.readFilesNames));
     P.inOut->logMain << "Fastx mate readers: active (" << P.readNends << " mate"
                      << (P.readNends == 1 ? "" : "s") << ", batches of "
                      << star::input::kFastxMateBatchRecords << " reads counted from the start of each file, "

@@ -19,10 +19,44 @@ uint64_t nowNs() {
         std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
-// Same as fastqHeaderExtraFromCurrentLine in ReadAlignChunk_processChunks.cpp.
-std::string headerExtra(std::istream& in) {
-    std::string extra;
-    std::getline(in, extra);
+// Whitespace as operator>> sees it in the C locale.
+bool isSpaceChar(int c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
+}
+
+bool isBlankLine(const std::string& line) {
+    for (const char c : line) {
+        if (!isSpaceChar(static_cast<unsigned char>(c))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Splits a header line that was read whole as operator>> and getline would
+// have: the first whitespace-delimited word, and the rest of the line.
+void splitFirstWord(const std::string& line, std::string* word, std::string* rest) {
+    size_t begin = 0;
+    while (begin < line.size() && isSpaceChar(static_cast<unsigned char>(line[begin]))) {
+        ++begin;
+    }
+    size_t end = begin;
+    while (end < line.size() && !isSpaceChar(static_cast<unsigned char>(line[end]))) {
+        ++end;
+    }
+    word->assign(line, begin, end - begin);
+    rest->assign(line, end, std::string::npos);
+}
+
+int laneFromMarkerRest(const std::string& rest) {
+    std::istringstream in(rest);
+    int lane = 0;
+    in >> lane;
+    return lane;
+}
+
+// The trimming of fastqHeaderExtraFromCurrentLine in ReadAlignChunk_processChunks.cpp.
+std::string trimHeaderExtra(std::string extra) {
     const size_t firstNonSpace = extra.find_first_not_of(" \t");
     if (firstNonSpace == std::string::npos) {
         extra.clear();
@@ -33,6 +67,23 @@ std::string headerExtra(std::istream& in) {
         extra.pop_back();
     }
     return extra;
+}
+
+// Same as fastqHeaderExtraFromCurrentLine in ReadAlignChunk_processChunks.cpp.
+std::string headerExtra(std::istream& in) {
+    std::string extra;
+    std::getline(in, extra);
+    return trimHeaderExtra(extra);
+}
+
+const char* headerKind(char format) {
+    if (format == '@') {
+        return "a FASTQ read header ('@')";
+    }
+    if (format == '>') {
+        return "a FASTA read header ('>')";
+    }
+    return "a read header ('@' or '>')";
 }
 
 // Same as illuminaFilterFlagFromHeaderExtra in ReadAlignChunk_processChunks.cpp.
@@ -89,8 +140,17 @@ FastxMateReader::InputBuf::int_type FastxMateReader::InputBuf::underflow() {
 
 FastxMateReader::FastxMateReader(uint32_t mate, std::istream* source, int initialLane,
                                  const BgzfWorkPermitHooks& hooks,
-                                 const FastxMateLimits& limits)
-    : mate_(mate), source_(source), lane_(initialLane), hooks_(hooks), limits_(limits) {}
+                                 const FastxMateLimits& limits,
+                                 const std::vector<std::string>& fileNames)
+    : mate_(mate), source_(source), lane_(initialLane), hooks_(hooks), limits_(limits),
+      fileNames_(fileNames) {}
+
+std::string FastxMateReader::fileName(int lane) const {
+    if (lane >= 0 && static_cast<size_t>(lane) < fileNames_.size()) {
+        return fileNames_[static_cast<size_t>(lane)];
+    }
+    return "input file # " + std::to_string(lane);
+}
 
 FastxMateReader::~FastxMateReader() {
     requestStop();
@@ -103,7 +163,7 @@ void FastxMateReader::start() {
         return;
     }
     const long long longest = std::max(limits_.nameSeqLineMax, limits_.seqLineMax);
-    line_.assign(static_cast<size_t>(longest) + 2, '\0');
+    lineBuffer_.assign(static_cast<size_t>(longest) + 2, '\0');
     owned_.reserve(kFastxMateBatchesInFlight);
     for (size_t i = 0; i < kFastxMateBatchesInFlight; ++i) {
         owned_.emplace_back(new FastxMateBatch());
@@ -287,6 +347,40 @@ void FastxMateReader::markLane(FastxMateBatch* batch, int nextLane) {
     batch->laneRecords = laneRecords_;
     lane_ = nextLane;
     laneRecords_ = 0;
+    line_ = 0;
+    laneFormat_ = 0;
+    afterBlank_ = false;
+}
+
+// A blank line where a read header is expected: count it, and note the first
+// one in each file for a WARNING.
+void FastxMateReader::noteBlankLine(FastxMateBatch* batch) {
+    ++stats_.blankLines[lane_];
+    if (!afterBlank_) {
+        afterBlank_ = true;
+        firstBlankLine_ = line_;
+    }
+    bool& warned = blankWarned_[lane_];
+    if (!warned) {
+        warned = true;
+        FastxMateBatch::BlankNote note;
+        note.beforeRecord = static_cast<uint32_t>(batch->records.size());
+        note.lane = lane_;
+        note.line = line_;
+        batch->blankNotes.push_back(note);
+    }
+}
+
+// The line after a blank line is not a read header in this file's format.
+bool FastxMateReader::failAfterBlank(FastxMateBatch* batch, uint64_t line) {
+    batch->end = FastxMateEnd::Error;
+    batch->laneRecords = laneRecords_;
+    batch->errorText = "EXITING because of FATAL INPUT ERROR: malformed input in read file " +
+        fileName(lane_) + " (mate " + std::to_string(mate_ + 1) + "): line " + std::to_string(line) +
+        " follows a blank line (line " + std::to_string(firstBlankLine_) + ") but is not " +
+        headerKind(laneFormat_) + ". STAR never reads a blank line as a read header.\n"
+        "SOLUTION: remove the blank lines from the read file, or correct the file.\n";
+    return true;
 }
 
 // The single-threaded loop's fastqReadOneLine: getline with its limit, drop
@@ -294,7 +388,7 @@ void FastxMateReader::markLane(FastxMateBatch* batch, int nextLane) {
 // wrote the newline over the preceding newline and added nothing.
 bool FastxMateReader::appendLine(FastxMateBatch* batch, std::istream& in,
                                  uint32_t* offset, uint32_t* length) {
-    in.getline(line_.data(), static_cast<std::streamsize>(limits_.nameSeqLineMax + 1));
+    in.getline(lineBuffer_.data(), static_cast<std::streamsize>(limits_.nameSeqLineMax + 1));
     const std::streamsize got = in.gcount();
     *offset = static_cast<uint32_t>(batch->arena.size());
     if (got <= 0) {
@@ -306,17 +400,18 @@ bool FastxMateReader::appendLine(FastxMateBatch* batch, std::istream& in,
         return true;
     }
     std::streamsize kept = got;
-    if (static_cast<int>(line_[static_cast<size_t>(got - 2)]) < 33) {
+    if (static_cast<int>(lineBuffer_[static_cast<size_t>(got - 2)]) < 33) {
         --kept;
     }
-    batch->arena.insert(batch->arena.end(), line_.data(), line_.data() + (kept - 1));
+    batch->arena.insert(batch->arena.end(), lineBuffer_.data(), lineBuffer_.data() + (kept - 1));
     batch->arena.push_back('\n');
     *length = static_cast<uint32_t>(kept);
     return true;
 }
 
 bool FastxMateReader::parseFastq(FastxMateBatch* batch, std::istream& in,
-                                 FastxMateRecord* record, const std::string& token) {
+                                 FastxMateRecord* record, const std::string& token,
+                                 const std::string* headerRest) {
     if (mate_ == 0) {
         std::string readId = token;
         // removeStringEndControl
@@ -326,7 +421,13 @@ bool FastxMateReader::parseFastq(FastxMateBatch* batch, std::istream& in,
         record->idOff = batch->append(readId.data(), readId.size());
         record->idLen = static_cast<uint32_t>(readId.size());
     }
-    const std::string extra = headerExtra(in);
+    std::string extra;
+    if (headerRest != nullptr) {
+        extra = trimHeaderExtra(*headerRest);
+    } else {
+        extra = headerExtra(in);
+        ++line_;
+    }
     if (mate_ == 0) {
         record->filter = illuminaFilterFlag(extra);
     }
@@ -336,30 +437,39 @@ bool FastxMateReader::parseFastq(FastxMateBatch* batch, std::istream& in,
         return false;
     }
     in.ignore(static_cast<std::streamsize>(limits_.nameSeqLineMax), '\n');
-    return appendLine(batch, in, &record->qualOff, &record->qualLen);
+    const bool complete = appendLine(batch, in, &record->qualOff, &record->qualLen);
+    line_ += 3;
+    return complete;
 }
 
 // The single-threaded loop's FASTA branch: the header token, the rest of the
 // header ignored, then sequence lines joined until the next record start.
 void FastxMateReader::parseFasta(FastxMateBatch* batch, std::istream& in,
-                                 FastxMateRecord* record, const std::string& token) {
+                                 FastxMateRecord* record, const std::string& token,
+                                 bool headerRead) {
     record->idOff = batch->append(token.data(), token.size());
     record->idLen = static_cast<uint32_t>(token.size());
-    in.ignore(static_cast<std::streamsize>(limits_.nameSeqLineMax), '\n');
+    if (!headerRead) {
+        in.ignore(static_cast<std::streamsize>(limits_.nameSeqLineMax), '\n');
+        ++line_;
+    }
     const size_t start = batch->arena.size();
     record->seqOff = static_cast<uint32_t>(start);
     int next = in.peek();
     while (next != '@' && next != '>' && next != ' ' && next != '\n' && in.good()) {
-        in.getline(line_.data(), static_cast<std::streamsize>(limits_.seqLineMax + 1));
+        in.getline(lineBuffer_.data(), static_cast<std::streamsize>(limits_.seqLineMax + 1));
         const std::streamsize got = in.gcount();
+        if (got > 0) {
+            ++line_;
+        }
         if (got < 2) {
             break;
         }
         std::streamsize kept = got - 1;
-        if (static_cast<int>(line_[static_cast<size_t>(kept - 1)]) < 33) {
+        if (static_cast<int>(lineBuffer_[static_cast<size_t>(kept - 1)]) < 33) {
             --kept;
         }
-        batch->arena.insert(batch->arena.end(), line_.data(), line_.data() + kept);
+        batch->arena.insert(batch->arena.end(), lineBuffer_.data(), lineBuffer_.data() + kept);
         next = in.peek();
     }
     batch->arena.push_back('\n');
@@ -368,7 +478,7 @@ void FastxMateReader::parseFasta(FastxMateBatch* batch, std::istream& in,
 
 // Fills one batch. Returns true when this mate's input has ended (or failed).
 bool FastxMateReader::fillBatch(FastxMateBatch* batch, std::istream& in) {
-    std::string token;
+    std::string token, word, rest, line;
     while (batch->records.size() < kFastxMateBatchRecords) {
         if (stop_.load(std::memory_order_relaxed)) {
             batch->end = FastxMateEnd::Input;
@@ -377,23 +487,65 @@ bool FastxMateReader::fillBatch(FastxMateBatch* batch, std::istream& in) {
         }
         FastxMateRecord record;
         token.clear();
+        bool headerRead = false;  // the header line was read whole (it starts with whitespace)
         // The single-threaded loop tested mates 1 and 2 for good() before
         // each read and logged the end of input only when both passed.
         const bool wasGood = in.good();
-        if (mate_ == 0) {
-            // The single-threaded loop peeks mate 0 to decide what comes next.
-            const int next = in.peek();
+        // The single-threaded loop peeked mate 1 to decide what comes next.
+        const int next = in.peek();
+        if (next != std::char_traits<char>::eof() && isSpaceChar(next)) {
+            // A line that starts with whitespace where a read header is
+            // expected. A blank line is skipped (and counted) only if the
+            // next non-blank line is a read header or the file ends.
+            std::getline(in, line);
+            ++line_;
+            if (isBlankLine(line)) {
+                noteBlankLine(batch);
+                continue;
+            }
+            if (afterBlank_) {
+                return failAfterBlank(batch, line_);
+            }
+            splitFirstWord(line, &word, &rest);
+            if (mate_ == 0 && next == ' ') {
+                // The single-threaded loop ended the input here.
+                batch->end = FastxMateEnd::Input;
+                batch->endChar = ' ';
+                batch->endSilent = !wasGood;
+                batch->laneRecords = laneRecords_;
+                return true;
+            }
+            if (word == "FILE") {
+                markLane(batch, laneFromMarkerRest(rest));
+                return false;
+            }
+            if (mate_ == 0) {
+                // The single-threaded loop read the first word and reported it.
+                batch->end = FastxMateEnd::Error;
+                batch->errorWord = word;
+                batch->errorRest = rest;
+                batch->laneRecords = laneRecords_;
+                return true;
+            }
+            // Other mates: the single-threaded loop read the first word as
+            // the read ID and the rest of the line as the header.
+            token = word;
+            record.format = token[0] == '>' ? '>' : '@';
+            headerRead = true;
+        } else if (mate_ == 0) {
             if (next == '@' || next == '>') {
+                if (afterBlank_ && laneFormat_ != 0 && next != laneFormat_) {
+                    return failAfterBlank(batch, line_ + 1);
+                }
                 in >> token;
                 record.format = static_cast<char>(next);
-            } else if (next == ' ' || next == '\n' || !in.good()) {
+            } else if (!in.good()) {
                 batch->end = FastxMateEnd::Input;
                 batch->endChar = static_cast<int>(static_cast<char>(next));
                 batch->endSilent = !wasGood;
                 batch->laneRecords = laneRecords_;
                 return true;
             } else {
-                std::string word;
                 in >> word;
                 if (word == "FILE") {
                     int nextLane = 0;
@@ -402,7 +554,9 @@ bool FastxMateReader::fillBatch(FastxMateBatch* batch, std::istream& in) {
                     markLane(batch, nextLane);
                     return false;
                 }
-                std::string rest;
+                if (afterBlank_) {
+                    return failAfterBlank(batch, line_ + 1);
+                }
                 std::getline(in, rest);
                 batch->end = FastxMateEnd::Error;
                 batch->errorWord = word;
@@ -411,7 +565,7 @@ bool FastxMateReader::fillBatch(FastxMateBatch* batch, std::istream& in) {
                 return true;
             }
         } else {
-            // Other mates follow mate 0 in the single-threaded loop, which
+            // Other mates follow mate 1 in the single-threaded loop, which
             // reads their ID token without checking it.
             if (!(in >> token)) {
                 batch->end = FastxMateEnd::Input;
@@ -426,17 +580,25 @@ bool FastxMateReader::fillBatch(FastxMateBatch* batch, std::istream& in) {
                 markLane(batch, nextLane);
                 return false;
             }
+            if (afterBlank_ && ((token[0] != '@' && token[0] != '>') ||
+                                (laneFormat_ != 0 && token[0] != laneFormat_))) {
+                return failAfterBlank(batch, line_ + 1);
+            }
             record.format = token[0] == '>' ? '>' : '@';
         }
         if (record.format == '@') {
-            if (!parseFastq(batch, in, &record, token)) {
+            if (!parseFastq(batch, in, &record, token, headerRead ? &rest : nullptr)) {
                 // Incomplete last record: this mate's input ends here.
                 batch->end = FastxMateEnd::Input;
                 batch->laneRecords = laneRecords_;
                 return true;
             }
         } else {
-            parseFasta(batch, in, &record, token);
+            parseFasta(batch, in, &record, token, headerRead);
+        }
+        afterBlank_ = false;
+        if (laneFormat_ == 0) {
+            laneFormat_ = record.format;
         }
         batch->records.push_back(record);
         ++laneRecords_;
@@ -451,10 +613,13 @@ bool FastxMateReader::fillBatch(FastxMateBatch* batch, std::istream& in) {
 FastxMateReaderGroup::FastxMateReaderGroup(const std::vector<std::istream*>& streams,
                                            int initialLane,
                                            const BgzfWorkPermitHooks& hooks,
-                                           const FastxMateLimits& limits) {
+                                           const FastxMateLimits& limits,
+                                           const std::vector<std::vector<std::string>>& fileNames) {
+    const std::vector<std::string> none;
     for (size_t m = 0; m < streams.size(); ++m) {
         readers_.emplace_back(new FastxMateReader(static_cast<uint32_t>(m), streams[m],
-                                                  initialLane, hooks, limits));
+                                                  initialLane, hooks, limits,
+                                                  m < fileNames.size() ? fileNames[m] : none));
     }
     cursors_.resize(streams.size());
 }
@@ -483,7 +648,7 @@ void FastxMateReaderGroup::stopAndJoin() {
     }
 }
 
-void FastxMateReaderGroup::normalize(uint32_t mate) {
+void FastxMateReaderGroup::normalize(uint32_t mate, FastxChunkFillContext& context) {
     Cursor& cursor = cursors_[mate];
     for (;;) {
         if (cursor.dead) {
@@ -495,6 +660,16 @@ void FastxMateReaderGroup::normalize(uint32_t mate) {
             if (cursor.batch == nullptr) {
                 cursor.dead = true;
                 return;
+            }
+            if (context.onWarning) {
+                for (const FastxMateBatch::BlankNote& note : cursor.batch->blankNotes) {
+                    context.onWarning("FASTX read file " + readers_[mate]->fileName(note.lane) +
+                        " (mate " + std::to_string(mate + 1) + "): blank line at line " +
+                        std::to_string(note.line) + " where a read header was expected. STAR skips "
+                        "blank lines that come before a read header; later ones in this file are "
+                        "not reported one by one, and the number skipped per file is in Log.out "
+                        "when the input closes.");
+                }
             }
         }
         if (cursor.index < cursor.batch->records.size() ||
@@ -529,9 +704,9 @@ std::string FastxMateReaderGroup::laneCount(uint32_t mate) const {
 }
 
 // Skips the rest of this mate's current lane, up to its lane or input end.
-void FastxMateReaderGroup::drainLane(uint32_t mate) {
+void FastxMateReaderGroup::drainLane(uint32_t mate, FastxChunkFillContext& context) {
     for (;;) {
-        normalize(mate);
+        normalize(mate, context);
         Cursor& cursor = cursors_[mate];
         if (cursor.dead) {
             return;
@@ -548,7 +723,7 @@ FastxMateReaderGroup::PairStatus FastxMateReaderGroup::nextPair(FastxChunkFillCo
     const uint32_t n = mates();
     for (;;) {
         for (uint32_t m = 0; m < n; ++m) {
-            normalize(m);
+            normalize(m, context);
         }
         const int lane = cursors_[0].batch != nullptr ? cursors_[0].batch->lane
                                                       : *context.readFilesIndex;
@@ -575,9 +750,9 @@ FastxMateReaderGroup::PairStatus FastxMateReaderGroup::nextPair(FastxChunkFillCo
                 }
                 if (end == FastxMateEnd::Input) {
                     if (!extraWarned_ && context.onWarning) {
-                        context.onWarning(" FASTX mate " + std::to_string(m + 1) + " ends after " +
+                        context.onWarning("FASTX mate " + std::to_string(m + 1) + " ends after " +
                             laneCount(m) + " reads of input file # " + std::to_string(lane) +
-                            ", before mate 1. STAR skips the remaining reads of the other mates.\n");
+                            ", before mate 1. STAR skips the remaining reads of the other mates.");
                     }
                     extraWarned_ = true;
                     *endCharOut = kNoEndLog;
@@ -587,7 +762,7 @@ FastxMateReaderGroup::PairStatus FastxMateReaderGroup::nextPair(FastxChunkFillCo
             // A mate reached the end of this input file first: use the reads
             // all mates have and skip the rest of the file.
             for (uint32_t m = 0; m < n; ++m) {
-                drainLane(m);
+                drainLane(m, context);
             }
             ++truncatedLanes_;
             if (context.onWarning) {
@@ -595,9 +770,9 @@ FastxMateReaderGroup::PairStatus FastxMateReaderGroup::nextPair(FastxChunkFillCo
                 for (uint32_t m = 0; m < n; ++m) {
                     counts += (m ? ", mate " : "mate ") + std::to_string(m + 1) + ": " + laneCount(m);
                 }
-                context.onWarning(" FASTX mates have different numbers of reads in input file # " +
+                context.onWarning("FASTX mates have different numbers of reads in input file # " +
                     std::to_string(lane) + " (" + counts + "). STAR mapped the reads all mates have "
-                    "and skipped the rest of this file.\n");
+                    "and skipped the rest of this file.");
             }
             continue;
         }
@@ -617,9 +792,9 @@ FastxMateReaderGroup::PairStatus FastxMateReaderGroup::nextPair(FastxChunkFillCo
                 for (uint32_t m = 1; m < n; ++m) {
                     if (hasRecord(m) || endOf(m) == FastxMateEnd::Lane) {
                         if (context.onWarning) {
-                            context.onWarning(" FASTX mate 1 ends after " + laneCount(0) +
+                            context.onWarning("FASTX mate 1 ends after " + laneCount(0) +
                                 " reads of input file # " + std::to_string(lane) + ", before mate " +
-                                std::to_string(m + 1) + ". STAR skips the remaining reads of the other mates.\n");
+                                std::to_string(m + 1) + ". STAR skips the remaining reads of the other mates.");
                         }
                         extraWarned_ = true;
                         break;
@@ -642,7 +817,7 @@ FastxMateReaderGroup::PairStatus FastxMateReaderGroup::nextPair(FastxChunkFillCo
         bool drained = false;
         for (uint32_t m = 1; m < n; ++m) {
             if (hasRecord(m)) {
-                drainLane(m);
+                drainLane(m, context);
                 drained = true;
             }
         }
@@ -653,9 +828,9 @@ FastxMateReaderGroup::PairStatus FastxMateReaderGroup::nextPair(FastxChunkFillCo
                 for (uint32_t m = 0; m < n; ++m) {
                     counts += (m ? ", mate " : "mate ") + std::to_string(m + 1) + ": " + laneCount(m);
                 }
-                context.onWarning(" FASTX mates have different numbers of reads in input file # " +
+                context.onWarning("FASTX mates have different numbers of reads in input file # " +
                     std::to_string(lane) + " (" + counts + "). STAR mapped the reads all mates have "
-                    "and skipped the rest of this file.\n");
+                    "and skipped the rest of this file.");
             }
             continue;
         }
@@ -668,8 +843,8 @@ FastxMateReaderGroup::PairStatus FastxMateReaderGroup::nextPair(FastxChunkFillCo
             }
             if (end == FastxMateEnd::Input) {
                 if (!extraWarned_ && context.onWarning) {
-                    context.onWarning(" FASTX mate " + std::to_string(m + 1) + " has no input file # " +
-                        std::to_string(next) + ". STAR skips the remaining files of the other mates.\n");
+                    context.onWarning("FASTX mate " + std::to_string(m + 1) + " has no input file # " +
+                        std::to_string(next) + ". STAR skips the remaining files of the other mates.");
                 }
                 extraWarned_ = true;
                 *endCharOut = kNoEndLog;
@@ -851,6 +1026,13 @@ std::string FastxMateReaderGroup::summary() const {
             << " permits=" << s.permitAcquires
             << " permitWaitSeconds=" << (static_cast<double>(s.permitWaitNs) / 1e9)
             << "\n";
+        for (const auto& blank : s.blankLines) {
+            if (blank.second != 0) {
+                out << "  mate " << (m + 1) << ": skipped " << blank.second
+                    << " blank line(s) where a read header was expected in "
+                    << readers_[m]->fileName(blank.first) << "\n";
+            }
+        }
     }
     return out.str();
 }
