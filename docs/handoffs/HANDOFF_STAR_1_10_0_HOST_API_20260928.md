@@ -20,8 +20,13 @@ depend on the supporting headers so edits trigger recompilation.
 and now passes: strict date-macro compilation in two directories and with two
 epochs, the unchanged explicitly seeded PCG sequence, and libem's default and
 caller-supplied compile flags. It runs in partial-build CI, including the
-release pipeline's prerequisite job. Clean strict host-library build and
-runtime regression validation are pending at this source checkpoint.
+release pipeline's prerequisite job. A fresh checkout of 03039d9 builds STAR,
+the host library and transcriptvb_finalize with strict checks on every nested
+compiler invocation, static HTSlib 1.23 and fixed build metadata. There were
+no compiler errors. A follow-up audit found the identical unused PCG copy in
+`flex/source/libflex`; it now carries the same fix and has its own regression.
+The active libflex build uses libscrna's samplers, so this copy was not linked
+in the successful build. Runtime regression validation is pending.
 
 The existing v1.10.0-rc1 tag is unchanged. These are post-rc1 source fixes;
 the historical gate acceptance below applies to the earlier candidate.

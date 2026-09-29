@@ -75,6 +75,13 @@ Keep evidence under
 `/mnt/pikachu/star_suite_v1100_gates_20260928/deterministic_build_fix_20260929/`.
 Do not move rc1 or treat these fixes as completion of the Multiomics gates.
 
+The first strict build, source 03039d9, passed for STAR, libstar_suite and
+transcriptvb_finalize. The initial safe tar extraction rejected an existing
+out-of-tree compatibility symlink; the build instead used a fresh exact-commit
+Git checkout (both setup records are retained). The old Flex PCG copy also
+contained the date/time helper, although it is not linked by the active
+libflex build. Apply the same fixed seed there and cover it in the regression.
+
 **2026-09-29 candidate creation:** following the owner's request to start
 1.10 version creation, create the local annotated `v1.10.0-rc1` tag from the
 accepted branch. No remote push or stable merge is included. Record the source

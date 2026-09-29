@@ -29,6 +29,12 @@ class ReproducibleLibraryBuildTests(unittest.TestCase):
         return result.stdout
 
     def test_pcg_strict_build_and_seeded_sequence_across_paths_and_epochs(self):
+        self.check_pcg_header("core/features/libscrna/include")
+
+    def test_legacy_flex_pcg_copy(self):
+        self.check_pcg_header("flex/source/libflex")
+
+    def check_pcg_header(self, include_dir):
         # This sequence is frozen from the unmodified vendored PCG header.
         # STAR's callers pass explicit seeds; the arbitrary-seed helper must
         # remain independent of build location/time without altering that RNG.
@@ -49,7 +55,7 @@ int main() {
             build = self.work / directory
             build.mkdir(parents=True)
             for name in ("pcg_random.hpp", "pcg_extras.hpp", "pcg_uint128.hpp"):
-                shutil.copy2(ROOT / "core/features/libscrna/include" / name, build)
+                shutil.copy2(ROOT / include_dir / name, build)
             source = build / "probe.cpp"
             source.write_text(program)
             executable = build / "probe"
