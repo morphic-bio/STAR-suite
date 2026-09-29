@@ -88,7 +88,7 @@ workflow artifacts.
 `tests/test_htslib_build_discovery.py` also checks custom HTSlib prefixes,
 include overrides, missing dependencies, portable includes, cached scans, and
 atomic failure. It compiles and links the HTSlib preflight probe, and compiles
-an object with Carl's indirect `ParametersSolo.h` -> `htslib/khash.h` include
+an object with a reported indirect `ParametersSolo.h` -> `htslib/khash.h` include
 using a nonstandard HTSlib prefix. The full Chromap build is a local acceptance case with its
 external checkout explicitly supplied; it is not silently substituted with a
 portable build in CI.

@@ -1855,9 +1855,9 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
   files, tiny fixture executables, recipe previews, and job records. No biological
   dataset was processed by these tests.
 
-## Carl's fresh Multiome build and Launchpad instructions (2026-09-29)
+## Fresh 1.9.5.b Multiome build and Launchpad instructions (2026-09-29)
 
-- `/mnt/pikachu/star-carl-build-20260929.0YxUk3/`: fresh HTTPS source clones of
+- `/mnt/pikachu/star-195b-build-20260929.0YxUk3/`: fresh HTTPS source clones of
   STAR `4f44406`, Chromap v1.1.0 (`a47f077`) and RapidMACS `34df448`; native
   builds, an isolated Launchpad Python environment, and synthetic inputs.
 - `evidence/` beneath that directory contains clone/build/setup logs, Python

@@ -257,6 +257,6 @@ Checked on **Ubuntu 22.04.5 x86-64, 29 September 2026**:
   directory names and the explicitly written default `--runMode alignReads`.
 
 This verifies compilation and a small end-to-end synthetic run. It does not
-establish biological accuracy or performance on Carl's dataset, and Ubuntu
+establish biological accuracy or performance on real datasets, and Ubuntu
 24.04 was not separately tested in this check. Artifact locations are recorded
 in [tests/ARTIFACTS.md](../tests/ARTIFACTS.md).
