@@ -6,6 +6,16 @@ update this file with its output location.
 
 ## Host API 1.10 Release Gates (2026-09-28)
 
+- September 29 follow-up: `acceptance_20260928/` under the gate root holds
+  the fresh container build, SLAM repeats, seeded H5AD comparisons, repaired
+  UCSF fixture, host-API/Tier A checks and TranscriptVB repeatability controls.
+  One-off command drivers are in the root's `tools/`. See
+  `docs/VALIDATION_STAR_1_10_0_20260929.md`; no G-S1 acceptance or G-S3 timings
+  are implied. Original failures and superseded diagnostic reports remain.
+- `tests/host_api/compare_h5ad_values.py` writes a new `--report` JSON and
+  refuses overwrites. Its unit tests use automatically removed temporary
+  HDF5 files. `tests/slam/compare_sam_records.py` prints a read-only comparison
+  report; its unit tests use in-memory byte strings.
 - Local gate binaries, captured outputs, status tables, and comparisons belong
   under `/mnt/pikachu/star_suite_v1100_gates_20260928/`, not in git. The initial
   session scratch location is recorded in the 1.10 host-API handoff.

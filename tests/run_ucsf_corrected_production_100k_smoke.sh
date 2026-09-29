@@ -55,7 +55,8 @@ if [[ "${USE_EXISTING_STAGED_FIXTURE}" == "1" ]]; then
   mkdir -p "${TEMP_FIXTURE_ROOT}/${SAMPLE}"
   ln -s "${SOURCE_SAMPLE_ROOT}/staged_input/GEX/${SAMPLE}" "${TEMP_FIXTURE_ROOT}/${SAMPLE}/GEX"
   ln -s "${SOURCE_SAMPLE_ROOT}/staged_input/guides/${SAMPLE}" "${TEMP_FIXTURE_ROOT}/${SAMPLE}/guides"
-  cp -f "${SOURCE_SAMPLE_ROOT}/pf_multi_config.csv" "${TEMP_FIXTURE_ROOT}/${SAMPLE}/pf_multi_config.csv"
+  # Let the workflow generate a config using these exact symlink paths. Copying
+  # the old config leaves stale paths and defeats STAR's GEX/guide separation.
   "${WORKFLOW}" \
     --samples "${SAMPLE}" \
     --dataset-root "${TEMP_FIXTURE_ROOT}" \
@@ -85,6 +86,9 @@ fi
 SAMPLE_ROOT="${OUT_ROOT}/samples/${SAMPLE}"
 RUN_DIR="${SAMPLE_ROOT}/run"
 DOWNSTREAM_DIR="${SAMPLE_ROOT}/downstream_genefull_velocyto"
+if ! grep -Eq 'pf-multi GEX input filtering retained [1-9][0-9]*/[1-9][0-9]* FASTQ files for GEX mapping' "${RUN_DIR}/Log.out"; then
+  die "Missing GEX/guide input separation; check fixture config paths before accepting counts"
+fi
 bash "${REPO_ROOT}/scripts/run_scrna_downstream_gene_full_velocyto.sh" \
   --run-dir "${RUN_DIR}" --output-dir "${DOWNSTREAM_DIR}" --adaptive-filter
 

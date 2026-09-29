@@ -55,6 +55,17 @@ that tag only in `AGENTS.md`; it is code-equivalent, not the same Git commit.
 
 ## Steps
 
+**2026-09-29 follow-up:** repeat approval is now recorded. The fresh candidate
+passed the host API, expanded Tier A, SLAM SE/PE and seeded downstream checks.
+The reused UCSF fixture configuration was repaired and matrix parity verified.
+The expanded capture audit uncovered multi-thread TranscriptVB numerical
+variation, also reproducible on the pristine baseline; exact one-thread SE/PE
+controls pass. G-S1 is not accepted pending disposition of this finding, and
+G-S3 must not bypass its acceptance guard. See
+[validation results](../VALIDATION_STAR_1_10_0_20260929.md).
+Earlier execution counts and holds below are historical, not current approval
+status. No tag, push or master merge has occurred.
+
 **2026-09-28 correction:** the modern Flex workload is
 `tests/run_flex_half_probe_100k_smoke.sh`, using the established H0/H1X2 half-khash
 and matching model/included-gene lists. It passed all 121 output comparisons to

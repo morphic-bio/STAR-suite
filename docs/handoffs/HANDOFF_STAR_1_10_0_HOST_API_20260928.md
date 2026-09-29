@@ -5,6 +5,29 @@ Updated: 2026-09-28, after both G-S1 batches completed. Runbook:
 
 ## State
 
+### Latest: authorized validation follow-up (2026-09-29)
+
+The owner approved the remaining repeats. A fresh same-container build of
+`a9c1636` passed G-S2, the expanded 15-case Tier A suite (with corrected
+companion paths), SLAM SE/PE determinism and cross-version checks, seeded
+downstream reproducibility and cross-version H5AD checks. A stale-path bug in
+the UCSF smoke's reused fixture config was fixed; the repaired run has the
+expected 3,943 cells and 35/35 matching MEX/axis files. The final downstream
+aggregate passes 51/51 checks. No production C++ changed in this follow-up.
+
+**G-S1 remains unaccepted for a newly identified reason:** the fuller capture
+audit found TranscriptVB quantification differences. The pristine 1.9.5.a
+baseline itself varies at 16 threads; one-thread SE/PE cross-version controls
+match exactly. An owner decision on the validation contract was requested;
+do not silently waive numerical differences. G-S3 remains unrun because its
+driver requires G-S1 acceptance, not because repeat approval is missing.
+
+Authoritative details, commands and evidence:
+[September 29 validation](../VALIDATION_STAR_1_10_0_20260929.md).
+Artifacts: `/mnt/pikachu/star_suite_v1100_gates_20260928/acceptance_20260928/`.
+The initial follow-up driver failures and invalid reused-fixture run are retained
+with their explicit replacements. Nothing pushed, tagged or merged into master.
+
 ### Latest follow-up: current Flex fixture corrected
 
 This section supersedes the earlier interpretation of the legacy Flex failure
@@ -101,11 +124,12 @@ Never label it a benign difference merely because the baseline also failed.
 
 ### Remaining release work
 
-Explicit repeat approval is still needed for G-S3, SE/PE SLAM determinism and the
-second seeded doublet run. No approval markers were created. Finish output-pairing
-normalization and the complete gate audit; the initial failed batches remain
-failed historical records. The new 100K smoke scope and separate CUDA test are
-not retroactive passes of the old combined wrapper. Multiomics integration and
+Repeat approval was subsequently received and recorded; see the September 29
+section above for the completed SLAM/downstream checks and new TranscriptVB
+acceptance issue. Finish the complete gate audit and G-S3 after resolving that
+issue; the initial failed batches remain failed historical records. The new
+100K smoke scope and separate CUDA test are not retroactive passes of the old
+combined wrapper. Multiomics integration and
 its recipe executable/snapshot migration remain stable-release dependencies
 after the local RC is available, not a reason to change the current Flex cache.
 No push, tag or master merge is authorized by this follow-up.

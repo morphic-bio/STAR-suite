@@ -130,6 +130,21 @@ STAR in the same process, sharing STAR's thread permits. See the
 The release gates are not complete. Do not interpret a completed regression
 batch as approval to tag or publish this candidate.
 
+**September 29 update:** the owner authorized repeats. Fresh-build G-S2 and
+15/15 Tier A checks pass; SLAM SE/PE repeat and cross-version results match
+when unsorted SAM record order is treated separately. Seeded downstream
+repeats and cross-version H5ADs match, including every dataset and attribute
+after explicit provenance-path normalization. The UCSF reused-fixture test
+now regenerates its configuration with current paths and rejects zero-match
+GEX filtering; its repaired MEX outputs match the previous run exactly.
+
+The expanded audit found a new acceptance issue: multi-thread TranscriptVB
+quantification varies on the pristine baseline too, while one-thread SE/PE
+cross-version controls match exactly. Strict G-S1 is **not accepted** pending
+disposition; G-S3 therefore remains unrun despite repeat approval. Details:
+[validation follow-up](VALIDATION_STAR_1_10_0_20260929.md).
+The earlier evidence below is retained as history, not the current hold reason.
+
 - Previously completed: clean no-Chromap build, bundled/external HTSlib host
   API tests, and partial builds (baseline 8/8; candidate 11/11).
 - Both G-S1 arms completed. Tier A passed 13/13 on each. Production results:
