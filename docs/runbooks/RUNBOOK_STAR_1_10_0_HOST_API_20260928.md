@@ -59,9 +59,14 @@ that tag only in `AGENTS.md`; it is code-equivalent, not the same Git commit.
 passed the host API, expanded Tier A, SLAM SE/PE and seeded downstream checks.
 The reused UCSF fixture configuration was repaired and matrix parity verified.
 The expanded capture audit uncovered multi-thread TranscriptVB numerical
-variation, also reproducible on the pristine baseline; exact one-thread SE/PE
-controls pass. G-S1 is not accepted pending disposition of this finding, and
-G-S3 must not bypass its acceptance guard. See
+variation, also reproducible on the pristine baseline. The owner subsequently
+directed single-thread, order-sensitive validation. All four 100K SE/PE cases
+and both ordered sidecar payloads now match exactly; the kept-output audit is
+closed. G-S1 is accepted and G-S2 passed. All eighteen G-S3 attempts match
+outputs; raw median changes are below +3% wall / +2% RSS, but six host records
+are contaminated. Only the 100K timing component passes; G-S3 remains open.
+Wrapper errors and their dispositions are preserved. Use immutable driver
+snapshots for any further authorized timing runs. See
 [validation results](../VALIDATION_STAR_1_10_0_20260929.md).
 Earlier execution counts and holds below are historical, not current approval
 status. No tag, push or master merge has occurred.

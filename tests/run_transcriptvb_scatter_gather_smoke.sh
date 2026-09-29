@@ -12,8 +12,17 @@ root="$(cd "$here/.." && pwd)"
 src="$root/core/legacy/source"
 STAR_BIN="${STAR_BIN:-$src/STAR}"
 TRANSCRIPTVB_FINALIZE_BIN="${TRANSCRIPTVB_FINALIZE_BIN:-$src/transcriptvb_finalize}"
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+THREADS="${THREADS:-4}"
+[[ "$THREADS" =~ ^[1-9][0-9]*$ ]] || { echo "THREADS must be positive" >&2; exit 2; }
+# Set THREADS=1 for order-sensitive cross-version evidence comparisons.
+if [[ -n "${OUT_ROOT:-}" ]]; then
+    mkdir -p "$(dirname "$OUT_ROOT")"
+    mkdir "$OUT_ROOT"
+    work="$(cd "$OUT_ROOT" && pwd)"
+else
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+fi
 
 run_quiet() {
     local stage="$1"
@@ -60,10 +69,10 @@ PY
 
 mkdir -p "$work/g"
 run_quiet genome_generate "$STAR_BIN" --runMode genomeGenerate --genomeDir "$work/g" --genomeFastaFiles "$work/ref.fa" \
-    --sjdbGTFfile "$work/genes.gtf" --genomeSAindexNbases 8 --runThreadN 4 \
+    --sjdbGTFfile "$work/genes.gtf" --genomeSAindexNbases 8 --runThreadN "$THREADS" \
     --outFileNamePrefix "$work/gg_"
 
-common=(--genomeDir "$work/g" --outSAMtype None --runThreadN 4 --quantMode TranscriptVB
+common=(--genomeDir "$work/g" --outSAMtype None --runThreadN "$THREADS" --quantMode TranscriptVB
         --quantVBLibType IU --transcriptomeFasta "$work/txome.fa")
 
 mkdir -p "$work/inproc"
@@ -88,7 +97,7 @@ done
 # like-for-like test.
 run_quiet transcriptvb_finalize "$TRANSCRIPTVB_FINALIZE_BIN" \
     --genome-dir "$work/g" --transcriptome "$work/txome.fa" \
-    --out-prefix "$work/gathered_" --no-gc --threads 4 \
+    --out-prefix "$work/gathered_" --no-gc --threads "$THREADS" \
     "$work/s0/evidence.stvb" "$work/s1/evidence.stvb"
 
 python3 - "$work/inproc/quant.sf" "$work/gathered_quant.sf" <<'PY'

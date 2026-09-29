@@ -1,6 +1,7 @@
 # Handoff: STAR Suite 1.10.0 host interface and Chromap removal
 
-Updated: 2026-09-28, after both G-S1 batches completed. Runbook:
+Updated: 2026-09-29. Latest disposition is in the first section; original batch
+records below are retained as history. Runbook:
 `docs/runbooks/RUNBOOK_STAR_1_10_0_HOST_API_20260928.md`.
 
 ## State
@@ -15,12 +16,22 @@ the UCSF smoke's reused fixture config was fixed; the repaired run has the
 expected 3,943 cells and 35/35 matching MEX/axis files. The final downstream
 aggregate passes 51/51 checks. No production C++ changed in this follow-up.
 
-**G-S1 remains unaccepted for a newly identified reason:** the fuller capture
-audit found TranscriptVB quantification differences. The pristine 1.9.5.a
-baseline itself varies at 16 threads; one-thread SE/PE cross-version controls
-match exactly. An owner decision on the validation contract was requested;
-do not silently waive numerical differences. G-S3 remains unrun because its
-driver requires G-S1 acceptance, not because repeat approval is missing.
+**G-S1 is now accepted:** after the fuller audit found multi-thread TranscriptVB
+variation on the pristine baseline too, the owner explicitly selected
+single-thread, order-sensitive validation. All 12 quantification tables for
+treated/no-4sU SE/PE and both ordered sidecar payloads match byte-for-byte. The
+legacy external BINSEQ probe also matches at one decoder thread. All 218
+kept-output discrepancies have explicit dispositions, and seeded summary/QC
+plots match. See `$D/G_S1_ACCEPTED.json` and the report below. The approved
+three-repeat G-S3 attempts are complete at `$D/gs3_acceptance/` and
+`$D/gs3_remaining/`, with 18/18 matching output signatures. Raw median wall
+changes are +0.036%, +0.151% and +0.130% for 100K scRNA, 10M scRNA and Flex;
+peak RSS changes are below 0.04%. Only 100K meets the clean-host requirement:
+six other attempts are flagged. G-S3 remains unaccepted. See
+`$A/gs3_report.json` and the wrapper-error dispositions in the report below.
+Future authorized timings must use `tools/run_gs3_frozen.sh`; never edit a
+live shell driver. No additional identical repeats were launched without
+approval. Do not treat functional acceptance as a performance result.
 
 Authoritative details, commands and evidence:
 [September 29 validation](../VALIDATION_STAR_1_10_0_20260929.md).
@@ -125,9 +136,9 @@ Never label it a benign difference merely because the baseline also failed.
 ### Remaining release work
 
 Repeat approval was subsequently received and recorded; see the September 29
-section above for the completed SLAM/downstream checks and new TranscriptVB
-acceptance issue. Finish the complete gate audit and G-S3 after resolving that
-issue; the initial failed batches remain failed historical records. The new
+section above for the completed SLAM/downstream checks and accepted ordered
+single-thread TranscriptVB comparison. Finish G-S3's timing/host-load audit;
+the initial failed batches remain failed historical records. The new
 100K smoke scope and separate CUDA test are not retroactive passes of the old
 combined wrapper. Multiomics integration and
 its recipe executable/snapshot migration remain stable-release dependencies

@@ -1905,6 +1905,26 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
   not remove them; nothing is committed.
 # STAR 1.10.0 gate follow-up (2026-09-28)
 
+- `/mnt/pikachu/star_suite_v1100_gates_20260928/acceptance_20260928/`:
+  clean same-container candidate, host/Tier A checks, corrected UCSF fixture,
+  seeded downstream and strict ordered single-thread TranscriptVB controls.
+  `single_thread_acceptance/ordered_parity.json` records all 27 exact checks;
+  `binseq_single_thread/` keeps exact one-thread decoded mates/probe records;
+  `kept_output_disposition_v2.json` closes the earlier output audit.
+  Original failures and multi-thread diagnostics are preserved, not overwritten.
+- `/mnt/pikachu/star_suite_v1100_gates_20260928/{gs3_acceptance,gs3_remaining}/`: authorized
+  serialized three-repeat performance executions, host-load records and GNU
+  time logs. The eighteen output signatures match, but G-S3 is not accepted;
+  `acceptance_20260928/gs3_report.json` retains all timings and host flags.
+  `gs3_remaining/BATCH_EXIT_DISPOSITION.md` records the trailing shell-driver
+  error; `gs3_round3/` records a cancelled resume with no data execution.
+  `driver_snapshots/` holds read-only driver/helper copies for future approved
+  runs. Completion is not an acceptance verdict.
+- `tests/run_transcriptvb_scatter_gather_smoke.sh` accepts `THREADS` (default
+  4; use 1 for order-sensitive cross-version controls) and `OUT_ROOT` (must
+  not exist). Explicit output roots are retained; default temporary outputs
+  are removed on exit.
+
 - `/mnt/pikachu/star_suite_v1100_gates_20260928/fixes_20260928/`: permit stress,
   clean-build logs, historical policy-versioned replay, modern H0/H1X2 100K
   comparison, seeded saved-MEX downstream and five-epoch CUDA/layer smoke.

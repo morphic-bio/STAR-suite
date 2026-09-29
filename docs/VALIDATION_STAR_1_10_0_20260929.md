@@ -1,9 +1,11 @@
 # STAR Suite 1.10.0 validation follow-up
 
-Date: 2026-09-29 UTC. **Not release acceptance.** The owner authorized the
-remaining repeats with "Ok finish the validation gates" on September 28.
-The previous authorization hold is resolved; the newly identified output-parity
-issue below is not. No tag, push, or master merge was performed.
+Date: 2026-09-29 UTC. **G-S1 and G-S2 accepted; G-S3 not accepted.** The owner
+authorized the remaining repeats with "Ok finish the validation gates" and then
+directed: "Do it on a single thread with a smaller set if needed - the order
+matters unfortunately". The exact ordered controls below close the TranscriptVB
+hold. This is not stable-release acceptance. No tag, push, or master merge was
+performed.
 
 ## Build and provenance
 
@@ -94,7 +96,7 @@ Preserved non-acceptance records:
 - Early downstream comparison reports that flagged provenance paths remain;
   the final `followup_output_parity_v2.json` includes explicit root normalization.
 
-## Outstanding G-S1 issue: TranscriptVB
+## Original G-S1 issue: TranscriptVB
 
 The expanded read-only capture audit paired all 100 original candidate STAR
 invocations without ambiguity. **95 pairs pass**. Eight additional baseline
@@ -143,16 +145,119 @@ Full reports: `capture_audit_v1.json`,
 `transcriptvb_diagnostic/{commands.json,report.json}` and
 `sidecar_content_diagnostics.json`.
 
+## Ordered single-thread acceptance
+
+The owner chose single-thread validation, not a numerical tolerance or a
+sorted-record comparison. The 100K inputs were retained without further
+downsampling. Reused the completed S50 no-4sU one-thread controls and executed
+S43 treated SE/PE on both frozen binaries. All **12 quantification tables**
+(transcript, gene and tximport for four cases) match byte-for-byte, including
+row order. No production TranscriptVB code or defaults changed.
+
+The synthetic 4,000-pair scatter/gather smoke ran on both versions with
+`THREADS=1` (mapping, reference generation and finalize). The two sidecar
+evidence payloads match byte-for-byte in order, including ECs, weights, GC and
+FLD bins. Checksums and fixed metadata validate. Only the explicitly verified
+source revision, reference directory and path/mtime-based FASTA fingerprint
+differ in their provenance headers; reference/FASTA/read files match exactly.
+In-process and gathered quantification outputs also match across versions.
+The audit passes **27/27 checks** in
+`single_thread_acceptance/ordered_parity.json`. The smoke's existing within-arm
+scatter-versus-in-process tolerances are separate from this exact cross-version
+audit; they were not used to accept cross-version differences.
+
+The legacy external BINSEQ probe's auto-thread decoder also varied record
+order. With the same pinned CBQ input and `bqtools decode --threads 1`, both
+versions now produce byte-identical R1, R2 and probe TSV outputs, preserving
+all headers and order (`binseq_single_thread/PASS`). No runtime reader code
+was changed.
+
+The final kept-output audit accounts for all **218 initially different or
+missing paths**, plus the original 2,042 identical outputs. There are no
+unexplained paths. Details are in `kept_output_disposition_v2.json`: logs,
+fixture Git/font caches, verified provenance/timing fields, approved keyed PF
+matrices, unordered transfer inventory, intentionally moved Chromap adapter
+outputs, and explicitly superseded OCM/downstream attempts. The old reports
+and failed outputs remain intact.
+
+The seeded downstream comparison additionally passes all six summary, QC,
+doublet and plot checks. The diagnostic `inspect_anndata.py` samples values
+without a fixed seed when describing inferred semantic types: this caused one
+different description of the identical ambiguous layer. Re-rendering both
+summaries with NumPy seed 1 produces identical descriptions. This is a
+diagnostic-only control, not a change to the H5AD data or production inspector.
+PNG bytes match, and HTML matches after replacing its generated Plotly ID.
+
+Acceptance record: `$D/G_S1_ACCEPTED.json`, generated only after these checks
+and the frozen binary SHA256 checks succeeded. The historical multi-thread
+differences remain documented; deterministic multi-thread TranscriptVB is not
+claimed.
+
+## Three-repeat timing results
+
+All eighteen planned workload attempts ran, with matching scientific outputs
+in all eighteen. The 100K scRNA regression includes vanilla, modern and
+modern-BAM modes; 10M scRNA uses Gene/GeneFull without BAM; Flex uses the
+established eight-lane H0/H1X2 fixture. Threads remain 8, 16 and 32 respectively;
+these are separate from the single-thread TranscriptVB correctness controls.
+
+**Observed all-attempt medians, not accepted headline performance claims for
+10M or Flex:**
+
+| Workload | 1.9.5.a wall (s) | 1.10.0 wall (s) | Wall change | Peak RSS change | Clean runs, old/new (of 3 each) | Gate |
+|---|---:|---:|---:|---:|---|---|
+| scRNA 100K, three modes | 55.65 | 55.67 | +0.036% | +0.0023% | 3 / 3 | PASS |
+| scRNA 10M | 39.63 | 39.69 | +0.151% | -0.00005% | 3 / 2 | Not accepted |
+| Flex 8 x 100K | 15.36 | 15.38 | +0.130% | +0.0348% | 1 / 0 | Not accepted |
+
+All observed changes are below the +3% wall / +2% RSS limits, but **six attempts
+fail the unchanged host-load criteria**. The first candidate 10M run started
+at load 4.33 (limit 4). The first baseline Flex run started at load 6.38 with
+about 496 MB of unattributed array I/O. Four later Flex runs had low start
+load but 238-373 KB of unattributed I/O; this exceeds the monitor's 5% fraction
+because these short, cached runs issue very little disk I/O themselves. These
+flags are retained, not overridden as negligible. No contaminated attempt was
+dropped from the displayed medians.
+
+Execution/disposition records:
+
+- `$D/gs3_acceptance/`: initial five attempts. The baseline Flex wrapper exited
+  2 on absolute build-header path checks in the archived copy; STAR itself
+  completed and all 121 output files matched. The dependency paths name the
+  original build directory, which still exists. Subsequent baseline executions
+  use that original binary path, with the same verified SHA256.
+- `$D/gs3_remaining/`: the thirteen previously unexecuted attempts, each with
+  zero exit status and `WORKLOAD_COMPLETE`. Untimed preflights drain preceding
+  writes and wait for low load. Sampling changed from 5 s to 0.5 s to observe
+  short-lived children; host-verdict thresholds did not change. The later idle
+  preflight permits up to 1 MiB background writes per five seconds instead of
+  demanding absolute zero; it does not decide timing acceptance.
+- The resumed batch shell still exited 2 **after** its last completed workload:
+  the agent edited the live driver, causing Bash to resume reading at a stale
+  file offset. This execution mistake is documented in
+  `gs3_remaining/BATCH_EXIT_DISPOSITION.md`. The per-run evidence is audited
+  independently; no successful batch marker was fabricated. Future executions
+  must use `tools/run_gs3_frozen.sh`, which snapshots the driver and idle helper.
+  Its existing-output guard was tested without launching a data workload.
+- `$D/gs3_round3/`: cancelled replacement driver; no timer or STAR workload
+  launched. No data execution was duplicated. Original driver revisions and
+  the first idle helper are retained under `$D/tools/`.
+- `$A/gs3_report.json`: 18/18 matching output signatures, all attempt timings,
+  peak RSS, host verdicts, the medians above and `accepted: false` for G-S3.
+
+Additional clean measurements were requested but not authorized during this
+turn. No further identical repetitions were launched. The timing gate remains
+open; this is not a claim of a measured performance regression either.
+
 ## Release disposition
 
-- **G-S1 is not accepted.** Owner review requested: use the exact single-thread
-  TranscriptVB control and document multi-thread variation, or retain the
-  strict multi-thread gate and address deterministic model learning first.
-  The broader kept-output audit still needs final acceptance/disposition.
+- **G-S1 accepted** under the owner-selected exact, ordered single-thread
+  TranscriptVB contract and the explicit kept-output dispositions above.
 - **G-S2 passed** on the new clean build.
-- **G-S3 is not run.** Repeat authorization now exists, but the fail-closed
-  driver also requires G-S1 acceptance. No acceptance marker was fabricated,
-  and no performance claim is made.
+- **G-S3 not accepted.** All eighteen attempts and their output audit are
+  finished. The 100K component passes; 10M/Flex still need clean timing
+  measurements. Raw medians are within numerical thresholds but do not waive
+  host-contamination flags or the recorded wrapper errors.
 - Recipe default-branch integration remains outstanding. Multiomics host
   integration and recipe/snapshot migration remain stable-release dependencies
   after the local RC. No release was pushed or tagged.
@@ -173,11 +278,28 @@ bash "$D/tools/run_seeded_baseline_downstream.sh"
 python3 "$D/tools/check_transcriptvb_repeatability.py"
 python3 "$D/tools/complete_capture_audit.py" --report "$A/capture_audit_v1.json"
 python3 "$D/tools/validate_followup_outputs.py" --report "$A/followup_output_parity_v2.json"
+python3 "$D/tools/run_single_thread_acceptance.py"
+python3 "$D/tools/verify_single_thread_acceptance.py"
+bash "$D/tools/check_binseq_ordered.sh"
+python3 "$D/tools/seed_inspection_summaries.py"
+python3 "$D/tools/close_kept_output_audit.py"
+python3 "$D/tools/accept_gs1.py"
+STAR_CANDIDATE_BIN="$A/src110/core/legacy/source/STAR" bash "$D/tools/run_gs3.sh"
+# Resume of only previously unexecuted attempts, with original build directory:
+OLD=/tmp/claude-1000/-mnt-pikachu-chromap-suite-paper/53e97281-48e6-45f8-90f8-a4913b843536/scratchpad/gate
+STAR_CANDIDATE_BIN="$A/src110/core/legacy/source/STAR" \
+  STAR_BASELINE_BIN="$OLD/src195/core/legacy/source/STAR.real" \
+  GS3_PRIOR_OUT="$D/gs3_acceptance" GS3_OUT="$D/gs3_remaining" \
+  bash "$D/tools/run_gs3.sh"
+python3 "$D/tools/report_gs3.py" \
+  --roots "$D/gs3_acceptance" "$D/gs3_remaining" --report "$A/gs3_report.json"
 # In the STAR candidate worktree:
 python3 -m unittest discover -s tests/host_api -p 'test_*.py' -v
 python3 -m unittest discover -s tests/slam -p test_compare_sam_records.py -v
 ```
 
-The drivers take the host lock per workload. The follow-up driver's original
-exit 1 is retained; replacement evidence is explicitly listed above rather
-than rewriting its historical status table.
+The drivers take the host lock per workload. Original nonzero driver exits
+are retained; replacement evidence is explicitly listed above rather than
+rewriting historical status tables. The initial timing driver is preserved
+as `tools/run_gs3.initial.sh`, the first resume as `run_gs3.resume_v1.sh`.
+Do not edit an executing driver or helper; prepare a new immutable snapshot.

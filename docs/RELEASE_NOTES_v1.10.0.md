@@ -138,10 +138,16 @@ after explicit provenance-path normalization. The UCSF reused-fixture test
 now regenerates its configuration with current paths and rejects zero-match
 GEX filtering; its repaired MEX outputs match the previous run exactly.
 
-The expanded audit found a new acceptance issue: multi-thread TranscriptVB
-quantification varies on the pristine baseline too, while one-thread SE/PE
-cross-version controls match exactly. Strict G-S1 is **not accepted** pending
-disposition; G-S3 therefore remains unrun despite repeat approval. Details:
+The expanded audit found multi-thread TranscriptVB quantification variation
+on the pristine baseline too. The owner selected exact single-thread validation:
+all treated/no-4sU SE/PE tables and ordered evidence payloads match across
+versions. No numerical tolerance or record sorting was used. The kept-output
+audit is closed and **G-S1 is accepted**. All eighteen G-S3 attempts match
+outputs and raw median timing/RSS changes are within limits, but six host
+records are contaminated. Only the 100K timing component passes; G-S3 is
+not accepted. Wrapper errors remain explicitly documented rather than
+rewritten as success. Deterministic multi-thread TranscriptVB is not claimed.
+Details:
 [validation follow-up](VALIDATION_STAR_1_10_0_20260929.md).
 The earlier evidence below is retained as history, not the current hold reason.
 
