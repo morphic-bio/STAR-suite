@@ -5,6 +5,9 @@ on:
     branches:
       - master
     paths:
+      - ".github/workflows/ci-launchpad.yml"
+      - "scripts/launchpad*.py"
+      - "scripts/launchpad*.sh"
       - ".github/workflows/ci-pr.yml"
       - ".github/workflows/ci-partial-builds.yml"
       - ".github/workflows/ci-dev-release.yml"
@@ -30,6 +33,9 @@ permissions:
   contents: read
 
 jobs:
+  launchpad-checks:
+    uses: ./.github/workflows/ci-launchpad.yml
+
   partial-builds:
     uses: ./.github/workflows/ci-partial-builds.yml
 
@@ -72,7 +78,7 @@ jobs:
             scripts/docker/run_smokes_tier_a.sh
 
   publish-master-images:
-    needs: [build-and-tier-a, check-secrets, partial-builds]
+    needs: [build-and-tier-a, check-secrets, partial-builds, launchpad-checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     if: needs.check-secrets.outputs.has-docker-creds == 'true'

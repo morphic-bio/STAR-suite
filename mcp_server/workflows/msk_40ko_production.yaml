@@ -11,7 +11,7 @@ caveats:
   - "No Y-removal is enabled for MSK 40KO, matching the MSK 30KO policy."
   - "Use --downstream-async for production so remote CellBender/downstream does not block the next local sample."
   - "PROVENANCE-FIRST: copy thread/memory/low-mem params from the known-good run at morphic-provenance/runs/msk_40ko/ (run.json + commands/); do not invent resource params."
-default_output_layout: /mnt/pikachu/MSK_40KO_processed/msk40ko_prod_<timestamp>/
+default_output_layout: "Outputs are written beneath the chosen output directory."
 
 scripts:
   - role: entry
@@ -88,8 +88,7 @@ parameters:
   - name: manifest
     cli_flag: --manifest
     type: file
-    required: false
-    default: /mnt/pikachu/STAR-suite/docs/MSK_40KO_FASTQ_MANIFEST.tsv
+    required: true
     path_must_exist: true
     description: MSK 40KO FASTQ/library manifest.
     category: inputs
@@ -97,8 +96,7 @@ parameters:
   - name: star_bin
     cli_flag: --star-bin
     type: file
-    required: false
-    default: /mnt/pikachu/STAR-suite/core/legacy/source/STAR
+    required: true
     path_must_exist: true
     must_be_executable: true
     description: STAR binary.
@@ -107,8 +105,7 @@ parameters:
   - name: genome_dir
     cli_flag: --genome-dir
     type: directory
-    required: false
-    default: /storage/autoindex_110_44/bulk_index
+    required: true
     path_must_exist: true
     description: STAR genomeDir used for MSK/UCSF GEX production.
     category: inputs
@@ -183,8 +180,7 @@ parameters:
   - name: remote_host
     cli_flag: --remote-host
     type: string
-    required: false
-    default: "10.159.4.53"
+    required: true
     description: Remote GPU host for downstream processing.
     category: downstream
 

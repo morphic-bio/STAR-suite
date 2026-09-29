@@ -12,7 +12,7 @@ caveats:
   - "Requires GEDI installation with homo_sapiens_110_44.oml genome."
   - "Common mask BED can be pre-computed or generated during the run."
   - "Uses full-depth SLAM-Seq FASTQs from /storage."
-default_output_layout: "/storage/slam_e2e_vb_commonmask_<timestamp>/"
+default_output_layout: "Outputs are written beneath the chosen output directory."
 
 stages:
   - name: "alignment"
@@ -43,8 +43,7 @@ parameters:
   - name: "work_dir"
     cli_flag: "--work-dir"
     type: "directory"
-    required: false
-    default: "/storage/slam_e2e_vb_commonmask"
+    required: true
     description: "Working directory for all outputs."
 
   - name: "threads"

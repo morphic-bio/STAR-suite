@@ -53,8 +53,7 @@ parameters:
   - name: "dataset_root"
     cli_flag: "--dataset-root"
     type: "directory"
-    required: false
-    default: "/mnt/pikachu/ucsf-perturb-seq-corrected"
+    required: true
     description: "Root of corrected UCSF dataset."
     env_var: "UCSF_100K_SMOKE_DATASET_ROOT"
     skip_when_default: true
@@ -62,8 +61,7 @@ parameters:
   - name: "feature_ref"
     cli_flag: "--feature-ref"
     type: "file"
-    required: false
-    default: "/mnt/pikachu/ucsf-perturb-seq/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv"
+    required: true
     description: "Feature reference CSV for guide library."
     env_var: "UCSF_100K_SMOKE_FEATURE_REF"
     skip_when_default: true
@@ -71,8 +69,7 @@ parameters:
   - name: "genome_dir"
     cli_flag: "--genome-dir"
     type: "directory"
-    required: false
-    default: "/storage/autoindex_110_44/bulk_index"
+    required: true
     description: "STAR genome index directory."
     env_var: "UCSF_100K_SMOKE_GENOME_DIR"
     skip_when_default: true

@@ -110,7 +110,7 @@ caveats:
   - "--cellbender-gpu only has effect when --star-only is not set."
   - "Adaptive QC filtering is always enabled in production. The effective max_genes threshold is median(n_genes)+n_mad*MAD over STAR-called singlets, clamped to min_genes; mt_pct_cutoff is the MT floor for max(mt_pct_cutoff, median(mt_pct)+n_mad*MAD). Set min_genes, mt_pct_cutoff, and n_mad via environment variables; max_genes is the non-adaptive fallback."
   - "Downstream QC and trim-QC parameters are consumed via environment variables, not CLI flags on the entry script. They appear in env_overrides from render_workflow_command."
-default_output_layout: "/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_<timestamp>/"
+default_output_layout: "Outputs are written beneath the chosen output directory."
 
 stages:
   - name: "star_alignment"
@@ -276,8 +276,7 @@ parameters:
   - name: "dataset_root"
     cli_flag: "--dataset-root"
     type: "directory"
-    required: false
-    default: "/mnt/pikachu/ucsf-perturb-seq-corrected"
+    required: true
     description: "Root of corrected UCSF dataset."
     path_must_exist: true
     category: "inputs"
@@ -298,8 +297,7 @@ parameters:
   - name: "feature_ref"
     cli_flag: "--feature-ref"
     type: "file"
-    required: false
-    default: "/mnt/pikachu/ucsf-perturb-seq/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv"
+    required: true
     description: "Feature reference CSV."
     path_must_exist: true
     category: "inputs"
@@ -308,8 +306,7 @@ parameters:
   - name: "genome_dir"
     cli_flag: "--genome-dir"
     type: "directory"
-    required: false
-    default: "/storage/autoindex_110_44/bulk_index"
+    required: true
     description: "STAR genomeDir."
     path_must_exist: true
     category: "inputs"
@@ -318,8 +315,7 @@ parameters:
   - name: "solo_cb_whitelist"
     cli_flag: "--solo-cb-whitelist"
     type: "file"
-    required: false
-    default: "/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/3M-february-2018_TRU.txt"
+    required: true
     description: "Solo CB whitelist file."
     path_must_exist: true
     category: "inputs"
@@ -328,8 +324,7 @@ parameters:
   - name: "cr_whitelist"
     cli_flag: "--cr-whitelist"
     type: "file"
-    required: false
-    default: "/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt"
+    required: true
     description: "CellRanger whitelist file."
     path_must_exist: true
     category: "inputs"

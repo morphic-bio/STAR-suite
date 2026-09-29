@@ -36,9 +36,18 @@ python -m mcp_server.app
 
 Open `http://<host>:<port>/launchpad/` in a browser for **STAR Launchpad** (recipe builder). Remote browsers typically see **public** workflows only; on **loopback**, authenticated discovery can list **private** workflows too. The UI defaults to **`star_*`** recipes only; enable **Include test & other recipes** to show the full list, including the private SLAM PE recipes. MCP clients continue to use `POST /` (streamable-HTTP) or `GET /sse` + `POST /messages` (SSE).
 
-#### Launchpad quick start / stop (recommended)
+#### Launchpad quick start / stop
 
-Start in the background (writes a pidfile + log under `plans/artifacts/`):
+For this source tree, use `python3 scripts/launchpad_cli.py --setup` once,
+then `python3 scripts/launchpad_cli.py`. Installed packages provide
+`star-suite-launchpad --setup` and `star-suite-launchpad`.
+See [Multiome ownership and legacy compatibility](../docs/LAUNCHPAD_MULTIOME.md).
+STAR 1.10 delegates the engine to Multiomics Suite; the old built-in
+`morphic_multiome` workflow remains removed. The pinned catalog recipe requires
+an explicitly selected external 1.9.5.b runtime and rejects STAR 1.10.
+
+
+Start in the background (writes a pidfile + log under the user state directory, keyed by checkout):
 
 ```bash
 bash scripts/launchpad_server.sh up
@@ -260,8 +269,8 @@ val = client.call_tool("validate_workflow_parameters", {
         "all_samples": True,
         "threads": 16,
         "dry_run": True,
-        "dataset_root": "/mnt/pikachu/ucsf-perturb-seq-corrected",
-        "genome_dir": "/storage/autoindex_110_44/bulk_index",
+        "dataset_root": "/path/to/dataset",
+        "genome_dir": "/path/to/genome_index",
     },
     "check_paths": True,  # set False to skip file/dir existence checks
 })
@@ -495,7 +504,7 @@ docker-compose up -d
 docker build -t star-mcp-server .
 docker run -p 8765:8765 \
   -e MCP_AUTH_TOKEN="your-token" \
-  -v /mnt/pikachu/STAR-suite:/repo:ro \
+  -v /path/to/STAR-suite:/repo:ro \
   -v /storage:/storage:ro \
   star-mcp-server
 ```

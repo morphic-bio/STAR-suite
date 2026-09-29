@@ -226,3 +226,14 @@ See the [runbook](runbooks/RUNBOOK_STAR_1_10_0_HOST_API_20260928.md) and
 [handoff](handoffs/HANDOFF_STAR_1_10_0_HOST_API_20260928.md) for gate evidence
 and remaining work. The observed local medians meet the regression limits;
 they are not a claim of noise-free measurements or a speedup.
+
+## Launchpad fixes merged from 1.9.5.b
+
+The portable config/forms, relocatable installed launcher, bundled browser
+assets, runtime capability report and release test gate are included. The
+pinned catalog's legacy Multiome recipe gains input/runtime validation and
+managed jobs/logs/cancellation for an explicitly selected external 1.9.5.b
+runtime. Standalone STAR 1.10 reports `chromap_atac:false` and cannot execute it.
+The deleted built-in `morphic_multiome` schema and all removed native Chromap
+integration remain deleted. Current Multiome ownership stays in Multiomics
+Suite. The 1.10 version and existing immutable rc tags are unchanged.

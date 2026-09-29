@@ -79,7 +79,7 @@ def expand_env_vars(value: Any) -> Any:
 
 
 def _resolved_path(base: Path, value: Path | str) -> Path:
-    path = Path(value)
+    path = Path(value).expanduser()
     if not path.is_absolute():
         path = base / path
     return path.resolve()
@@ -111,7 +111,9 @@ def _load_workflow_schema(path: Path, workflow_id: str) -> WorkflowSchema:
         raise FileNotFoundError(
             f"Workflow schema file not found for '{workflow_id}': {path}"
         )
-    return WorkflowSchema(**_read_yaml(path, "workflow schema"))
+    schema = WorkflowSchema(**_read_yaml(path, "workflow schema"))
+    from .launchpad.multiome import WORKFLOW_IDS, prepare_schema
+    return prepare_schema(schema) if workflow_id in WORKFLOW_IDS else schema
 
 
 def _validate_external_workflow_paths(
@@ -369,6 +371,14 @@ def load_config(config_path: Optional[Path] = None) -> MCPConfig:
     # Parse into Pydantic model
     config = MCPConfig(**expanded_config)
     config_dir = config_path.parent.resolve()
+    config.paths.repo_root = _resolved_path(config_dir, config.paths.repo_root)
+    config.paths.artifact_log_root = _resolved_path(config_dir, config.paths.artifact_log_root)
+    config.paths.temp_root = _resolved_path(config_dir, config.paths.temp_root)
+    roots = [*config.trusted_roots, *os.environ.get("STAR_SUITE_DATA_ROOTS", "").split(os.pathsep)]
+    config.trusted_roots = list(dict.fromkeys(str(_resolved_path(config_dir, root)) for root in roots if root))
+    for script in config.scripts:
+        if script.fixtures:
+            script.fixtures = [str(_resolved_path(config.paths.repo_root, fixture)) for fixture in script.fixtures]
     _resolve_provenance_paths(config.provenance, config_dir)
 
     # Load workflow schemas

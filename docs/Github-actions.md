@@ -270,3 +270,16 @@ make dev-release-tag RELEASE_VERSION=1.1.0 RC=1
   cost and registry churn.
 - It can be tightened further (for example, only publish `latest` on tags) if
   release discipline becomes stricter.
+
+## Launchpad release gate (1.9.5.b)
+
+`ci-launchpad.yml` runs for PRs, master, release candidates, and release tags.
+It checks the portable configuration, relocated installed payload, required
+Multiome inputs, runtime capabilities, job serialization/cancellation, and the
+Chromium form/run/reload flow using tiny fixture processes. No biological
+benchmark is run. Browser evidence is uploaded as a workflow artifact.
+
+`release.yml` requires both `partial-builds` and `launchpad-checks` before
+`build-release-artifacts`, so failing UI tests block tarball and Debian builds
+and their publication. Master/dev image publication also depends on this gate.
+Launchpad source and launcher paths are included in the CI path filters.

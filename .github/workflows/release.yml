@@ -9,6 +9,9 @@ permissions:
   contents: write
 
 jobs:
+  launchpad-checks:
+    uses: ./.github/workflows/ci-launchpad.yml
+
   partial-builds:
     uses: ./.github/workflows/ci-partial-builds.yml
 
@@ -26,7 +29,7 @@ jobs:
           fi
 
   build-release-artifacts:
-    needs: partial-builds
+    needs: [partial-builds, launchpad-checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -65,6 +68,7 @@ jobs:
             fakeroot \
             gnupg \
             pkg-config \
+            python3-yaml \
             zlib1g-dev \
             libbz2-dev \
             liblzma-dev \

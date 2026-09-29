@@ -1,6 +1,6 @@
 # MCP Server Dockerfile
 # Build: docker build -t star-mcp-server .
-# Run:   docker run -p 8765:8765 -v /storage:/storage:ro -v /mnt/pikachu/STAR-suite:/repo:ro star-mcp-server
+# Run:   docker run -p 127.0.0.1:8765:8765 -v /path/to/data:/data:ro -v /path/to/STAR-suite:/repo:ro star-mcp-server
 
 FROM python:3.10-slim
 

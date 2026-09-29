@@ -1953,3 +1953,13 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
 - `/tmp/star_cellbender_cuda_*/`, `/tmp/star_flex_half_probe_100k_*/`,
   `/tmp/downstream_contract_*/`, `/tmp/flex_mex_compare_*/`: default isolated
   smoke/unit outputs. CUDA smoke outputs are not production denoising releases.
+
+## Launchpad portability (2026-09-29)
+
+- `tests/launchpad_portability_output/`: ignored build/test logs and installed
+  Chromium UI screenshots for the 1.9.5.b candidate and its 1.10 merge.
+  The 1.10 merge also records `build-v110.log`, `merge-tests-v110.log` and
+  `native-v110-check.json` here.
+- Pytest temporary directories contain relocated payloads, synthetic reference
+  files, tiny fixture executables, recipe previews, and job records. No biological
+  dataset was processed by these tests.

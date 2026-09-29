@@ -68,7 +68,7 @@ parameters:
     help: >-
       Path to a directory containing a previously built STAR genome index
       (from genomeGenerate). Must contain SA, SAindex, Genome, etc.
-    example: /storage/autoindex_110_44/bulk_index
+    example: /path/to/genome_index
     widget_hint: path
     aliases: [genomeDir]
     display_order: 1

@@ -59,8 +59,7 @@ parameters:
   - name: "genome_dir"
     cli_flag: "--genome-dir"
     type: "directory"
-    required: false
-    default: "/storage/A375-CR-9.01/refdata-gex-GRCh38-2024-A/star_2.7.11b"
+    required: true
     description: "Genome directory for both STAR and CellRanger."
     env_var: "CR_PARITY_GENOME_DIR"
     skip_when_default: true

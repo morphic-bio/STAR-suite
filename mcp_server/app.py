@@ -8,6 +8,7 @@ from typing import Optional
 
 from fastmcp import FastMCP
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
 import uvicorn
 
@@ -64,6 +65,7 @@ from .tools.scaffold import (
     validate_draft_workflow_schema as _validate_draft_workflow_schema,
 )
 from .launchpad.api import get_launchpad_routes
+from .launchpad.jobs import JobManager
 
 
 # Create the MCP server
@@ -99,11 +101,15 @@ def build_http_app() -> Starlette:
     """Build an HTTP app that supports both SSE and streamable-http clients."""
     sse_app = mcp.http_app(transport="sse")
     stream_app = mcp.http_app(transport="streamable-http", path="/")
+    jobs = JobManager()
 
     @asynccontextmanager
     async def lifespan(app: Starlette):
         async with sse_app.lifespan(sse_app), stream_app.lifespan(stream_app):
-            yield
+            try:
+                yield
+            finally:
+                await run_in_threadpool(jobs.shutdown)
 
     middleware = [Middleware(AcceptHeaderMiddleware)]
     middleware += stream_app.user_middleware + sse_app.user_middleware
@@ -111,11 +117,13 @@ def build_http_app() -> Starlette:
     # Launchpad API + static SPA under /launchpad/ (must precede generic /launchpad static catch-all)
     launchpad = get_launchpad_routes()
 
-    return Starlette(
+    app = Starlette(
         routes=launchpad + stream_app.routes + sse_app.routes,
         middleware=middleware,
         lifespan=lifespan,
     )
+    app.state.multiome_jobs = jobs
+    return app
 
 
 def check_auth(token: Optional[str], is_discovery: bool = False) -> Optional[ErrorResponse]:

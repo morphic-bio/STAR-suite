@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>STAR Launchpad</title>
   <link rel="stylesheet" href="./style.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
+  <script defer src="./vendor/alpine-3.14.3.min.js"></script>
 </head>
 <body>
   <div class="app" x-data="launchpadApp()"
@@ -81,7 +81,7 @@
     <div class="toolbar recipe-toolbar">
       <label class="field-inline">
         <span>Recipe</span>
-        <select x-model="workflowId" @change="loadWorkflow()">
+        <select id="recipe-select" x-model="workflowId" @change="loadWorkflow()">
           <template x-for="w in workflows" :key="w.id">
             <option :value="w.id" x-text="w.title + ' (' + w.id + ')'"></option>
           </template>
@@ -159,12 +159,13 @@
             <legend x-text="group.title"></legend>
             <template x-for="pname in group.parameters" :key="pname">
               <div class="field" :class="{ 'skip-default': paramByName(pname)?.skip_when_default }"
+                   :data-param="pname"
                    x-show="paramRowVisible(pname)">
                 <label
                     :title="paramTooltip(pname)"
                     :class="{ 'has-param-tip': paramHasRichTip(pname) }">
                   <span class="label-text" @click="focusParam = pname">
-                    <code x-text="paramByName(pname)?.cli_flag || pname"></code>
+                    <span x-text="paramByName(pname)?.label || paramByName(pname)?.cli_flag || pname"></span>
                     <span class="req" x-show="paramByName(pname)?.required">*</span>
                   </span>
                   <input type="checkbox" x-show="paramByName(pname)?.type === 'bool'"
@@ -182,8 +183,13 @@
                   <span class="path-input-group"
                         x-show="['string','file','directory','string_list'].includes(paramByName(pname)?.type)">
                     <input type="text" class="path-text-input"
+                           x-show="paramByName(pname)?.widget_hint !== 'textarea'"
                            x-model="params[pname]" @focus="focusParam = pname"
                            :placeholder="(paramByName(pname)?.description || '').slice(0, 96)">
+                    <textarea rows="3" class="path-text-input"
+                              x-show="paramByName(pname)?.widget_hint === 'textarea'"
+                              x-model="params[pname]" @focus="focusParam = pname"
+                              placeholder="One FASTQ path per line, in lane order"></textarea>
                     <button type="button"
                             class="icon-btn browse-icon"
                             x-show="paramSupportsServerBrowse(paramByName(pname))"
@@ -365,8 +371,9 @@
             type="button"
             class="btn primary"
             @click="doLaunch()"
-            :disabled="loading || !launchSupported"
+            :disabled="loading || !launchSupported || (isMultiome() && multiomeRunning())"
             :title="launchSupported ? 'Start this command on the machine running the MCP server (detached)' : 'Only available when Launchpad is opened via localhost (same host as the server)'"
+            x-text="isMultiome() ? 'Run sample' : 'Run in shell'"
           >Run in shell</button>
         </div>
         <p class="launch-hint" x-show="renderResult && !launchSupported">
@@ -377,6 +384,18 @@
           <p x-show="launchResult?.pid != null"><code>pid</code> <span x-text="launchResult?.pid"></span></p>
         </div>
       </div>
+
+      <section x-show="multiomeJob" class="multiome-job">
+        <h3>Multiome run</h3>
+        <p role="status" id="multiome-job-status" x-text="(multiomeJob?.dry_run ? 'Preview: ' : 'Sample: ') + (multiomeJob?.status || '')"></p>
+        <p x-show="multiomeJob?.message" x-text="multiomeJob?.message"></p>
+        <p x-text="'Output: ' + (multiomeJob?.output_dir || '')"></p>
+        <p x-text="'Run record: ' + (multiomeJob?.record_path || '')"></p>
+        <p x-show="multiomeJob?.exit_code != null" x-text="'Exit code: ' + multiomeJob?.exit_code"></p>
+        <button class="btn secondary" type="button" @click="cancelMultiomeJob()" :disabled="multiomeJob?.status !== 'running'">Cancel run</button>
+        <pre class="json-block" id="multiome-job-log" x-text="multiomeLogText()"></pre>
+      </section>
+      <p class="err" x-show="jobError" x-text="jobError"></p>
 
       <div class="bridge-panel" x-show="bridgeEditors.length && bridgeUiEnabled()" x-cloak>
         <h3>Ask editor AI</h3>

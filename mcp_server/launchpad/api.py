@@ -33,13 +33,17 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from ..config import get_config
+from ..config import get_config, get_workflow_root
+from .multiome import WORKFLOW_IDS as MULTIOME_IDS, runtime_check
+from .jobs import JobConflict
 from ..tools.workflows import (
     describe_workflow,
     get_workflow_parameter_schema,
@@ -96,6 +100,30 @@ def _json_error(code: str, message: str, status_code: int = 400) -> JSONResponse
         {"error": True, "code": code, "message": message},
         status_code=status_code,
     )
+
+
+def _job_access_error(request, *, write=False):
+    if not launchpad_request_trusted_local(request) or request.url.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        return _json_error("FORBIDDEN", "Multiome execution and job access require localhost or an SSH tunnel.", 403)
+    origin = request.headers.get("origin")
+    if origin and (urlsplit(origin).netloc != request.url.netloc or urlsplit(origin).scheme != request.url.scheme):
+        return _json_error("FORBIDDEN", "Use Launchpad from this server's own origin.", 403)
+    if write and request.headers.get("content-type", "").split(";")[0] != "application/json":
+        return _json_error("BAD_REQUEST", "Send application/json.", 415)
+    return None
+
+
+async def lp_multiome_job(request):
+    error = _job_access_error(request, write=request.method == "POST")
+    if error:
+        return error
+    try:
+        jobs = request.app.state.multiome_jobs
+        job_id = request.path_params["job_id"]
+        job = jobs.cancel(job_id) if request.method == "POST" else jobs.get(job_id)
+        return JSONResponse(job)
+    except KeyError:
+        return _json_error("NOT_FOUND", "Job is not in this server session; its saved record remains on disk.", 404)
 
 
 # --- Filesystem browse / upload helpers --------------------------------------
@@ -653,6 +681,12 @@ async def lp_validate(request: Request) -> JSONResponse:
         result = validate_workflow_parameters(
             wf_id, params, check_paths=check_paths
         )
+        if result.valid and check_paths and wf_id in MULTIOME_IDS:
+            try:
+                await run_in_threadpool(runtime_check, result.normalized_params, get_config().paths.repo_root)
+            except (ValueError, OSError, subprocess.SubprocessError) as exc:
+                result.valid = False
+                result.errors.append(str(exc))
         return JSONResponse(result.model_dump())
     except ValueError as e:
         return _json_error("NOT_FOUND", str(e), 404)
@@ -668,12 +702,21 @@ async def lp_render(request: Request) -> JSONResponse:
     if params is None or not isinstance(params, dict):
         return _json_error("BAD_REQUEST", "Body must contain an object 'params'", 400)
     try:
+        if wf_id in MULTIOME_IDS:
+            validation = validate_workflow_parameters(wf_id, params, check_paths=False)
+            if not validation.valid:
+                return JSONResponse({"code": "VALIDATION_FAILED", "validation": validation.model_dump(),
+                                     "message": "; ".join(validation.errors)}, status_code=400)
+            params = validation.normalized_params
         result = render_workflow_command(wf_id, params)
         # Launchpad is intentionally unauthenticated and should not leak host
         # filesystem layout (e.g. repo_root). Rewrite the entry script from the
         # schema path and rebuild argv/shell_preview accordingly.
         authed = launchpad_request_trusted_local(request)
         public_entry = describe_workflow(wf_id, authenticated=authed).entry_script
+        if authed and wf_id in MULTIOME_IDS:
+            # A local user can paste the recipe command from any working directory.
+            public_entry = str(Path(result.entry_script).resolve())
         payload = result.model_dump()
         argv = list(payload.get("argv") or [])
         if argv:
@@ -718,6 +761,25 @@ async def lp_launch(request: Request) -> JSONResponse:
             },
             status_code=400,
         )
+
+    if wf_id in MULTIOME_IDS:
+        error = _job_access_error(request, write=True)
+        if error:
+            return error
+        try:
+            identity = await run_in_threadpool(runtime_check, val.normalized_params, get_config().paths.repo_root)
+            result = render_workflow_command(wf_id, val.normalized_params)
+            rendered = result.model_dump()
+            rendered["normalized_params"] = val.normalized_params
+            rendered["env_overrides"].update(identity["env"])
+            spec = {"id": wf_id, "source_repo": str(get_workflow_root(wf_id)), "entry_script": result.entry_script}
+            job = await run_in_threadpool(request.app.state.multiome_jobs.start, spec, rendered, identity,
+                                         get_config().paths.artifact_log_root)
+        except JobConflict as exc:
+            return _json_error("JOB_CONFLICT", str(exc), 409)
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            return _json_error("EXEC_FAILED", str(exc))
+        return JSONResponse({**job, "ok": True, "message": "Multiome job started."}, status_code=202)
 
     try:
         result = render_workflow_command(wf_id, params)
@@ -973,6 +1035,8 @@ async def lp_quit(request: Request) -> JSONResponse:
 def get_launchpad_routes() -> list:
     """Routes for Launchpad API (must be registered before static /launchpad mount)."""
     return [
+        Route("/launchpad/api/jobs/{job_id}", endpoint=lp_multiome_job, methods=["GET"]),
+        Route("/launchpad/api/jobs/{job_id}/cancel", endpoint=lp_multiome_job, methods=["POST"]),
         Route(
             "/launchpad/api/capabilities",
             endpoint=lp_capabilities,
@@ -1005,27 +1069,27 @@ def get_launchpad_routes() -> list:
         ),
         Route("/launchpad/api/workflows", endpoint=lp_list_workflows, methods=["GET"]),
         Route(
-            "/launchpad/api/workflows/{workflow_id}/schema",
+            "/launchpad/api/workflows/{workflow_id:path}/schema",
             endpoint=lp_get_schema,
             methods=["GET"],
         ),
         Route(
-            "/launchpad/api/workflows/{workflow_id}/describe",
+            "/launchpad/api/workflows/{workflow_id:path}/describe",
             endpoint=lp_describe,
             methods=["GET"],
         ),
         Route(
-            "/launchpad/api/workflows/{workflow_id}/validate",
+            "/launchpad/api/workflows/{workflow_id:path}/validate",
             endpoint=lp_validate,
             methods=["POST"],
         ),
         Route(
-            "/launchpad/api/workflows/{workflow_id}/render",
+            "/launchpad/api/workflows/{workflow_id:path}/render",
             endpoint=lp_render,
             methods=["POST"],
         ),
         Route(
-            "/launchpad/api/workflows/{workflow_id}/launch",
+            "/launchpad/api/workflows/{workflow_id:path}/launch",
             endpoint=lp_launch,
             methods=["POST"],
         ),

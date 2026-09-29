@@ -76,6 +76,10 @@ Before 1.10.0, `make core` linked Chromap Suite for multiome runs. That
 integration, including the `--chromapAtac*` and `--multiomeAtac*` parameters,
 moved to Multiomics Suite, which builds the multiome binary.
 
+For the portable browser launcher and the legacy 1.9 compatibility recipe,
+see [Launchpad and Multiome ownership](LAUNCHPAD_MULTIOME.md). STAR 1.10 itself
+builds no Chromap integration.
+
 ## Parallel Jobs
 
 Use 8 to 16 threads for practical compile time:

@@ -777,7 +777,15 @@ instead of `127.0.0.1`.
    and a checklist of required input files.
 5. **Copy and run** -- paste the command into your terminal.
 
-Launchpad does not execute anything. It generates commands; you run them.
+On localhost, **Run in shell** starts the selected workflow. The portable
+launcher and browser assets from 1.9.5.b are included here: use
+`star-suite-launchpad --setup` once, then `star-suite-launchpad`. From this
+source tree, use `python3 scripts/launchpad_cli.py` with the same options.
+
+STAR 1.10 delegates the Multiome engine to Multiomics Suite. The pinned catalog's
+legacy Multiome recipe requires an external STAR 1.9.5.b runtime; its managed
+job checks reject the standalone STAR 1.10 executable. See
+[Multiome ownership and compatibility](docs/LAUNCHPAD_MULTIOME.md).
 
 Design details: [`plans/star_launchpad_v1_runbook.md`](plans/star_launchpad_v1_runbook.md)
 
