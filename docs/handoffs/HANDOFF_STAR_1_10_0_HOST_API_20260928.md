@@ -24,14 +24,19 @@ legacy external BINSEQ probe also matches at one decoder thread. All 218
 kept-output discrepancies have explicit dispositions, and seeded summary/QC
 plots match. See `$D/G_S1_ACCEPTED.json` and the report below. The approved
 three-repeat G-S3 attempts are complete at `$D/gs3_acceptance/` and
-`$D/gs3_remaining/`, with 18/18 matching output signatures. Raw median wall
+`$D/gs3_remaining/`, with 18/18 matching output signatures. Median wall
 changes are +0.036%, +0.151% and +0.130% for 100K scRNA, 10M scRNA and Flex;
-peak RSS changes are below 0.04%. Only 100K meets the clean-host requirement:
-six other attempts are flagged. G-S3 remains unaccepted. See
-`$A/gs3_report.json` and the wrapper-error dispositions in the report below.
+peak RSS changes are below 0.04%. **G-S3 is accepted** under the owner's
+subsequent instruction: host activity does not block acceptance within the
++3% wall / +2% RSS tolerances. Six host flags remain recorded, and the wrapper
+errors were separately audited as harness errors after completed STAR work.
+See `$A/gs3_report_v2.json`, `$D/G_S3_ACCEPTED.json` and
+`$A/VALIDATION_STATUS_v3.json`. The original strict-policy report is preserved.
+No additional STAR executions were needed for this reassessment.
 Future authorized timings must use `tools/run_gs3_frozen.sh`; never edit a
 live shell driver. No additional identical repeats were launched without
-approval. Do not treat functional acceptance as a performance result.
+approval. Out-of-tolerance timings still fail; host activity may be flagged
+as a possible contributor, not an automatic excuse.
 
 Authoritative details, commands and evidence:
 [September 29 validation](../VALIDATION_STAR_1_10_0_20260929.md).
@@ -131,17 +136,20 @@ Never label it a benign difference merely because the baseline also failed.
 - `$D/tools/run_gs3.sh` now resolves the durable paths, uses the modern half-probe
   test, refuses output overwrites, propagates failures, records binary hashes,
   and checks repeat-approval/G-S1-acceptance records before any execution. Its
-  no-approval dry check exits 2 without running a workload. Actual timings remain held.
+  no-approval dry check exits 2 without running a workload. Timings subsequently
+  completed; the current acceptance is recorded in the first section.
 
 ### Remaining release work
 
 Repeat approval was subsequently received and recorded; see the September 29
 section above for the completed SLAM/downstream checks and accepted ordered
-single-thread TranscriptVB comparison. Finish G-S3's timing/host-load audit;
-the initial failed batches remain failed historical records. The new
-100K smoke scope and separate CUDA test are not retroactive passes of the old
-combined wrapper. Multiomics integration and
-its recipe executable/snapshot migration remain stable-release dependencies
+single-thread TranscriptVB comparison. G-S3's saved-evidence reassessment is
+also complete under the clarified host-activity policy; all local STAR gates
+are accepted. The initial failed batches remain failed historical records.
+The new 100K smoke scope and separate CUDA test are not retroactive passes of
+the old combined wrapper. Canonical recipe default-branch integration,
+Multiomics integration and its recipe executable/snapshot migration remain
+stable-release dependencies
 after the local RC is available, not a reason to change the current Flex cache.
 No push, tag or master merge is authorized by this follow-up.
 

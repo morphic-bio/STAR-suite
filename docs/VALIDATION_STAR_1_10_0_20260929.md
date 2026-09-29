@@ -1,11 +1,13 @@
 # STAR Suite 1.10.0 validation follow-up
 
-Date: 2026-09-29 UTC. **G-S1 and G-S2 accepted; G-S3 not accepted.** The owner
+Date: 2026-09-29 UTC. **Local STAR gates G-S1, G-S2 and G-S3 accepted.** The owner
 authorized the remaining repeats with "Ok finish the validation gates" and then
 directed: "Do it on a single thread with a smaller set if needed - the order
 matters unfortunately". The exact ordered controls below close the TranscriptVB
-hold. This is not stable-release acceptance. No tag, push, or master merge was
-performed.
+hold. G-S3 is accepted under the subsequent owner instruction to treat host
+activity as diagnostic when measured runtime and memory stay within tolerance.
+No benchmarks were rerun for this reassessment. This is not stable-release
+acceptance. No tag, push, or master merge was performed.
 
 ## Build and provenance
 
@@ -201,23 +203,32 @@ modern-BAM modes; 10M scRNA uses Gene/GeneFull without BAM; Flex uses the
 established eight-lane H0/H1X2 fixture. Threads remain 8, 16 and 32 respectively;
 these are separate from the single-thread TranscriptVB correctness controls.
 
-**Observed all-attempt medians, not accepted headline performance claims for
-10M or Flex:**
+**Accepted local regression-gate medians, using all three observations per
+version.** These are not noise-free headline performance measurements.
 
-| Workload | 1.9.5.a wall (s) | 1.10.0 wall (s) | Wall change | Peak RSS change | Clean runs, old/new (of 3 each) | Gate |
+| Workload | 1.9.5.a wall (s) | 1.10.0 wall (s) | Wall change | Peak RSS change | Host-flagged runs, old/new (of 3 each) | Gate |
 |---|---:|---:|---:|---:|---|---|
-| scRNA 100K, three modes | 55.65 | 55.67 | +0.036% | +0.0023% | 3 / 3 | PASS |
-| scRNA 10M | 39.63 | 39.69 | +0.151% | -0.00005% | 3 / 2 | Not accepted |
-| Flex 8 x 100K | 15.36 | 15.38 | +0.130% | +0.0348% | 1 / 0 | Not accepted |
+| scRNA 100K, three modes | 55.65 | 55.67 | +0.036% | +0.0023% | 0 / 0 | PASS |
+| scRNA 10M | 39.63 | 39.69 | +0.151% | -0.00005% | 0 / 1 | PASS |
+| Flex 8 x 100K | 15.36 | 15.38 | +0.130% | +0.0348% | 2 / 3 | PASS |
 
-All observed changes are below the +3% wall / +2% RSS limits, but **six attempts
-fail the unchanged host-load criteria**. The first candidate 10M run started
+All observed changes are below the +3% wall / +2% RSS limits. **Six attempts
+retain their original host-monitor flags**. The first candidate 10M run started
 at load 4.33 (limit 4). The first baseline Flex run started at load 6.38 with
 about 496 MB of unattributed array I/O. Four later Flex runs had low start
 load but 238-373 KB of unattributed I/O; this exceeds the monitor's 5% fraction
 because these short, cached runs issue very little disk I/O themselves. These
-flags are retained, not overridden as negligible. No contaminated attempt was
-dropped from the displayed medians.
+flags remain in the original logs and both reports. No observation was dropped
+from the medians.
+
+The owner's subsequent instruction was: "Don't worry about host activity as
+long as it falls within tolerances. If it doesn't then you can flag that as
+a reason". Accordingly, host activity is diagnostic, not an independent veto
+when median wall time is within +3% and median peak RSS within +2%. An
+out-of-tolerance result still fails; host activity may be investigated as a
+possible contributor, not assumed to excuse a regression. Completed workloads
+and output parity are still required. This changes the acceptance policy, not
+the host monitor's verdicts or the measurements.
 
 Execution/disposition records:
 
@@ -225,7 +236,11 @@ Execution/disposition records:
   2 on absolute build-header path checks in the archived copy; STAR itself
   completed and all 121 output files matched. The dependency paths name the
   original build directory, which still exists. Subsequent baseline executions
-  use that original binary path, with the same verified SHA256.
+  use that original binary path, with the same verified SHA256. Reassessment
+  independently verifies `out/A/rc=0`, the finished 800,000-read final log,
+  matching output signatures, and exactly those two build-path guard failures.
+  This observation is accepted as a completed STAR workload with a documented
+  harness failure, not reclassified as a successful wrapper execution.
 - `$D/gs3_remaining/`: the thirteen previously unexecuted attempts, each with
   zero exit status and `WORKLOAD_COMPLETE`. Untimed preflights drain preceding
   writes and wait for low load. Sampling changed from 5 s to 0.5 s to observe
@@ -243,21 +258,29 @@ Execution/disposition records:
   launched. No data execution was duplicated. Original driver revisions and
   the first idle helper are retained under `$D/tools/`.
 - `$A/gs3_report.json`: 18/18 matching output signatures, all attempt timings,
-  peak RSS, host verdicts, the medians above and `accepted: false` for G-S3.
+  peak RSS, host verdicts, the medians above and the original strict-policy
+  `accepted: false` result. Preserved unchanged.
+- `$A/gs3_report_v2.json`: read-only reassessment under the revised policy,
+  **G-S3 accepted**. Binary hashes, raw timing/completion evidence and all
+  eighteen output signatures were rechecked; no workload was launched.
+  `tools/test_reassess_gs3.py` passes ten synthetic checks, including rejection
+  of failed/missing workloads, duplicate repetitions, changed outputs and
+  out-of-tolerance measurements despite host activity.
 
-Additional clean measurements were requested but not authorized during this
-turn. No further identical repetitions were launched. The timing gate remains
-open; this is not a claim of a measured performance regression either.
+The prior request for additional clean-host measurements is superseded by this
+policy clarification. No further identical repetitions were launched or are
+needed solely for these host flags. Acceptance is recorded in
+`$D/G_S3_ACCEPTED.json`; current combined status is
+`$A/VALIDATION_STATUS_v3.json`. Earlier status files remain historical records.
 
 ## Release disposition
 
 - **G-S1 accepted** under the owner-selected exact, ordered single-thread
   TranscriptVB contract and the explicit kept-output dispositions above.
 - **G-S2 passed** on the new clean build.
-- **G-S3 not accepted.** All eighteen attempts and their output audit are
-  finished. The 100K component passes; 10M/Flex still need clean timing
-  measurements. Raw medians are within numerical thresholds but do not waive
-  host-contamination flags or the recorded wrapper errors.
+- **G-S3 accepted** under the owner-clarified host-activity policy. All eighteen
+  outputs match; all three workloads meet the unchanged numerical limits.
+  Host flags and separately audited wrapper errors remain preserved.
 - Recipe default-branch integration remains outstanding. Multiomics host
   integration and recipe/snapshot migration remain stable-release dependencies
   after the local RC. No release was pushed or tagged.
@@ -293,6 +316,9 @@ STAR_CANDIDATE_BIN="$A/src110/core/legacy/source/STAR" \
   bash "$D/tools/run_gs3.sh"
 python3 "$D/tools/report_gs3.py" \
   --roots "$D/gs3_acceptance" "$D/gs3_remaining" --report "$A/gs3_report.json"
+# Saved-evidence reassessment only; does not execute STAR or overwrite reports:
+python3 -m unittest discover -s "$D/tools" -p test_reassess_gs3.py -v
+python3 "$D/tools/reassess_gs3.py"
 # In the STAR candidate worktree:
 python3 -m unittest discover -s tests/host_api -p 'test_*.py' -v
 python3 -m unittest discover -s tests/slam -p test_compare_sam_records.py -v

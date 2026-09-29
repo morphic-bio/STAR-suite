@@ -127,8 +127,9 @@ STAR in the same process, sharing STAR's thread permits. See the
 
 ## Validation
 
-The release gates are not complete. Do not interpret a completed regression
-batch as approval to tag or publish this candidate.
+The local STAR gates G-S1, G-S2 and G-S3 are accepted. Canonical recipe
+integration and Multiomics integration/snapshot migration remain stable-release
+dependencies. Validation does not authorize tagging or publishing this candidate.
 
 **September 29 update:** the owner authorized repeats. Fresh-build G-S2 and
 15/15 Tier A checks pass; SLAM SE/PE repeat and cross-version results match
@@ -143,10 +144,13 @@ on the pristine baseline too. The owner selected exact single-thread validation:
 all treated/no-4sU SE/PE tables and ordered evidence payloads match across
 versions. No numerical tolerance or record sorting was used. The kept-output
 audit is closed and **G-S1 is accepted**. All eighteen G-S3 attempts match
-outputs and raw median timing/RSS changes are within limits, but six host
-records are contaminated. Only the 100K timing component passes; G-S3 is
-not accepted. Wrapper errors remain explicitly documented rather than
-rewritten as success. Deterministic multi-thread TranscriptVB is not claimed.
+outputs and median timing/RSS changes are within limits. **G-S3 is accepted**
+under the subsequent owner clarification that host activity is diagnostic
+within +3% wall / +2% peak RSS tolerances. Maximum observed median increases
+are 0.151% wall time and 0.035% peak RSS across the three workloads. All six
+host flags remain; separately verified wrapper errors are documented rather
+than rewritten as successful exits. No benchmarks were rerun for this
+reassessment. Deterministic multi-thread TranscriptVB is not claimed.
 Details:
 [validation follow-up](VALIDATION_STAR_1_10_0_20260929.md).
 The earlier evidence below is retained as history, not the current hold reason.
@@ -187,13 +191,15 @@ The earlier evidence below is retained as history, not the current hold reason.
   to preserved 1.9.5.a output with the correct H0/H1X2 half-probe fixture.
   The earlier March H0/H1 test was the wrong modern gate; its matrix drift is
   not evidence of a regression in the current half-probe route.
-- G-S3 remains held for explicit repeat approval and completion of the wider
-  output audit. Its driver now refuses overwrites, propagates failures, and
-  selects the modern half-probe workload.
+- G-S3 was initially held for repeat approval and the wider output audit.
+  Both subsequently completed; current acceptance is summarized above. Its
+  driver refuses overwrites, propagates failures, and selects the modern
+  half-probe workload.
 - Official snapshot digest/count validation passed (11 recipes, 10 evidence
   records). Migration of the pinned multiome recipes is still a separate
   dependency.
 
 See the [runbook](runbooks/RUNBOOK_STAR_1_10_0_HOST_API_20260928.md) and
 [handoff](handoffs/HANDOFF_STAR_1_10_0_HOST_API_20260928.md) for gate evidence
-and remaining work. No performance-regression claim is made yet.
+and remaining work. The observed local medians meet the regression limits;
+they are not a claim of noise-free measurements or a speedup.

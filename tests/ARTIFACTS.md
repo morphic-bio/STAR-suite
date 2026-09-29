@@ -10,8 +10,9 @@ update this file with its output location.
   the fresh container build, SLAM repeats, seeded H5AD comparisons, repaired
   UCSF fixture, host-API/Tier A checks and TranscriptVB repeatability controls.
   One-off command drivers are in the root's `tools/`. See
-  `docs/VALIDATION_STAR_1_10_0_20260929.md`; no G-S1 acceptance or G-S3 timings
-  are implied. Original failures and superseded diagnostic reports remain.
+  `docs/VALIDATION_STAR_1_10_0_20260929.md` and `VALIDATION_STATUS_v3.json`
+  for current G-S1/G-S2/G-S3 acceptance. Original failures and superseded
+  diagnostic reports remain.
 - `tests/host_api/compare_h5ad_values.py` writes a new `--report` JSON and
   refuses overwrites. Its unit tests use automatically removed temporary
   HDF5 files. `tests/slam/compare_sam_records.py` prints a read-only comparison
@@ -1914,8 +1915,13 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
   Original failures and multi-thread diagnostics are preserved, not overwritten.
 - `/mnt/pikachu/star_suite_v1100_gates_20260928/{gs3_acceptance,gs3_remaining}/`: authorized
   serialized three-repeat performance executions, host-load records and GNU
-  time logs. The eighteen output signatures match, but G-S3 is not accepted;
-  `acceptance_20260928/gs3_report.json` retains all timings and host flags.
+  time logs. The eighteen output signatures match and all medians meet limits.
+  `acceptance_20260928/gs3_report.json` preserves the original strict-policy hold;
+  `acceptance_20260928/gs3_report_v2.json` records acceptance under the owner's clarified policy
+  that host flags are diagnostic within tolerance. No benchmarks were rerun.
+  `G_S3_ACCEPTED.json` and `acceptance_20260928/VALIDATION_STATUS_v3.json` record
+  current acceptance. One-off saved-evidence logic and ten synthetic tests:
+  `tools/{reassess_gs3,test_reassess_gs3}.py` under the same gate artifact root.
   `gs3_remaining/BATCH_EXIT_DISPOSITION.md` records the trailing shell-driver
   error; `gs3_round3/` records a cancelled resume with no data execution.
   `driver_snapshots/` holds read-only driver/helper copies for future approved

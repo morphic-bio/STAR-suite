@@ -43,6 +43,12 @@ that tag only in `AGENTS.md`; it is code-equivalent, not the same Git commit.
   `/mnt/pikachu/multiomics-suite-nm-refresh/scripts/run_timed.py` and report
   its verdict. Untimed builds: `nice -n 10`, at most `-j16`. Do not use
   `pkill -f` with a pattern that appears in your own command line.
+- **G-S3 host-activity policy (owner clarification, 2026-09-29).** Preserve
+  host-monitor flags, but do not reject a completed, output-matching workload
+  when three-repeat median wall time and peak RSS meet the +3% / +2% limits.
+  Keep every observation in the medians. If tolerance is exceeded, flag host
+  activity as a possible contributor; do not automatically excuse the failure.
+  This does not waive STAR errors, missing outputs or incomplete runs.
 - **Design problems.** If a design assumption is wrong, stop and report.
 - **Gate failures are not passes.** Matching failures on both binaries can
   establish that a problem predates this refactor, but do not satisfy coverage
@@ -63,10 +69,13 @@ variation, also reproducible on the pristine baseline. The owner subsequently
 directed single-thread, order-sensitive validation. All four 100K SE/PE cases
 and both ordered sidecar payloads now match exactly; the kept-output audit is
 closed. G-S1 is accepted and G-S2 passed. All eighteen G-S3 attempts match
-outputs; raw median changes are below +3% wall / +2% RSS, but six host records
-are contaminated. Only the 100K timing component passes; G-S3 remains open.
-Wrapper errors and their dispositions are preserved. Use immutable driver
-snapshots for any further authorized timing runs. See
+outputs; median changes are below +3% wall / +2% RSS. **G-S3 is accepted**
+under the subsequent owner clarification above, with all six host flags kept.
+Wrapper errors were separately verified as harness-only, not failed STAR
+workloads; their original exits and dispositions are preserved. Read-only
+reassessment: `acceptance_20260928/gs3_report_v2.json` and
+`G_S3_ACCEPTED.json` under the gate artifact root. No benchmarks were rerun.
+Use immutable driver snapshots for any further authorized timing runs. See
 [validation results](../VALIDATION_STAR_1_10_0_20260929.md).
 Earlier execution counts and holds below are historical, not current approval
 status. No tag, push or master merge has occurred.
@@ -96,7 +105,7 @@ Earlier batch totals below are historical, not retroactively green gates.
 | Hand-over | `docs/HANDOVER_MULTIOMICS_1.10.md`: every removed file, block, symbol and parameter with its last STAR commit | commit `face24f` | review |
 | Version | `core/legacy/source/VERSION` 1.10.0; `debian/changelog` 1.10.0-1 | commit `0b92ce2` | — |
 | S4 G-S1 | `make core-portable` of v1.9.5.a vs `make core` of the rc in one container; 24 non-multiome manifest rows, Tier A (13), CI partial builds, release smokes; byte-identical except logs, BAM `@PG`/`@CO`, first line of `genomeParameters.txt` (and the Step 0 allowed items) | tools in `/mnt/pikachu/star_suite_v1100_gates_20260928/tools/` (section below) | new STAR-own tests pass; `test_parameters_default_generation.py` passes |
-| S4 G-S3 | `tests/run_scrna_gex_100k_regression.sh`, one 10M-read scRNA run, the Flex 100k run; median of three; wall ≤ +3 %, peak RSS ≤ +2 % vs 1.9.5.a | `run_gs3.sh` | `run_timed.py` verdicts |
+| S4 G-S3 | `tests/run_scrna_gex_100k_regression.sh`, one 10M-read scRNA run, the Flex 100k run; median of three; wall ≤ +3 %, peak RSS ≤ +2 % vs 1.9.5.a | `run_gs3.sh`; saved-evidence `reassess_gs3.py` | Completion, output parity and numerical limits; host verdicts diagnostic |
 | Release | `docs/RELEASE_NOTES_v1.10.0.md` with gate results; `docs/Star-binary-distribution.md` entry; local annotated tag | `git tag -a v1.10.0-rc1 -m "STAR Suite v1.10.0-rc1"` | `python3 scripts/release/validate_official_snapshots.py` |
 
 ## Gate tooling
