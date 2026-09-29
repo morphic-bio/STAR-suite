@@ -30,8 +30,7 @@ that tag only in `AGENTS.md`; it is code-equivalent, not the same Git commit.
 - **Clean room.** Never read, grep or summarize 10x Genomics code (Cell
   Ranger, Space Ranger, installed tarballs). Barcode whitelists used as test
   inputs are data. Stop and ask if a question needs vendor source.
-- **Patent material.** Never read `/mnt/pikachu/libbfastq`,
-  `/mnt/pikachu/fgqzip` or `/mnt/pikachu/zshard*`.
+- **Excluded material.** Follow the exclusions in the maintainers' private notes.
 - **Git.** Commit on `dev-release-v1.10.0` only, plain messages, no AI or
   Claude attribution. Do not push anything, tags included. Do not merge into
   `master`. Do not touch other worktrees or branches
