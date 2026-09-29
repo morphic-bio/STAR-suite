@@ -89,7 +89,7 @@ workflow artifacts.
 include overrides, missing dependencies, the default bundled includes, switching
 between `HTSLIB=bundled` and `HTSLIB=external`, cached scans, and atomic
 failure. It compiles and links the HTSlib preflight probe, and compiles an
-object with Carl's indirect `ParametersSolo.h` -> `htslib/khash.h` include
+object with a reported indirect `ParametersSolo.h` -> `htslib/khash.h` include
 using a nonstandard HTSlib prefix. `core-external-htslib` is available as a
 local partial-build case.
 
