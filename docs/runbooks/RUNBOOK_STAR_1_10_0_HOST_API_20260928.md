@@ -82,6 +82,20 @@ Git checkout (both setup records are retained). The old Flex PCG copy also
 contained the date/time helper, although it is not linked by the active
 libflex build. Apply the same fixed seed there and cover it in the regression.
 
+**Repair validation complete:** source 03039d9 built with all nested compilers
+enforcing date-macro rejection and rejecting native CPU flags. Static HTSlib
+linkage and a clean tracked source tree were verified. Against this clean
+build, all 10 EmptyDrops tests, the complete host API suite, and the
+single-thread TranscriptVB scatter/gather smoke (40 transcripts, 4,000 reads)
+pass. Runtime checks held the shared lock; these were untimed correctness
+checks. `build_driver.py`, `test_driver.py`, exact commands, source identities,
+binary/archive checksums and logs are retained in the evidence directory.
+The subsequent ed61bca changes only the unlinked old Flex header, its test and
+documentation; all three reproducible-library tests pass on that source.
+Parameter-default generation, 9 HTSlib discovery tests and 5 report tests also
+pass. No running jobs remain. Multiomics can repin to the corrected development
+commit and tree; its strict composed build and G-M1/G-M2/G-M3 are still pending.
+
 **2026-09-29 candidate creation:** following the owner's request to start
 1.10 version creation, create the local annotated `v1.10.0-rc1` tag from the
 accepted branch. No remote push or stable merge is included. Record the source

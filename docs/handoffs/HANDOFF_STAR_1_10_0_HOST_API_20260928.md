@@ -26,7 +26,38 @@ compiler invocation, static HTSlib 1.23 and fixed build metadata. There were
 no compiler errors. A follow-up audit found the identical unused PCG copy in
 `flex/source/libflex`; it now carries the same fix and has its own regression.
 The active libflex build uses libscrna's samplers, so this copy was not linked
-in the successful build. Runtime regression validation is pending.
+in the successful build. Both headers are covered by the three passing build
+regressions at ed61bca. No sampler implementation or seed selection changed.
+
+Validation is complete for these repairs:
+
+- Clean strict build of 03039d964afcf81d360f0c37bb6af592f89b11a7: STAR,
+  libstar_suite.a and transcriptvb_finalize pass. All nested compiler commands
+  use the enforcing launchers; no native CPU flag appears. HTSlib 1.23 is
+  static, with no missing shared-library dependencies.
+- EmptyDrops: all 10 tests pass against the freshly built libscrna.
+- Host API: the complete suite passes, including eight UMI modes, no-callback
+  parity, External permits, parameter pass-through and failure callbacks.
+- TranscriptVB: single-thread scatter/gather smoke passes (40 transcripts,
+  4,000 reads), including gene-level output.
+- Build harness checks pass: parameter-default generation, 9 HTSlib-discovery
+  tests and 5 regression-report tests. The 3 reproducible-library tests cover
+  both PCG copies and default/custom libem flags.
+
+Evidence: `/mnt/pikachu/star_suite_v1100_gates_20260928/deterministic_build_fix_20260929/`
+contains source_identity.json, build_command.json, build_result.json,
+build_audit.json, test_results.json and individual logs. The clean build and
+runtime checks use 03039d9; ed61bca only adds the unlinked legacy-header repair,
+its compiler test and documentation. STAR binary SHA-256:
+`58fe76cecb2f0ff032d9839e4dd0e3b9a414da732fd811f4027ef5efca95002e`.
+No timed benchmark was run; runtime checks were serialized under the shared
+lock. There are no remaining jobs from this repair.
+
+Multiomics may now pin ed61bca or its documentation-only successor on
+dev-release-v1.10.0 through its development source route, then rebuild and run
+its own gates. The manifest must record the chosen exact commit and tree;
+the unchanged rc1 tag still points to the old source. These targeted tests do
+not establish G-M1/G-M2/G-M3 or replace the required new-candidate validation.
 
 The existing v1.10.0-rc1 tag is unchanged. These are post-rc1 source fixes;
 the historical gate acceptance below applies to the earlier candidate.

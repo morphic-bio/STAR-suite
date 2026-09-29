@@ -26,8 +26,11 @@ needs would come as `v1.10.0-rc2`.
   libem's hard-coded `-march=native`. Post-rc1 branch fixes replace the unused
   arbitrary seed with a fixed literal and remove host-CPU detection, preserving
   explicit scientific seeds. A new regression enforces both requirements.
-  Clean strict-build validation is pending; the Multiomics integration gates
-  and a new immutable candidate are still required before stable release.
+  Clean strict STAR/host-library builds, EmptyDrops tests, host API checks and
+  the single-thread TranscriptVB scatter/gather smoke pass. The same fix and
+  compiler regression cover the unlinked old Flex PCG copy. The Multiomics
+  integration gates and a new immutable candidate are still required before
+  stable release; rc1 itself has not changed.
 - The bundled official recipe catalog remains the pinned 1.9.5 snapshot.
   Its multiome recipes have not yet migrated to the Multiomics executable
   and must not be treated as supported standalone STAR 1.10 workflows.
