@@ -4,34 +4,29 @@
 
 Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction install and clear provenance.
 
-## Local 1.10.0 Release Candidate (2026-09-29)
+## Minor Release v1.10.0 (2026-09-29)
 
-- Local branch: `dev-release-v1.10.0`; local annotated tag `v1.10.0-rc1`.
-  This is not a published GitHub release. No 1.10 installable packages or
-  container images are announced; the published 1.9.5 releases are unchanged.
-- `make core` now uses bundled HTSlib without Chromap or RapidMACS;
-  `core-portable` is a compatibility alias. Hosts that share HTSlib with other
-  libraries can build with `HTSLIB=external`.
-- `make star-host-lib` builds the static embedding archive and its link
-  dependencies. See [Host API](HOST_API.md); the multiome executable belongs
-  to Multiomics Suite, not the standalone STAR release.
-- Version metadata is `1.10.0` / Debian `1.10.0-1`; existing genome-index
-  compatibility is unchanged. Local G-S1/G-S2/G-S3 gates are accepted; see
-  [validation evidence](VALIDATION_STAR_1_10_0_20260929.md). Official snapshot
-  integrity passes (11 recipes, 10 evidence records). Binary/installer/deb
-  release-artifact validation and publication remain pending.
-- The local source handoff is under
-  `/mnt/pikachu/star_suite_v1100_gates_20260928/releases/v1.10.0-rc1/`:
-  source archive, checksums and `LOCAL_RC.json` recording the tag, commit,
-  source tree and gate evidence. It is not a binary installer.
+- Release tag: `v1.10.0`; notes: `docs/RELEASE_NOTES_v1.10.0.md`. The tag is
+  the validated `v1.10.0-rc2` source plus one documentation-only commit.
+- Debian source version: `1.10.0-1`; Ubuntu binaries:
+  `1.10.0-1~ubuntu22.04.1` and `1.10.0-1~ubuntu24.04.1`.
+- Scope: remove every dependency on other suites (STAR no longer links
+  Chromap Suite or RapidMACS; the multiome binary moves to Multiomics Suite);
+  add the generic host interface and `make star-host-lib`; add paired hashtag
+  demultiplexing and per-library ambient-FDR feature calling.
+- `make core` builds with bundled HTSlib and without Chromap or RapidMACS;
+  `core-portable` remains an alias and `HTSLIB=external` selects an installed
+  HTSlib. Hosted tarballs, Debian packages and the Docker image were already
+  built without Chromap.
+- `STAR --version` reports `1.10.0`; upstream and genome compatibility remain
+  `2.7.11b` and `2.7.4a`. Existing indexes do not need rebuilding.
 - The bundled catalog is still the pinned 1.9.5 snapshot. Its six multiome
-  recipes must migrate to the Multiomics executable before stable release;
-  snapshot integrity is not evidence that those recipes run with STAR 1.10.
-- Release evidence and blockers are recorded in the
-  [1.10 handoff](handoffs/HANDOFF_STAR_1_10_0_HOST_API_20260928.md).
-  The final stable tag also requires validation by Multiomics Suite. Its strict
-  reproducible build currently rejects a PCG helper's date/time macros and
-  libem's hard-coded `-march=native`; these remain explicit pre-stable work.
+  recipes need the Multiomics Suite executable and are not supported with
+  standalone STAR 1.10. Snapshot integrity passes (11 recipes, 10 evidence
+  records).
+- Gate evidence: [validation](VALIDATION_STAR_1_10_0_20260929.md), the
+  [1.10 handoff](handoffs/HANDOFF_STAR_1_10_0_HOST_API_20260928.md) and the
+  release notes.
 
 ## Implementation Status (2026-02-14)
 
