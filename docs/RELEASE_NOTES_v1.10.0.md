@@ -1,6 +1,6 @@
 # STAR Suite v1.10.0 Release Notes
 
-Draft: 2026-09-28 (intended release candidate `v1.10.0-rc1`; not tagged)
+Local release candidate: 2026-09-29 (`v1.10.0-rc1`; not published)
 
 STAR Suite 1.10.0 removes every dependency on other suites. STAR no longer
 links Chromap Suite or RapidMACS, and no longer hosts the joint RNA + ATAC
@@ -19,6 +19,24 @@ rebuilding.
 This is an unreleased candidate. The final `v1.10.0` tag follows once Multiomics
 Suite has built its binary against the host interface; a change the interface
 needs would come as `v1.10.0-rc2`.
+
+## Candidate limitations
+
+- Multiomics' strict reproducible build remains blocked by date/time macros
+  in the PCG helper header and libem's hard-coded `-march=native`. The ordinary
+  STAR builds and local regression gates pass; that does not establish the
+  stricter composed-build contract. Resolve these before stable release;
+  any source change after rc1 requires a new immutable candidate and validation.
+- The bundled official recipe catalog remains the pinned 1.9.5 snapshot.
+  Its multiome recipes have not yet migrated to the Multiomics executable
+  and must not be treated as supported standalone STAR 1.10 workflows.
+  The validator confirms snapshot integrity, not runtime compatibility.
+- The validated canonical downstream fixes are on
+  `morphic-recipes` branch `fix/v1100-downstream-validation`, commit `bbf8b54`;
+  their default-branch integration remains outstanding.
+- The local tag and source handoff are not published binaries, installer
+  bundles, Debian packages or container images. Those artifacts still need
+  their release-pipeline build and runtime checks.
 
 ## Removed: the Chromap integration
 
@@ -129,7 +147,8 @@ STAR in the same process, sharing STAR's thread permits. See the
 
 The local STAR gates G-S1, G-S2 and G-S3 are accepted. Canonical recipe
 integration and Multiomics integration/snapshot migration remain stable-release
-dependencies. Validation does not authorize tagging or publishing this candidate.
+dependencies. The owner subsequently authorized starting version creation;
+rc1 is local only. Publication and the stable master merge remain separate.
 
 **September 29 update:** the owner authorized repeats. Fresh-build G-S2 and
 15/15 Tier A checks pass; SLAM SE/PE repeat and cross-version results match

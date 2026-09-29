@@ -6,6 +6,10 @@ update this file with its output location.
 
 ## Host API 1.10 Release Gates (2026-09-28)
 
+- Local rc1 source handoff:
+  `/mnt/pikachu/star_suite_v1100_gates_20260928/releases/v1.10.0-rc1/`.
+  `LOCAL_RC.json` pins tag/commit/tree and gate evidence; source archive and
+  `SHA256SUMS` remain untracked. This is not a binary release or publication.
 - September 29 follow-up: `acceptance_20260928/` under the gate root holds
   the fresh container build, SLAM repeats, seeded H5AD comparisons, repaired
   UCSF fixture, host-API/Tier A checks and TranscriptVB repeatability controls.

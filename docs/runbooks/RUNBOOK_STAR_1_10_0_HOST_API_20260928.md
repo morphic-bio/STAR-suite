@@ -61,6 +61,16 @@ that tag only in `AGENTS.md`; it is code-equivalent, not the same Git commit.
 
 ## Steps
 
+**2026-09-29 candidate creation:** following the owner's request to start
+1.10 version creation, create the local annotated `v1.10.0-rc1` tag from the
+accepted branch. No remote push or stable merge is included. Record the source
+archive and exact identities in `$D/releases/v1.10.0-rc1/LOCAL_RC.json`; see
+the [handoff](../handoffs/HANDOFF_STAR_1_10_0_HOST_API_20260928.md) and
+[distribution status](../Star-binary-distribution.md). Multiomics strict-build
+blockers, its integration gates, canonical downstream integration and multiome
+recipe migration remain pre-stable dependencies. Do not move rc1 to include
+later fixes; create a new immutable candidate.
+
 **2026-09-29 follow-up:** repeat approval is now recorded. The fresh candidate
 passed the host API, expanded Tier A, SLAM SE/PE and seeded downstream checks.
 The reused UCSF fixture configuration was repaired and matrix parity verified.
@@ -78,7 +88,8 @@ reassessment: `acceptance_20260928/gs3_report_v2.json` and
 Use immutable driver snapshots for any further authorized timing runs. See
 [validation results](../VALIDATION_STAR_1_10_0_20260929.md).
 Earlier execution counts and holds below are historical, not current approval
-status. No tag, push or master merge has occurred.
+status. No tag, push or master merge occurred during validation; subsequent
+local candidate creation is recorded above.
 
 **2026-09-28 correction:** the modern Flex workload is
 `tests/run_flex_half_probe_100k_smoke.sh`, using the established H0/H1X2 half-khash

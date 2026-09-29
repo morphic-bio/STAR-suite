@@ -7,7 +7,9 @@ matters unfortunately". The exact ordered controls below close the TranscriptVB
 hold. G-S3 is accepted under the subsequent owner instruction to treat host
 activity as diagnostic when measured runtime and memory stay within tolerance.
 No benchmarks were rerun for this reassessment. This is not stable-release
-acceptance. No tag, push, or master merge was performed.
+acceptance. No tag, push, or master merge was performed during validation.
+Subsequent local rc1 creation is recorded in the
+[release handoff](handoffs/HANDOFF_STAR_1_10_0_HOST_API_20260928.md).
 
 ## Build and provenance
 

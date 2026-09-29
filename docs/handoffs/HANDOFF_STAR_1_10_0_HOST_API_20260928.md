@@ -6,6 +6,29 @@ records below are retained as history. Runbook:
 
 ## State
 
+### Local release candidate (2026-09-29)
+
+After acceptance of G-S1/G-S2/G-S3, the owner asked to start 1.10 version
+creation. The validated branch is frozen as local annotated tag
+`v1.10.0-rc1`. It is not pushed, published or merged into master. Runtime and
+build sources are unchanged from tested candidate `a9c1636`; later commits
+contain test-harness and documentation changes. Resolve the full commit with
+`git rev-parse 'v1.10.0-rc1^{commit}'`; never move the tag.
+
+Local handoff: `$D/releases/v1.10.0-rc1/`, with a source archive, checksums and
+`LOCAL_RC.json` containing exact source/gate identities. Official snapshot
+integrity passes (11 recipes, 10 evidence records). Installable release assets
+have not been built or published by this step.
+
+The Multiomics M1-M5 handoff now records two reproducible-build blockers in
+the unchanged STAR source: date/time macros in
+`core/features/libscrna/include/pcg_extras.hpp` and hard-coded `-march=native`
+in `core/features/vbem/source/libem/Makefile`. Do not waive its strict build
+contract or claim G-M1/G-M2/G-M3 complete. Resolve these with the Multiomics
+owner before the final stable release, using rc2 if STAR source changes.
+Canonical downstream integration and migration of the six pinned multiome
+recipes remain outstanding. The 1.9.5 paper release is untouched.
+
 ### Latest: authorized validation follow-up (2026-09-29)
 
 The owner approved the remaining repeats. A fresh same-container build of
@@ -42,7 +65,8 @@ Authoritative details, commands and evidence:
 [September 29 validation](../VALIDATION_STAR_1_10_0_20260929.md).
 Artifacts: `/mnt/pikachu/star_suite_v1100_gates_20260928/acceptance_20260928/`.
 The initial follow-up driver failures and invalid reused-fixture run are retained
-with their explicit replacements. Nothing pushed, tagged or merged into master.
+with their explicit replacements. At validation completion nothing was pushed,
+tagged or merged into master; subsequent local rc1 creation is recorded above.
 
 ### Latest follow-up: current Flex fixture corrected
 
@@ -151,7 +175,8 @@ the old combined wrapper. Canonical recipe default-branch integration,
 Multiomics integration and its recipe executable/snapshot migration remain
 stable-release dependencies
 after the local RC is available, not a reason to change the current Flex cache.
-No push, tag or master merge is authorized by this follow-up.
+The subsequent local rc1 creation is recorded above. No remote push or master
+merge is included in that step.
 
 Completed execution commands (records, not rerun authorization):
 

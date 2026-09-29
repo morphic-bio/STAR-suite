@@ -4,10 +4,11 @@
 
 Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction install and clear provenance.
 
-## Pending 1.10.0 Candidate (2026-09-28)
+## Local 1.10.0 Release Candidate (2026-09-29)
 
-- Local branch: `dev-release-v1.10.0`; intended tag `v1.10.0-rc1` is not yet
-  created or published. No 1.10 packages or container images are announced.
+- Local branch: `dev-release-v1.10.0`; local annotated tag `v1.10.0-rc1`.
+  This is not a published GitHub release. No 1.10 installable packages or
+  container images are announced; the published 1.9.5 releases are unchanged.
 - `make core` now uses bundled HTSlib without Chromap or RapidMACS;
   `core-portable` is a compatibility alias. Hosts that share HTSlib with other
   libraries can build with `HTSLIB=external`.
@@ -15,12 +16,22 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   dependencies. See [Host API](HOST_API.md); the multiome executable belongs
   to Multiomics Suite, not the standalone STAR release.
 - Version metadata is `1.10.0` / Debian `1.10.0-1`; existing genome-index
-  compatibility is unchanged. Local partial-build and host-API tests passed,
-  but production-output/performance gates and release-artifact validation
-  remain pending. Do not equate a local build with a published package.
+  compatibility is unchanged. Local G-S1/G-S2/G-S3 gates are accepted; see
+  [validation evidence](VALIDATION_STAR_1_10_0_20260929.md). Official snapshot
+  integrity passes (11 recipes, 10 evidence records). Binary/installer/deb
+  release-artifact validation and publication remain pending.
+- The local source handoff is under
+  `/mnt/pikachu/star_suite_v1100_gates_20260928/releases/v1.10.0-rc1/`:
+  source archive, checksums and `LOCAL_RC.json` recording the tag, commit,
+  source tree and gate evidence. It is not a binary installer.
+- The bundled catalog is still the pinned 1.9.5 snapshot. Its six multiome
+  recipes must migrate to the Multiomics executable before stable release;
+  snapshot integrity is not evidence that those recipes run with STAR 1.10.
 - Release evidence and blockers are recorded in the
   [1.10 handoff](handoffs/HANDOFF_STAR_1_10_0_HOST_API_20260928.md).
-  The final stable tag also requires validation by Multiomics Suite.
+  The final stable tag also requires validation by Multiomics Suite. Its strict
+  reproducible build currently rejects a PCG helper's date/time macros and
+  libem's hard-coded `-march=native`; these remain explicit pre-stable work.
 
 ## Implementation Status (2026-02-14)
 
