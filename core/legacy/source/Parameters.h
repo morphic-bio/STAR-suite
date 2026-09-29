@@ -40,6 +40,7 @@ struct CbqReadBatchView;
 class BgzfStarAdapter;
 class BgzfPipeGroup;
 class FastxInputModule;
+class FastxMateReaderGroup;
 struct InputRecord;
 } // namespace input
 } // namespace star
@@ -187,6 +188,13 @@ class Parameters {
         // after the mapping thread controller has been initialized.
         std::shared_ptr<star::input::BgzfStarAdapter> bgzfCoreInputAdapter;
         std::shared_ptr<star::input::BgzfPipeGroup> bgzfPipes;
+        // auto|off|on: parse each FASTX mate on its own reader thread
+        // (input/FastxMateReaders). The group is created by openReadsFiles()
+        // when the gate accepts the run, started by the first chunk fill and
+        // stopped at the end of mapping and by closeReadsFiles(). Shared, like
+        // bgzfPipes, with the Parameters copy made for two-pass pass 1.
+        string readFilesMateThreads = "auto";
+        std::shared_ptr<star::input::FastxMateReaderGroup> fastxMateReaders;
         bool bgzfCoreActive = false;
         bool bgzfCoreExhausted = false;
         uint32 bgzfCoreLaneIndex = 0;

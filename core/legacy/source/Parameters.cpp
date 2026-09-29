@@ -253,6 +253,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoVector <string> (-1, -1, "readFilesSAMattrKeep", &readFiles.samAttrKeepIn));
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "readFilesCbqRangeMode", &readFilesCbqRangeMode));
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "readFilesBgzfMode", &readFilesBgzfMode));
+    parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "readFilesMateThreads", &readFilesMateThreads));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "bgzfReaderThreads", &bgzfReaderThreads));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "bgzfCrcCheck", &bgzfCrcCheck));
 
@@ -1742,6 +1743,16 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         ostringstream errOut;
         errOut << "EXITING: fatal input ERROR: --readFilesBgzfMode must be auto, off, or range, user-defined value="
                << readFilesBgzfMode << "\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    std::transform(readFilesMateThreads.begin(), readFilesMateThreads.end(),
+                   readFilesMateThreads.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (readFilesMateThreads != "auto" && readFilesMateThreads != "off" &&
+        readFilesMateThreads != "on") {
+        ostringstream errOut;
+        errOut << "EXITING: fatal input ERROR: --readFilesMateThreads must be auto, off, or on, user-defined value="
+               << readFilesMateThreads << "\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
     if (bgzfReaderThreads < 0) {

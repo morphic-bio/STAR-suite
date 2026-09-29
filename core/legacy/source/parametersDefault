@@ -448,6 +448,13 @@ readFilesBgzfMode           auto
                             off   ... always use the existing zlib stream
                             range ... require BGZF range readers; non-BGZF or unsupported input is fatal
 
+readFilesMateThreads        auto
+    string: auto|off|on - parse each FASTX mate on its own reader thread; mates are paired by
+                          counting reads from the start of each file
+                            auto ... use for supported Fastx runs (not Flex, SLAM, TranscriptVB, batch mode)
+                            off  ... parse all mates in the mapping threads, one chunk at a time
+                            on   ... require mate reader threads; unsupported runs are fatal
+
 bgzfReaderThreads           0
     int: >=0: reader/inflate worker threads. 0 ... derive from --runThreadN.
               Workers cache claimed block metadata in memory; no sidecar is read or written.

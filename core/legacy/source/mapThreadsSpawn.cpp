@@ -1,4 +1,5 @@
 #include "input/BgzfPipeGroup.h"
+#include "input/FastxMateReaders.h"
 #include "mapThreadsSpawn.h"
 #include "FlexPipeline.h"
 #include "FlexHashScreen.h"
@@ -1041,6 +1042,13 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
         P.inOut->logMain << "Joined thread # " <<ithread <<"\n"<<flush;
         pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
     };
+
+    // The mate readers may have read ahead (--readMapNumber, pass 1 of
+    // two-pass). Stop them before MAP is marked complete, so no reader holds
+    // or waits for a permit after mapping.
+    if (P.fastxMateReaders) {
+        P.fastxMateReaders->stopAndJoin();
+    }
 
     if (interfaceEnabled) {
         g_threadChunks.mapPermitMarkDomainComplete(

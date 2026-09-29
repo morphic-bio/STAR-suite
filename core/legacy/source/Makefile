@@ -225,7 +225,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	Transcriptome.o Transcriptome_quantAlign.o Transcriptome_geneFullAlignOverlap.o \
 	ReadAlign_quantTranscriptome.o Quantifications.o Transcriptome_geneCountsAddAlign.o \
 	sjdbLoadFromFiles.o sjdbLoadFromStream.o sjdbPrepare.o sjdbBuildIndex.o sjdbInsertJunctions.o mapThreadsSpawn.o \
-	FastxInputModule.o CbqInputModule.o BgzfBlockReader.o BgzfRangeReader.o CbBucketStore.o \
+	FastxInputModule.o FastxMateReaders.o CbqInputModule.o BgzfBlockReader.o BgzfRangeReader.o CbBucketStore.o \
 	Parameters_readFilesInit.o Parameters_openReadsFiles.cpp Parameters_closeReadsFiles.cpp Parameters_batchReset.cpp Parameters_readSAMheader.o \
 	bam_cat.o serviceFuns.o GlobalVariables.cpp \
 	BAMoutput.o BAMfunctions.o ReadAlign_alignBAM.o BAMbinSortByCoordinate.o signalFromBAM.o bamRemoveDuplicates.o BAMbinSortUnmapped.o \
@@ -365,6 +365,13 @@ fastx-input-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 fastx-input-harness : LDFLAGS := $(LDFLAGSextra) -lz -lcrypto
 fastx-input-harness : FastxInputModule.o input/fastx_input_harness.cpp
 	$(CXX) -o fastx_input_harness $(CXXFLAGS) input/fastx_input_harness.cpp FastxInputModule.o $(LDFLAGS)
+
+# Per-mate reader threads against a copy of the single-threaded chunk fill.
+.PHONY: fastx-mate-reader-harness
+fastx-mate-reader-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+fastx-mate-reader-harness : LDFLAGS := $(LDFLAGSextra) -lpthread
+fastx-mate-reader-harness : FastxMateReaders.o input/fastx_mate_reader_harness.cpp
+	$(CXX) -o fastx_mate_reader_harness $(CXXFLAGS) input/fastx_mate_reader_harness.cpp FastxMateReaders.o $(LDFLAGS)
 
 # Standalone BGZF block/range harness for the phased T1-T5 ingest gates.
 .PHONY: bgzf-input-harness
@@ -695,6 +702,9 @@ flex/%.o: flex/%.cpp
 FastxInputModule.o: input/FastxInputModule.cpp input/FastxInputModule.h input/InputContract.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
+FastxMateReaders.o: input/FastxMateReaders.cpp input/FastxMateReaders.h input/BgzfRangeReader.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
 BinseqInputProbeModule.o: input/BinseqInputProbeModule.cpp input/BinseqInputProbeModule.h input/FastxInputModule.h input/InputContract.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
@@ -736,7 +746,7 @@ solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_S
 
 .PHONY: clean
 clean:
-	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong libstar_suite.a libstar_suite.link star_feature_call transcriptvb_finalize trim_qc_fastq trim_qc_merge trim_qc_replay fastx_input_harness bgzf_input_harness cb_bucket_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness Depend.list parametersDefault.xxd .depend.htslib_*
+	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong libstar_suite.a libstar_suite.link star_feature_call transcriptvb_finalize trim_qc_fastq trim_qc_merge trim_qc_replay fastx_input_harness fastx_mate_reader_harness bgzf_input_harness cb_bucket_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness Depend.list parametersDefault.xxd .depend.htslib_*
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean
