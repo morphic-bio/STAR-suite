@@ -82,6 +82,35 @@ GitHub release until the author's go.
   and v1.9.4 release notes, and the frozen Tier A list of the 28 Sep gate
   batch in `tests/host_api/audit_gate_batch.py`.
 
+- **Final release merge: `5d3df7acaa724aa57a7a4fb1e09f877622205141`**
+  (`--no-ff` onto `0f9701a`, second parent `6a002a7`; its tree equals the
+  branch tip; `d28a897`, `ea60370` and an unchecked third merge `e8e0582`
+  are not in its history). This is the commit for Multiomics to pin. The
+  removal commit is `6949225`; it was rebuilt once before the checks to also
+  drop the tiny smoke from the release-smoke usage text.
+- Release checks on `5d3df7a` (fresh clone `$W/release/check_P3`, driver
+  `$W/release/run_release_checks_v3.sh`, results in
+  `$W/release/checks_v3/status.tsv`): all 33 steps exit 0. Every image was
+  built from that clone; the four release images (both build images and
+  both runtime-check images) with `--no-cache`.
+  - notes, version and `debian/changelog` 1.11.0-1, snapshot validation,
+    relative links (none broken), dependency-generation tests: pass;
+  - Launchpad `app.js` check and pytest (125 passed, 19 skipped): pass;
+  - partial builds (9 targets), scRNA exact counts on core and
+    core-static: pass;
+  - Tier A: 14 of 14 pass (the repository's own list; no local edits);
+  - both tarballs (metadata commit `5d3df7a`), installer bundle (both
+    variants carry `star-suite-launchpad`), three tarball runtime checks,
+    installer-bundle validation on Ubuntu 22.04 and 24.04 (1.11.0, source
+    revision `5d3df7a`), tarball and bundle release smokes (repository
+    scripts, no local skip), both debs, three deb install checks, source
+    package, checksums: pass.
+  - `grep -i -E "universc|public_10x_tiny|flex_tiny"` over every check log
+    and the driver output: no match; no step cloned any repository. The
+    only matches under `$W/release/checks_v3` are in the partial-build
+    source exports: the historical documents and the frozen audit list
+    named above.
+
 Earlier stop (resolved): the first F2 dry run was denied ("[Safety Bypass
 Flag]") because of `--skip-active-check`; the coordinator pointed out that
 the lane runner's active-run check runs only without `--dry-run`
