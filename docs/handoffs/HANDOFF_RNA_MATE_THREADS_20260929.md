@@ -135,10 +135,11 @@ an incremental rebuild keeps the old revision string).
 | M | State |
 |---|---|
 | M0 | **Done.** Fixtures staged; argv in `$W/argv`; B0 pairs run (queue `m0`, all exit 0). Variance classes and diagnostic below. |
-| M1 | Committed (`130af40`). **B1 = B0 on F1 and F2: PASS** (F1a fully identical; F2 within the Multiomics lists, Solo.out exact). Also PASS on every other variant with both runs: f1a1, f1b-f1f, f4, f5a, f5b, f6a, f6a1, f6b, f7vanilla, f7modern, f7modernbam. B1 traces collected for every variant except f6c: its first B1 run used a misspelled option (`--twoPassMode`; STAR's is `--twopassMode`), failed with exit 102 and is kept as `runs/f6c/failed_b1_twoPassMode_typo`; the argv is fixed and the rerun is in `m3_resume`. |
+| M1 | Committed (`130af40`). **B1 = B0 on every variant (F1-F7, F3), including F1 and F2 as required.** B1 traces collected for all. The first B1 f6c run used a misspelled option (`--twoPassMode`; STAR's is `--twopassMode`), exited 102 and is kept as `runs/f6c/failed_b1_twoPassMode_typo`; rerun with the fixed argv. |
 | M2 | Committed (`75608c3`), blank-line rule `4329a6a`; G-R0 passes (272 identity runs, behaviour, blank-line part). |
-| M3 | **Running.** B0 done for every variant (f6c two-pass ran both passes); B1 = B0 PASS on every variant with both runs (f6c B1 rerun pending). C runs with traces in queue `m3_resume2`. |
-| M4-M5 | C built at `4329a6a` (`libstar_suite.a` too); queue `m4`, G-R3 wrapper `tools/run_flex_smoke.sh`, report script `tools/m3_report.sh` ready. Not run. |
+| M3 | **Done: G-R1, G-R2, G-R3 pass.** 21 variants (below): C trace = B1 trace row for row (both CRC32s), C outputs = B0 outputs under runbook 4.2 and the variance classes, B1 = B0; C's Log.out says the readers were active (twice for two-pass). G-R3: B0 and C both reproduce all 121 non-log outputs of the preserved v1.9.5a Flex reference; C logs "Fastx mate readers: not active (Flex runs read their own lanes)". |
+| M4 | **Done: G-R1 and G-R2 pass on F3** (391 chunks, 20M reads; three C runs vs B0). Informal measurements below. D5 (M4b) is the author's call. |
+| M5 | Running: G-S2 on C, then G-M1 with the Multiomics development build (`$W/m5/`). |
 | M6 | Not started; stop before G-S1 and the release. |
 
 ### M0 results (B0 repeatability pairs, `$W/compare/`)
@@ -169,6 +170,52 @@ with `.gz` input (two runs) against 41.27 ms with the same GEX mates as
 plain FASTQ. Plain input is not as slow as `.gz`, and the plain-input chunk
 read (no decompression wait) is still about two thirds of the `.gz` value,
 so the parse is the larger part. The runbook's M0 stop condition is not met.
+
+### M3 results (G-R1, G-R2; `tools/m3_report.sh`, reports in `$W/compare/`)
+
+All PASS: f1a (zcat, lanes), f1a1 (1 thread), f1b (internal gzip), f1c
+(BGZF pipe group, "BGZF raw input: active"), f1d (plain lanes, `cat`), f1e
+(plain single file, direct), f1f (manifest), f2, f4, f5a (zcat,
+`--readMapNumber` on full files), f5b (no command), f6a (sorted BAM +
+GeneCounts), f6a1 (1 thread), f6b (unsorted BAM), f6c (two-pass; 36 trace
+rows over both passes), f6d (BySJout), f6e (single-end), f6f (plain),
+f7vanilla, f7modern, f7modernbam.
+
+- 1-thread runs (f1a1, f6a1) and F1, F6, F7 at 8 threads: every output byte
+  identical to B0, including `Log.final.out` count lines.
+- F2, F4, F5: differences only in feature-arm files the Multiomics lists
+  cover; `Solo.out`, `SJ.out.tab` and `Log.final.out` counts identical.
+- f6b unsorted BAM: B0, B1 and C each wrote the same 1,099,014 records in a
+  different order (thread scheduling); compared as a multiset per 4.2.
+
+### M4 results (F3: DOGMA-plex lane 1, 20M, STAR only, 32 threads)
+
+- G-R1: trace equal (391 rows, 20,000,000 reads). G-R2: PASS for C runs 1-3
+  against B0 run 1, and C run 2 against B0 run 2.
+- Variance class found at 20M: `cr_assign/CellTag/celltag_dp01/ct/
+  feature_sequences.txt` differs between the two B0 runs (and B1) in the
+  "Match Position" field of mismatched sequences, as the ADT and HTO files do
+  in the committed 2M list. Recorded from the B0 pair in
+  `$W/compare/lists/content_varying_f3_extra.txt`
+  (method `feature-sequences`) and used for F3 only. Not a C difference.
+- Informal measurements (shared host, order B0, C, C, B0; no claims):
+
+  | run | wall | avg chunk read ms | mutex wait thread-s | map chunk thread-s | MAP/FEATURE/idle permit occupancy |
+  |---|---|---|---|---|---|
+  | B0 r1 | 3:12 | 93.57 | 699.1 | 445.2 | 11.8 / 0.51 / 19.7 |
+  | C r2 | 3:16 | 52.23 | 124.4 | 539.7 | 24.9 / 0.01 / 7.1 |
+  | C r3 | 3:14 | 53.48 | 127.0 | 552.5 | (similar) |
+  | B0 r2 | 3:20 | 93.57 | 684.6 | 459.8 | (similar) |
+
+  Reader summary (C r2): mate 1 (R2) parse 7.4 s, input wait 13.1 s, filler
+  waited 17.6 s for mate 1; mate 2 blocked 13.7 s on a full queue. The
+  ceiling has moved to mate 1's decompression (R2 on one core), as the
+  runbook predicted; wall time is unchanged at this scale. MAP occupancy
+  rose toward `runThreadN` (the runbook's expected effect). FEATURE permit
+  acquisitions fell from about 1.57M to about 0.1k with identical feature-arm
+  phase times and outputs; the cause was not established (observation only).
+- D5 (M4b fast parser): the mate-1 parse (7.4 s) is not the ceiling here;
+  the decompressor is. Recommendation for the author: no M4b for 1.11.0.
 
 ## Next steps
 
