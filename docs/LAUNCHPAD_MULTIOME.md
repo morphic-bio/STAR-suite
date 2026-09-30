@@ -20,7 +20,7 @@ and its compatibility runtime.
 
 ## STAR 1.9.5.b compatibility instructions
 
-> **Draft for review; not yet approved for publication.** STAR Suite 1.9.5.b
+> STAR Suite 1.9.5.b
 > is an interim compatibility build for running the integrated RNA + ATAC
 > engine from source, as described below. It is not an official STAR Suite
 > release. Multiomics Suite supersedes it once Multiomics Suite is available;
