@@ -7,27 +7,24 @@ the runbook where they differ. The runbook edits that were pending are done
 
 ## Current state (read first)
 
-- C is now `4bc3b8f` (blank-line rule refined per the author's decisions of
-  30 Sep), rebuilt from clean in `$W/src_c` with `libstar_suite.a`; G-R0
-  passes there (272 identity runs, behaviour, blank-line part: 0 failures).
-- The earlier stop (30 minutes on the lock at 00:59 UTC) is superseded: the
-  coordinator removed the 30-minute cutoff. Queue behind the lock; stop only
-  if a single wait passes about 3 hours. `run_star.sh` waits up to 3 hours;
-  with `RUN_STAR_LOCK_HELD=1` it skips its own lock when the caller holds it
-  for a batch (`flock <lock> env RUN_STAR_LOCK_HELD=1 run_queue.sh <queue>`),
-  as the single-run agent holds it for a whole gate run.
-- Running (background chain): queue `m3_resume2` (B1 F6c rerun, all C runs
-  with traces) as one lock-held batch, then G-R3 (`run_flex_smoke.sh b0`,
-  `c`), then queue `m4` as one batch.
-- M5 prepared (D6): scratch clones in `$W/scratch/d6` (STAR Suite at C with
-  the local, unpushed tag `v1.11.0-dev.rna-mate-threads`; `multiomics-suite`
-  master `79b5899`, clean), scratch manifest `$W/scratch/d6/manifest_c.json`
-  and `local_sources.json`. The Multiomics development build is done:
-  `$W/scratch/d6/multiomics/build/native/multiomics`, receipt status
-  complete, STAR tag verified as `local-override`, input digest `efc07e37…`.
-  G-M1 driver: `$W/tools/run_g_m1_c.py` (the committed perf-lane driver with
-  only ROOT, OUT, BIN, HERE changed). G-S2 not run yet. After M5, delete
-  `$W/scratch/d6` (the tag lives only there).
+**M0-M5 are done; stopped before G-S1 as instructed.** No output difference
+from v1.10.0 outside the B0 variance classes was found in any gate.
+
+- C is `4bc3b8f` (blank-line rule per the author's decisions of 29 and 30
+  Sep), built from clean in `$W/src_c` with `libstar_suite.a`; G-R0 passes
+  there (272 identity runs, behaviour, blank-line part: 0 failures).
+- G-R1/G-R2 (M3, 21 variants; M4, F3 20M), G-R3 (Flex), G-S2 and G-M1 (5
+  fixtures) pass; details below.
+- D6 was carried out and cleaned up: the Multiomics development build used a
+  local, unpushed tag `v1.11.0-dev.rna-mate-threads` in a scratch STAR Suite
+  clone and a scratch manifest via `--manifest`; the scratch area
+  (`$W/scratch/d6`, clones, tag and build) is deleted. The tag never existed
+  outside that clone (checked: worktree, `/mnt/pikachu/STAR-suite`, GitHub).
+  Build record kept in `$W/m5/d6_record/` (receipt, inputs, sources lock,
+  scratch manifest, build log, binary sha256).
+- Lock policy: queue behind the lock with no cutoff; stop only if a single
+  wait passes about 3 hours. `run_star.sh` supports batch holding
+  (`flock <lock> env RUN_STAR_LOCK_HELD=1 run_queue.sh <queue>`).
 
 Earlier stop (resolved): the first F2 dry run was denied ("[Safety Bypass
 Flag]") because of `--skip-active-check`; the coordinator pointed out that
@@ -139,8 +136,8 @@ an incremental rebuild keeps the old revision string).
 | M2 | Committed (`75608c3`), blank-line rule `4329a6a`; G-R0 passes (272 identity runs, behaviour, blank-line part). |
 | M3 | **Done: G-R1, G-R2, G-R3 pass.** 21 variants (below): C trace = B1 trace row for row (both CRC32s), C outputs = B0 outputs under runbook 4.2 and the variance classes, B1 = B0; C's Log.out says the readers were active (twice for two-pass). G-R3: B0 and C both reproduce all 121 non-log outputs of the preserved v1.9.5a Flex reference; C logs "Fastx mate readers: not active (Flex runs read their own lanes)". |
 | M4 | **Done: G-R1 and G-R2 pass on F3** (391 chunks, 20M reads; three C runs vs B0). Informal measurements below. D5 (M4b) is the author's call. |
-| M5 | Running: G-S2 on C, then G-M1 with the Multiomics development build (`$W/m5/`). |
-| M6 | Not started; stop before G-S1 and the release. |
+| M5 | **Done: G-S2 and G-M1 pass.** G-S2 on C (`$W/m5/gs2_c`): PASS, readers active in all 31 STAR/host runs, including the host with a dummy External domain. G-M1 (Multiomics development build against C, `$W/g_m1`): 5 of 5 fixtures pass under the committed lists; details below. |
+| M6 | Not started; G-S1 not run (stop before G-S1 and the release). Remaining M6 work: README option list if it lists input options, final release notes, G-R5 (G-S1 plus Tier A) with the new default. |
 
 ### M0 results (B0 repeatability pairs, `$W/compare/`)
 
@@ -217,17 +214,49 @@ f7vanilla, f7modern, f7modernbam.
 - D5 (M4b fast parser): the mate-1 parse (7.4 s) is not the ceiling here;
   the decompressor is. Recommendation for the author: no M4b for 1.11.0.
 
+### M5 results
+
+- **G-S2** (`tests/host_api/run_host_api_tests.sh` in `$W/src_c`, under the
+  lock): PASS. The `.gz` fixture made the readers active in all 31 runs.
+- **G-M1** (`$W/tools/run_g_m1_c.py`: the committed perf-lane driver with
+  only ROOT, OUT, BIN, HERE and `MULTIOMICS_MANIFEST` changed; outputs
+  `$W/g_m1`): exit codes match the reference for all five fixtures.
+  - PBMC 3k, HIV DOGMA four-arm, CAT-ATAC: comparator PASS as run.
+  - DOGMA-plex lane 1 (2M) and five-arm: as run, 10 files each differed
+    only in absolute paths to the reference's Multiomics checkout
+    (`/mnt/pikachu/multiomics-suite-single-binary-20260928`; each size gap
+    exactly the 45 bytes between that path and `<REPO0>`). With
+    `--reference-repo-root` (the comparator option added for this in 0.10.0,
+    per its release notes) both PASS, no list changed
+    (`comparison_with_reference_repo_root.{log,json}`).
+  - `.gz` representation audit: one entry, `atac/peak_mex/matrix.mtx.gz` in
+    lane 1 (compressed bytes differ, decompressed identical). It is written
+    by the ATAC peak layer, not STAR, and the perf-lane G-M1 of another
+    Multiomics build flagged the same file; not attributable to this change.
+- The first G-M1 attempt failed to start four fixtures because the copied
+  driver pointed `MULTIOMICS_MANIFEST` at the clone's committed manifest
+  (STAR v1.10.0) while the build used the scratch manifest; kept as
+  `$W/g_m1_failed_manifest_env`, fixed, rerun.
+
 ## Next steps
 
-1. After queue `m3_resume2`: `tools/m3_report.sh f1a f1a1 f1b f1c f1d f1e
-   f1f f2 f4 f5a f5b f6a f6a1 f6b f6c f6d f6e f6f f7vanilla f7modern
-   f7modernbam`.
-2. G-R3: `tools/run_flex_smoke.sh b0` and `c`; check C's `Log.out` for
-   "Fastx mate readers: not active (Flex ...)".
-3. M4: queue `m4` (F3), G-R1/G-R2 on F3, informal measurements.
-4. M5: G-S2 in `$W/src_c` (under the lock), then the Multiomics development
-   build against C and G-M1 under the D6 conditions.
-5. Stop before G-S1 and the release.
+1. Author review of the results and of the items in "For the author" below.
+2. M6 (after approval): README option list if it lists input options, final
+   1.11.0 release notes, G-R5 (G-S1 plus Tier A) with the new default in
+   force, final handoff. No tag, push, merge or release.
+
+## For the author
+
+- **D5 (M4b fast parser):** at F3 (20M, 32 threads) the mate-1 reader parses
+  in 7.4 s and waits 13.1 s on its input; the ceiling is mate 1's
+  decompression, not the parse. Recommendation: no M4b for 1.11.0.
+- **Observation (informal):** with C, MAP permit occupancy rises toward
+  `runThreadN` (11.8 -> 24.9 of 32 on F3), as the runbook expected; FEATURE
+  permit acquisitions fall from about 1.57M to about 0.1k with identical
+  feature-arm phase times and outputs. Cause not established; relevant to
+  the hosted lane, where the host's floors govern the split.
+- **Log.out "not active" checks for SLAM, TranscriptVB and CBQ** (runbook
+  4.2) were not run here; those modes are G-S1 rows (M6).
 
 ## Author decisions of 30 Sep (implemented)
 
