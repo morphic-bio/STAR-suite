@@ -25,16 +25,20 @@ not run yet, and this file will be completed before release.
 These inputs are malformed. v1.10.0 handled them silently or inconsistently
 between mates.
 
-- **Blank lines where a read header is expected.** The rule is the same for
-  every mate, in FASTQ and FASTA. A blank line (only spaces, tabs or carriage
-  returns) is never read as a read header.
-  - If the next non-blank line is a read header in that file's format (`@` or
-    `>`), or the file ends, the blank lines are skipped. `Log.out` gets a
-    WARNING, naming the file, mate and line, at the first blank line in each
-    file, plus each file's count of skipped blank lines when the input
-    closes.
-  - Otherwise STAR stops with a fatal error that names the file and line and
-    says the input is malformed.
+- **Blank lines where a read header is expected** (the author's decisions
+  of 29 and 30 Sep). The rule is the same for every mate, in FASTQ and FASTA.
+  A blank line (only spaces, tabs or carriage returns) is never read as a
+  read header.
+  - A single blank line followed by a read header in that file's format (`@`
+    or `>`) is skipped.
+  - Blank lines at the end of a file, followed by end of input or by the next
+    input file, are skipped, whatever their number.
+  - Skipped lines get a WARNING in `Log.out`, naming the file, mate and line,
+    at the first one in each file, and each file's count of skipped blank
+    lines when the input closes.
+  - A second blank line in a row before the end of the file, or a blank line
+    followed by anything other than a read header, stops STAR with a fatal
+    error that names the file and line and says the input is malformed.
   - v1.10.0 ended the whole input at such a line in mate 1, skipped it
     silently in mates 2 and 3, and with FASTA plus `--outSAMreadID Number`
     could read it as mate 2's header.

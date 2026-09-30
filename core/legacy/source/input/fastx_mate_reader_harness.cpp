@@ -13,9 +13,11 @@
 // markers out of step (fatal), mates in different formats (fatal).
 //
 // Part 3 checks the deliberate change for blank lines where a read header is
-// expected, in each of three mates, for FASTQ and FASTA: a blank line before
-// a header is skipped with one WARNING per file and counted per file; a blank
-// line before anything else is fatal, naming the file and line.
+// expected (the author's decisions of 29 and 30 Sep), in each of three mates,
+// for FASTQ and FASTA: a single blank line before a header, and any number of
+// blank lines at the end of a file, are skipped with one WARNING per file and
+// counted per file; a second blank line in a row before the end of the file,
+// or a blank line before anything but a header, is fatal, naming file and line.
 //
 // Usage: fastx_mate_reader_harness <scratch dir>
 
@@ -773,11 +775,15 @@ int blankLinePart(const std::string& dir) {
         const std::vector<std::vector<std::string>> records =
             blankRecords(rng, format, kCount, kMates);
 
+        // Two-file reference. FASTA: the sequence loop reads a FILE marker line
+        // right after a read's sequence as sequence (v1.10.0 and here alike), so
+        // every FASTA mate ends file 0 with one blank line, which ends the read.
+        const std::string fileEnd = format == '@' ? "" : "\n";
         Case clean{"blank_clean_" + formatName, {}};
         Case cleanTwo{"blank_clean_two_files_" + formatName, {}};
         for (size_t m = 0; m < kMates; ++m) {
             clean.mates.push_back(joinRecords(records[m], 0, kCount, none, ""));
-            cleanTwo.mates.push_back("FILE 0\n" + joinRecords(records[m], 0, kSplit, none, "") +
+            cleanTwo.mates.push_back("FILE 0\n" + joinRecords(records[m], 0, kSplit, none, fileEnd) +
                                      "FILE 1\n" + joinRecords(records[m], kSplit, kCount, none, ""));
         }
         const Result reference = runThreads(writeCase(dir, clean), options);
@@ -785,13 +791,9 @@ int blankLinePart(const std::string& dir) {
         failures += expect(reference.reads == kCount && reference.warnings.empty() &&
                            !reference.fatal && !contains(reference.summary, "blank line"),
                            clean.name);
-        // FASTA: the sequence loop reads a following FILE marker line as
-        // sequence, in v1.10.0 and here alike (identity case
-        // fasta_multiline_lanes), so the two-file cases are FASTQ only.
-        if (format == '@') {
-            failures += expect(referenceTwo.reads == kCount && referenceTwo.warnings.empty() &&
-                               referenceTwo.lanes == std::vector<int>({0, 1}), cleanTwo.name);
-        }
+        failures += expect(referenceTwo.reads == kCount && !referenceTwo.fatal &&
+                           referenceTwo.warnings.size() == (format == '@' ? 0U : kMates) &&
+                           referenceTwo.lanes == std::vector<int>({0, 1}), cleanTwo.name);
 
         for (size_t mate = 0; mate < kMates; ++mate) {
             const std::string tag = formatName + "_mate" + std::to_string(mate + 1);
@@ -844,19 +846,40 @@ int blankLinePart(const std::string& dir) {
                     c.name);
             }
 
-            // Several blank lines in one file, including a run of two, a line
-            // of spaces and tabs, a CRLF blank line (FASTQ; in FASTA a CRLF
-            // line after a read is an empty sequence line, as in v1.10.0) and
-            // two at the end of the file: one WARNING, every line counted.
+            // A second blank line in a row before the end of the file is fatal,
+            // reported at the second blank line, whatever follows it.
+            const std::pair<std::string, std::string> doubles[] = {
+                {"double_blank_then_header", "\n\n"},
+                {"double_blank_spaces_then_header", "\n \t\n"},
+                {"double_blank_then_garbage", "\n\ngarbage line\n"},
+            };
+            for (const auto& item : doubles) {
+                const Case c = variant(item.first, {{99, item.second}}, "");
+                const std::vector<std::string> files = writeCase(dir, c);
+                const Result r = runThreads(files, options);
+                failures += expect(
+                    r.fatal && r.reads == 99 && r.warnings.size() == 1 &&
+                    contains(r.fatalText, "malformed input in read file " +
+                             laneFileName(files[mate], 0) + " (mate " + std::to_string(mate + 1) +
+                             "): line " + std::to_string(linesPerRead * 99 + 2) +
+                             " is a second blank line in a row (after line " +
+                             std::to_string(linesPerRead * 99 + 1) + ")"),
+                    c.name);
+            }
+
+            // Several single blank lines in one file (one of spaces and tabs;
+            // FASTQ also a CRLF one, while in FASTA a CRLF line after a read is
+            // an empty sequence line, as in v1.10.0) and three at the end of the
+            // file: one WARNING, every line counted, chunks as without them.
             {
                 std::map<size_t, std::string> before = {
-                    {10, "\n"}, {20, "\n"}, {30, " \t\n"}, {40, "\n\n"}};
-                unsigned long long expected = 5 + 2;
+                    {10, "\n"}, {20, "\n"}, {30, " \t\n"}, {40, "\n"}};
+                unsigned long long expected = 4 + 3;
                 if (format == '@') {
                     before[50] = "\r\n";
                     ++expected;
                 }
-                const Case c = variant("several_blank_lines", before, "\n\n");
+                const Case c = variant("several_blank_lines", before, "\n\n\n");
                 const std::vector<std::string> files = writeCase(dir, c);
                 const Result r = runThreads(files, options);
                 failures += expect(
@@ -867,26 +890,35 @@ int blankLinePart(const std::string& dir) {
                     c.name);
             }
 
-            // Two input files (FASTQ): a WARNING and a count per file; a blank
-            // line at the end of file 0 (before the next file's marker) is
-            // skipped.
-            if (format == '@') {
+            // Two input files: a WARNING and a count per file; three blank
+            // lines at the end of file 0 (before the next file's marker) and
+            // two at the end of file 1 (end of input) are skipped.
+            {
                 Case c{"two_files_blank_lines_" + tag, cleanTwo.mates};
-                c.mates[mate] = "FILE 0\n" + joinRecords(records[mate], 0, kSplit, {{5, "\n"}}, "\n") +
+                c.mates[mate] = "FILE 0\n" + joinRecords(records[mate], 0, kSplit, {{5, "\n"}}, "\n\n\n") +
                                 "FILE 1\n" + joinRecords(records[mate], kSplit, kCount,
-                                                         {{7, "\n"}, {8, "\n"}}, "");
+                                                         {{7, "\n"}, {8, "\n"}}, "\n\n");
                 const std::vector<std::string> files = writeCase(dir, c);
                 const Result r = runThreads(files, options);
+                // FASTA: the other mates warn once each for their file-0 blank line.
+                const size_t otherWarnings = format == '@' ? 0 : kMates - 1;
+                std::vector<std::string> mine;
+                for (const std::string& w : r.warnings) {
+                    if (contains(w, " (mate " + std::to_string(mate + 1) + "): ")) {
+                        mine.push_back(w);
+                    }
+                }
                 failures += expect(
-                    compare(referenceTwo, r, kMates).empty() && r.warnings.size() == 2 &&
-                    contains(r.warnings[0], laneFileName(files[mate], 0) + " (mate " +
+                    compare(referenceTwo, r, kMates).empty() &&
+                    r.warnings.size() == 2 + otherWarnings && mine.size() == 2 &&
+                    contains(mine[0], laneFileName(files[mate], 0) + " (mate " +
                              std::to_string(mate + 1) + "): blank line at line " +
                              std::to_string(linesPerRead * 5 + 1) + " ") &&
-                    contains(r.warnings[1], laneFileName(files[mate], 1) + " (mate " +
+                    contains(mine[1], laneFileName(files[mate], 1) + " (mate " +
                              std::to_string(mate + 1) + "): blank line at line " +
                              std::to_string(linesPerRead * 7 + 1) + " ") &&
-                    contains(r.summary, skippedLine(mate, 2, laneFileName(files[mate], 0))) &&
-                    contains(r.summary, skippedLine(mate, 2, laneFileName(files[mate], 1))),
+                    contains(r.summary, skippedLine(mate, 4, laneFileName(files[mate], 0))) &&
+                    contains(r.summary, skippedLine(mate, 4, laneFileName(files[mate], 1))),
                     c.name);
             }
         }

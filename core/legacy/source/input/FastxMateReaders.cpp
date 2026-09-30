@@ -350,6 +350,7 @@ void FastxMateReader::markLane(FastxMateBatch* batch, int nextLane) {
     line_ = 0;
     laneFormat_ = 0;
     afterBlank_ = false;
+    blankRun_ = 0;
 }
 
 // A blank line where a read header is expected: count it, and note the first
@@ -359,6 +360,9 @@ void FastxMateReader::noteBlankLine(FastxMateBatch* batch) {
     if (!afterBlank_) {
         afterBlank_ = true;
         firstBlankLine_ = line_;
+    }
+    if (++blankRun_ == 2) {
+        secondBlankLine_ = line_;
     }
     bool& warned = blankWarned_[lane_];
     if (!warned) {
@@ -371,15 +375,25 @@ void FastxMateReader::noteBlankLine(FastxMateBatch* batch) {
     }
 }
 
-// The line after a blank line is not a read header in this file's format.
+// Blank lines before something other than the end of the file: either two
+// or more in a row (reported at the second), or one followed by a line that
+// is not a read header in this file's format (reported at that line).
 bool FastxMateReader::failAfterBlank(FastxMateBatch* batch, uint64_t line) {
     batch->end = FastxMateEnd::Error;
     batch->laneRecords = laneRecords_;
-    batch->errorText = "EXITING because of FATAL INPUT ERROR: malformed input in read file " +
-        fileName(lane_) + " (mate " + std::to_string(mate_ + 1) + "): line " + std::to_string(line) +
-        " follows a blank line (line " + std::to_string(firstBlankLine_) + ") but is not " +
-        headerKind(laneFormat_) + ". STAR never reads a blank line as a read header.\n"
-        "SOLUTION: remove the blank lines from the read file, or correct the file.\n";
+    const std::string where = "EXITING because of FATAL INPUT ERROR: malformed input in read file " +
+        fileName(lane_) + " (mate " + std::to_string(mate_ + 1) + "): ";
+    if (blankRun_ >= 2) {
+        batch->errorText = where + "line " + std::to_string(secondBlankLine_) +
+            " is a second blank line in a row (after line " + std::to_string(firstBlankLine_) +
+            "). STAR skips a single blank line before a read header, and blank lines at the end "
+            "of a file, but never reads a blank line as a read header.\n";
+    } else {
+        batch->errorText = where + "line " + std::to_string(line) + " follows a blank line (line " +
+            std::to_string(firstBlankLine_) + ") but is not " + headerKind(laneFormat_) +
+            ". STAR never reads a blank line as a read header.\n";
+    }
+    batch->errorText += "SOLUTION: remove the blank lines from the read file, or correct the file.\n";
     return true;
 }
 
@@ -534,7 +548,8 @@ bool FastxMateReader::fillBatch(FastxMateBatch* batch, std::istream& in) {
             headerRead = true;
         } else if (mate_ == 0) {
             if (next == '@' || next == '>') {
-                if (afterBlank_ && laneFormat_ != 0 && next != laneFormat_) {
+                if (afterBlank_ &&
+                    (blankRun_ >= 2 || (laneFormat_ != 0 && next != laneFormat_))) {
                     return failAfterBlank(batch, line_ + 1);
                 }
                 in >> token;
@@ -580,7 +595,7 @@ bool FastxMateReader::fillBatch(FastxMateBatch* batch, std::istream& in) {
                 markLane(batch, nextLane);
                 return false;
             }
-            if (afterBlank_ && ((token[0] != '@' && token[0] != '>') ||
+            if (afterBlank_ && (blankRun_ >= 2 || (token[0] != '@' && token[0] != '>') ||
                                 (laneFormat_ != 0 && token[0] != laneFormat_))) {
                 return failAfterBlank(batch, line_ + 1);
             }
@@ -597,6 +612,7 @@ bool FastxMateReader::fillBatch(FastxMateBatch* batch, std::istream& in) {
             parseFasta(batch, in, &record, token, headerRead);
         }
         afterBlank_ = false;
+        blankRun_ = 0;
         if (laneFormat_ == 0) {
             laneFormat_ = record.format;
         }
@@ -666,9 +682,9 @@ void FastxMateReaderGroup::normalize(uint32_t mate, FastxChunkFillContext& conte
                     context.onWarning("FASTX read file " + readers_[mate]->fileName(note.lane) +
                         " (mate " + std::to_string(mate + 1) + "): blank line at line " +
                         std::to_string(note.line) + " where a read header was expected. STAR skips "
-                        "blank lines that come before a read header; later ones in this file are "
-                        "not reported one by one, and the number skipped per file is in Log.out "
-                        "when the input closes.");
+                        "a single blank line before a read header and blank lines at the end of a "
+                        "file; later ones in this file are not reported one by one, and the number "
+                        "skipped per file is in Log.out when the input closes.");
                 }
             }
         }

@@ -174,23 +174,21 @@ so the parse is the larger part. The runbook's M0 stop condition is not met.
    build against C and G-M1 under the D6 conditions.
 5. Stop before G-S1 and the release.
 
-## For the author
+## Author decisions of 30 Sep (implemented)
 
-- **Blank-line rule (author decision, 29 Sep): implemented** (runbook 3.7,
-  draft `docs/RELEASE_NOTES_v1.11.0.md`). Two implementation choices within
-  the decision need confirming:
-  - a run of consecutive blank lines counts as one gap: every line is
-    counted, and the header check applies to the first non-blank line;
-  - blank lines at the end of a file (then end of input or the next input
-    file) are skipped and counted, not fatal.
-- **F8 second script not run.** `tests/run_flex_tiny_public_smoke.sh` clones
-  a third-party repository (`minoda-lab/universc`) to get test data derived
-  from the vendor's tiny test set. Under the clean-room rule it was not run
-  without asking. G-R3 uses `tests/run_flex_half_probe_100k_smoke.sh` (local
-  fixtures, byte comparison with the preserved v1.9.5a reference outputs).
-- Pre-existing, unchanged: with multi-file FASTA through lane markers, the
-  FASTA loop reads the next file's `FILE` marker line as sequence, in
-  v1.10.0 and here alike.
+- Blank lines (runbook 3.7): a single blank line followed by a header is
+  skipped with a WARNING and a count; a second blank line in a row before the
+  end of the file is fatal at the second blank line; blank lines at the end of
+  a file (then end of input or the next file) are skipped and counted, any
+  number; a blank line is never read as a header.
+- `tests/run_flex_tiny_public_smoke.sh` is not run. G-R3 uses the half-probe
+  100k smoke with local fixtures.
+- The multi-file FASTA marker limitation (a `FILE` marker right after a
+  FASTA read's sequence is read as sequence, in v1.10.0 and here alike) stays
+  as it is, documented.
+- Lock waits: queue behind the lock with no cutoff; the single-run agent's
+  gate runs use it too. Only if a single wait passes about 3 hours, update
+  this handoff and stop to report.
 
 ## D6 conditions (approved)
 
@@ -221,4 +219,5 @@ so the parse is the larger part. The runbook's M0 stop condition is not met.
 - There are no timings and no benchmark claims.
 - Stop on any output difference from v1.10.0, on a needed change to Flex, CBQ,
   the feature readers or the allocator design, on a permission denial (record
-  the command, no workaround), or near 90% of the usage limit.
+  the command, no workaround), on a single lock wait of more than about 3
+  hours, or near 90% of the usage limit.

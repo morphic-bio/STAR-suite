@@ -478,8 +478,10 @@ Modes:
 |---|---|---|
 | Well-formed input | chunks as described | identical chunks |
 | Mate-0 record start neither `@`, `>` nor `FILE` | fatal "wrong read ID line format", read *N* | same text and *N*; raised by the filler when it reaches that record |
-| Blank line where a read header is expected, followed by a header in the file's format | mate 1: ends all input; mates 2-3: skipped silently (FASTA with `--outSAMreadID Number`: read as the header, mates misalign) | **deliberate change, every mate:** skipped; WARNING at the first one per file; count per file in `Log.out` |
+| Single blank line where a read header is expected, followed by a header in the file's format | mate 1: ends all input; mates 2-3: skipped silently (FASTA with `--outSAMreadID Number`: read as the header, mates misalign) | **deliberate change, every mate:** skipped; WARNING at the first one per file; count per file in `Log.out` |
 | Blank line where a read header is expected, followed by anything else | mate 1: ends all input; mates 2-3: skipped, the next line read as a header | **deliberate change, every mate:** fatal, naming the file and line |
+| Two or more blank lines in a row before the end of a file | mate 1: ends all input; mates 2-3: skipped silently | **deliberate change, every mate:** fatal at the second blank line |
+| Blank lines at the end of a file (then end of input or the next file) | mate 1: ends all input; mates 2-3: skipped silently | **deliberate change, every mate:** skipped, any number; WARNING and count |
 | Line starting with a space (not blank) at a mate-1 record start | ends all input | same |
 | Mate 0 ends first | silent truncation | truncation plus a WARNING with both counts (D2) |
 | Mate 1 ends first | the loop checks mate 1 only before each pair, so a malformed final pair is appended | clean truncation plus a WARNING (D2) |
@@ -493,47 +495,56 @@ Modes:
 The unequal-bytes check (1339-1360) cannot fire, because both mates always
 contribute the same record count per chunk.
 
-**Blank lines where a read header is expected (the author's decision of 29
-Sep, confirmed the same day; a deliberate change from v1.10.0 on malformed
-input).** A blank line must never be taken as a read header, because that is
-the safe choice. The same rule applies to every mate (1, 2 and 3), for FASTQ
-and FASTA:
+**Blank lines where a read header is expected (the author's decisions of 29
+and 30 Sep; a deliberate change from v1.10.0 on malformed input).** A blank
+line must never be taken as a read header, because that is the safe choice
+(29 Sep). The same rule applies to every mate (1, 2 and 3), for FASTQ and
+FASTA:
 
 - A blank line is a line of only spaces, tabs or carriage returns. STAR never
   reads one as a read header.
-- At the first blank line in each input file, `Log.out` (and stderr) gets a
-  WARNING that names the file, the mate and the line number. Later blank
-  lines in the file are counted, not reported. When the readers are joined,
-  the reader summary in `Log.out` gives each file's count.
-- The line after the blank lines must be a read header in that file's format
-  (`@` for FASTQ, `>` for FASTA; either if the file has no read yet). If it
-  is, the blank lines are skipped and reading continues. If it is anything
-  else (another kind of line, a header in the other format, or a line that
-  starts with whitespace), STAR stops with a fatal error that names the file
-  and the line and says the input is malformed.
-- Implementation choices within the decision, still for the author to
-  confirm explicitly (a literal reading of "look at the next line" would make
-  both fatal; neither ever reads a blank line as a header):
-  - a run of consecutive blank lines is treated as one gap; every line is
-    counted, and the header check applies to the first non-blank line;
-  - blank lines at the end of a file (followed by end of input or by the next
-    input file) are skipped and counted, not fatal.
+- **A single blank line followed immediately by a read header** in that
+  file's format (`@` for FASTQ, `>` for FASTA; either if the file has no read
+  yet) is skipped, with a WARNING and a count (29 Sep).
+- **A blank line followed by anything else** (another kind of line, a header
+  in the other format, or a line that starts with whitespace) is fatal: STAR
+  stops with an error that names the file and the line and says the input is
+  malformed (29 Sep).
+- **A second blank line in a row, anywhere before the end of the file**, is
+  fatal, reported at the second blank line, whatever follows it (30 Sep).
+- **Blank lines at the end of a file**, followed by end of input or by the
+  next input file, are skipped with a WARNING and counted, whatever their
+  number (30 Sep).
+- WARNING and counts: at the first skipped blank line in each input file,
+  `Log.out` (and stderr) gets a WARNING that names the file, the mate and the
+  line number. Later blank lines in the file are counted, not reported. When
+  the readers are joined, the reader summary in `Log.out` gives each file's
+  count.
 - Line numbers count from 1 at the start of each input file.
 - Where v1.10.0 already consumed such a line in another way, nothing changes.
   This covers a blank line inside a FASTQ record, and a CRLF blank line after
   FASTA sequence lines, which v1.10.0 and the readers both read as an empty
   sequence line.
 - Harness: `fastx_mate_reader_harness` part 3 covers mates 1-3 in FASTQ and
-  FASTA: blank line then header (skip, one WARNING with file and line, output
-  equal to the input without the blank line); blank line then garbage, an
-  indented header or the other format (fatal, file and line); several blank
-  lines in one file (one WARNING, exact count); two input files (a WARNING and
-  a count per file). The identity part (inputs without blank lines) still
-  matches the copy of the v1.10.0 loop, including its `Log.out` lines, with no
-  new WARNING.
-- Pre-existing and unchanged: with FASTA, a `FILE` marker line after a read's
-  sequence lines is read as sequence (the FASTA loop stops only at `@`, `>`,
-  a space or a newline), in v1.10.0 and here alike.
+  FASTA:
+  - one blank line then a header: skipped, one WARNING with file and line,
+    output equal to the input without it;
+  - a blank line then garbage, an indented header or the other format: fatal,
+    naming file and line;
+  - two blank lines in a row (also with spaces and tabs) before a header or
+    garbage: fatal at the second blank line;
+  - several single blank lines plus three at the end of the file: one
+    WARNING, exact count, output equal to the input without them;
+  - two input files with blank lines at the end of each (before the next
+    file's marker, and before end of input): a WARNING and a count per file.
+
+  The identity part (inputs without blank lines) still matches the copy of
+  the v1.10.0 loop, including its `Log.out` lines, with no new WARNING.
+- Pre-existing and unchanged (left documented): with FASTA, a `FILE` marker
+  line right after a read's sequence lines is read as sequence (the FASTA
+  loop stops only at `@`, `>`, a space or a newline), in v1.10.0 and here
+  alike. The harness's two-file FASTA cases therefore end file 0 with one
+  blank line in every mate.
 
 ### 3.8 Multi-lane lists
 

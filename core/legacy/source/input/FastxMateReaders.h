@@ -17,13 +17,18 @@
 // reader's compute permit while it waits for input bytes. A reader never
 // holds a permit while it waits for input or for queue space.
 //
-// Blank lines where a read header is expected (a deliberate change from
-// v1.10.0, which ended the input at such a line in mate 1 and skipped it
-// silently in mates 2 and 3): every mate skips them, with a WARNING at the
-// first one in each file and a per-file count in Log.out, provided the next
-// non-blank line is a read header in that file's format (or the file ends).
-// Anything else after a blank line is fatal. A blank line is never read as a
-// header.
+// Blank lines where a read header is expected (the author's decisions of 29
+// and 30 Sep, a deliberate change from v1.10.0, which ended the input at such
+// a line in mate 1 and skipped it silently in mates 2 and 3). Every mate
+// applies the same rule, and a blank line is never read as a header:
+// - a single blank line followed by a read header in that file's format is
+//   skipped;
+// - blank lines at the end of a file (then end of input or the next file),
+//   any number, are skipped;
+// - a second blank line in a row before the end of the file, or a blank line
+//   followed by anything but a read header, is fatal.
+// Skipped lines get a WARNING at the first one in each file and a per-file
+// count in Log.out.
 
 #include "input/BgzfRangeReader.h"  // BgzfWorkPermitHooks
 
@@ -220,7 +225,9 @@ private:
     uint64_t line_ = 0;
     char laneFormat_ = 0;
     bool afterBlank_ = false;
-    uint64_t firstBlankLine_ = 0;
+    uint64_t firstBlankLine_ = 0;   // first blank line of the current run
+    uint64_t blankRun_ = 0;         // blank lines in the current run
+    uint64_t secondBlankLine_ = 0;  // second blank line of the current run
     std::map<int, bool> blankWarned_;
     std::vector<char> lineBuffer_;
 
