@@ -1,7 +1,7 @@
 # Runbook: RNA mate reader threads for STAR Suite 1.11.0 (2026-09-29)
 
 Status: **approved; implementation in progress.** M1 and M2 are committed
-and G-R0 passes; M0 has not started. Handoff (current state, supersedes this
+and G-R0 passes; M0 is done; M3 is partly run (see the handoff). Handoff (current state, supersedes this
 file where they differ): `docs/handoffs/HANDOFF_RNA_MATE_THREADS_20260929.md`.
 
 - Worktree `/mnt/pikachu/STAR-suite-rna-mate-threads-20260929`, branch
