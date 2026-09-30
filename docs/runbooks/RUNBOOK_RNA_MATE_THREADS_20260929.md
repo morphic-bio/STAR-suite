@@ -677,7 +677,7 @@ STAR-only argv means the source argv minus the host options (`--chromapAtac*`,
 | F5 | CAT-ATAC 100k | `/mnt/pikachu/catatac_gse288996/fastq/GEX/SRR32265752_{2,1}.fastq.gz` (full files) | 2 and 1, with `--readMapNumber 100000` on full files (early stop while readers run ahead) | `…/single_binary_reference_20260928/catatac_trimodal_100k/run1/RUN_STAR_TRIMODAL_SMOKE.sh` | 8 |
 | F6 | Bulk PE, SRR4422207, 500k pairs | `/tmp/starsuite-public-fixture.ZuSe1s/SRR4422207_{1,2}.fastq.gz` (**in /tmp: copy to `$W/fixtures/bulk` first and record sha256**); genome `/storage/autoindex_110_44/bulk_index` | 1; sorted BAM plus `GeneCounts`; unsorted BAM; `--twoPassMode Basic`; `--outFilterType BySJout`; single-end (mate 1 only); plain FASTQ | new argv, no TranscriptVB | 8 and 1 |
 | F7 | scRNA 100k regression, 2 lanes, `zcat` | `tests/run_scrna_gex_100k_regression.py` defaults | 2+3 | the script (a G-S1 row) | default |
-| F8 | Flex | `tests/run_flex_half_probe_100k_smoke.sh`, `tests/run_flex_tiny_public_smoke.sh` | reader stands down; outputs unchanged | the scripts | default |
+| F8 | Flex | `tests/run_flex_half_probe_100k_smoke.sh` (the public tiny Flex smoke is removed in 1.11.0) | reader stands down; outputs unchanged | the scripts | default |
 | F9 | Synthetic | harness inputs; `tests/test_scrna_gex_counts.py` fixture (G-S2) | edge cases; host | — | — |
 
 ### 4.4 Gates

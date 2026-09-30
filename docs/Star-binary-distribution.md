@@ -13,7 +13,8 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   buffered parser (`--readFilesMateThreads auto|off|on`, default `auto`);
   malformed input is handled the same way in every mate; the Launchpad fixes
   from 1.9.5.b and the Multiome compatibility guide, carried on `master`
-  since 1.10.0, are included.
+  since 1.10.0, are included; the public tiny Flex smoke and its test-data
+  fetch are removed.
 - `STAR --version` reports `1.11.0`; upstream and genome compatibility remain
   `2.7.11b` and `2.7.4a`. Existing indexes do not need rebuilding.
 - The bundled catalog is still the pinned 1.9.5 snapshot; its legacy

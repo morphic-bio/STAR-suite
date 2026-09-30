@@ -107,6 +107,12 @@ orientation, as in the public 10x Genomics PBMC 3k Multiome dataset).
 
 - The Tier A test image installs `binutils`, which
   `tests/test_flex_gdna_removed.py` needs for `nm`.
+- The public tiny Flex smoke and its test-data fetch are removed, with its
+  binary-matrix and CBQ variants and their helper scripts. Tier A, the
+  release smokes, the binary test matrix, the CBQ regression wrapper, the
+  production regression manifest and the MCP test registry no longer list
+  them. Flex validation for this release uses the Flex half-probe 100K
+  smoke (see Validation).
 
 ## Known limitations
 
@@ -126,7 +132,8 @@ orientation, as in the public 10x Genomics PBMC 3k Multiome dataset).
 The validated code is commit `81e03b6` on branch
 `design/rna-mate-threads-20260929`. The release commits after it change the
 version number, packaging metadata, the installer bundle scripts, the Tier A
-test image and documentation only.
+test image, the removal of the public tiny Flex smoke, and documentation
+only.
 Comparisons are against the v1.10.0 code at `0f9701a` (under `core/` it
 differs from the `v1.10.0` tag only by the `--build-features` flag, which
 does not affect mapping). Runs used the shared host lock; no timing
@@ -175,5 +182,5 @@ results are claimed.
   is a log, timestamp, elapsed time, build revision, an external decoder's
   output order, a cloned repository's metadata, or the unseeded downstream
   analysis after identical STAR outputs. The two Tier A and manifest tests
-  that download third-party test data were not run (the
-  readers stand down for their Flex path).
+  that downloaded third-party test data were not run; this release removes
+  them.

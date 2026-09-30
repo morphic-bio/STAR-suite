@@ -125,7 +125,6 @@ documented Make commands instead.
     `tests/run_spatial_r1_tap_guard.sh`,
     `tests/test_visium_hd_gex_sidecar_concurrency.py`,
     `tests/slam/test_snp_mask_build_smoke.sh`,
-    `tests/run_flex_tiny_public_smoke.sh`, and
     `tests/run_molecule_first_native_smoke.sh`,
     `tests/run_adapter_clip_synthetic_test.sh`,
     `tests/run_transcriptvb_scatter_gather_smoke.sh`,

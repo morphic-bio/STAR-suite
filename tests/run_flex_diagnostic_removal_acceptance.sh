@@ -27,5 +27,4 @@ run htslib_discovery python3 tests/test_htslib_build_discovery.py
 run scrna_exact python3 tests/test_scrna_gex_counts.py --outdir "$out/scrna"
 run solo_smoke bash tests/run_solo_smoke.sh
 run cr_golden bash tests/run_scrna_sidecar_off_golden.sh
-run flex_tiny env WORKDIR="$out/flex_tiny" bash tests/run_flex_tiny_public_smoke.sh
 echo "PASS: diagnostic-removal acceptance; $out/summary.tsv"

@@ -83,10 +83,8 @@ run_case cbq_process_features_adapter tests/run_cbq_pf_adapter_smoke.sh
 
 if [[ "$RUN_NETWORK" == "1" ]]; then
     run_case binseq_upstream_arc_fixture tests/run_binseq_upstream_fixture_smoke.sh
-    run_case cbq_flex_tiny_public tests/run_cbq_flex_tiny_public_smoke.sh
 else
     printf 'SKIP\tbinseq_upstream_arc_fixture\tRUN_NETWORK=0\n' | tee -a "$SUMMARY"
-    printf 'SKIP\tcbq_flex_tiny_public\tRUN_NETWORK=0\n' | tee -a "$SUMMARY"
 fi
 
 echo "PASS: CBQ E2E/module regression suite completed at $OUT_ROOT"

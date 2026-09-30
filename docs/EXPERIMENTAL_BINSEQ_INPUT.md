@@ -67,9 +67,8 @@ and STAR/process_features/Chromap adapter surfaces are documented in
   count-only FlexPipeline runs
   (`--flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1`, which
   `--flex yes` sets by default from 1.9.4) use the CBQ-native lane producer.
-  `tests/run_cbq_flex_tiny_public_smoke.sh` covers FASTQ-vs-CBQ parity on a generated public tiny FLEX fixture; the host-local
-  SC2300771 100K FLEX downsample also passed count parity and order-normalized
-  BAM payload parity.
+  The host-local SC2300771 100K FLEX downsample passed count parity and
+  order-normalized BAM payload parity.
 - FLEX count-only no-genome production is the first full-size topline CBQ use
   case. The timings in this bullet and under "How This Differs From FASTQ"
   were measured before release 1.9.4, when FASTQ.gz was read through the
@@ -271,16 +270,10 @@ Downsampled CBQ E2E/module regression suite:
 BQTOOLS=/path/to/bqtools tests/run_cbq_e2e_module_regression.sh
 ```
 
-Include network/public-fixture CBQ smokes, including FLEX tiny public:
+Include the network/public-fixture CBQ smoke:
 
 ```bash
 RUN_NETWORK=1 BQTOOLS=/path/to/bqtools tests/run_cbq_e2e_module_regression.sh
-```
-
-FLEX FASTQ-vs-CBQ public tiny smoke only:
-
-```bash
-tests/run_cbq_flex_tiny_public_smoke.sh
 ```
 
 Upstream ARC paired-CBQ fixture smoke:

@@ -339,7 +339,6 @@ Core smoke and regression coverage:
 - `tests/run_cbq_solo_e2e_smoke.sh`
 - `tests/run_cbq_pf_adapter_smoke.sh`
 - `tests/run_cbq_ocm_composite_smoke.sh`
-- `tests/run_cbq_flex_tiny_public_smoke.sh`
 - `tests/run_slam_cbq_divergence_harness.sh`
 - `tests/run_cbq_e2e_module_regression.sh`
 - `tests/production_module_regression_manifest.tsv`
