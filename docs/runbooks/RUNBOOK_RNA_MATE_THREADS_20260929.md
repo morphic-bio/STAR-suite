@@ -354,8 +354,8 @@ A new module `input/FastxMateReaders.{h,cpp}` holds one reader thread per mate.
      `input-fastx  fastx-mate-readers  contract` to
      `tests/production_module_regression_manifest.tsv`.
 9. **Docs (M6).** `parametersDefault` text, `docs/RELEASE_NOTES_v1.11.0.md`
-   (draft; a local 1.10.1 notes file already exists for unreleased Launchpad
-   content), and the README option list if it lists input options. Keep the
+   (draft; the unreleased 1.10.1 Launchpad notes were later folded into
+   it), and the README option list if it lists input options. Keep the
    runbook and handoff current.
 
 ### 3.4 Chunk text that must be reproduced (the byte rules)

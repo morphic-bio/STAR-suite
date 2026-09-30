@@ -1,7 +1,21 @@
-star-suite (1.10.0-1) unstable; urgency=medium
+star-suite (1.11.0-1) unstable; urgency=medium
 
+  * Parse each FASTQ/FASTA mate on its own reader thread with a buffered
+    parser (--readFilesMateThreads auto|off|on, default auto); the mapping
+    threads receive the same input as before.
+  * Handle malformed FASTQ/FASTA input the same way in every mate: skip a
+    single blank line before a read header and blank lines at the end of a
+    file, and stop at a second blank line in a row; map the reads all mates
+    have when their counts differ, with a WARNING; stop when lane markers are
+    out of step or mates are in different formats.
   * Include the portable Launchpad launcher, bundled browser assets and
     release test gate from 1.9.5.b; keep Multiomics ownership of the engine.
+  * Install binutils in the Tier A test image.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Wed, 30 Sep 2026 12:00:00 +0000
+
+star-suite (1.10.0-1) unstable; urgency=medium
+
   * Remove every dependency on other suites: STAR no longer links Chromap
     Suite or RapidMACS. The --chromapAtac*, --multiomeAtac* and ATAC-only
     permit parameters, the libchromap contract, the multiome orchestration,

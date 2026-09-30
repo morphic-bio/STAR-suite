@@ -1,16 +1,20 @@
 # STAR Suite v1.11.0 Release Notes
 
-Unreleased. The candidate source is branch `design/rna-mate-threads-20260929`
-(the validated commit is named under Validation); tagging, the version bump
-and packaging are part of the separate release step. Upstream STAR remains
-`2.7.11b`, genome-index compatibility remains `2.7.4a`, and legacy
-compatibility remains `2.7.1a`. Existing indexes do not need rebuilding.
+Date: 2026-09-30
 
 STAR Suite 1.11.0 moves FASTQ/FASTA parsing out of the mapping threads' input
 lock. Each mate is parsed on its own reader thread, and the mapping threads
 only pair the parsed reads, so mapping sees the same input as before. A new
 option controls it. Malformed input is now handled the same way in every
-mate.
+mate. The release also includes the Launchpad fixes from 1.9.5.b and the
+Multiome compatibility guide, which `master` carried after 1.10.0 as
+unreleased 1.10.1 changes.
+
+`STAR --version` reports `1.11.0`. Debian source packaging uses `1.11.0-1`;
+Ubuntu packages use `1.11.0-1~ubuntu22.04.1` and `1.11.0-1~ubuntu24.04.1`.
+Upstream STAR remains `2.7.11b`, genome-index compatibility remains `2.7.4a`,
+and legacy compatibility remains `2.7.1a`. Existing indexes do not need
+rebuilding.
 
 ## FASTQ/FASTA mates parsed on their own reader threads
 
@@ -36,9 +40,9 @@ mate.
   do), only while parsing bytes already in memory; a reader never holds a
   permit while it waits for input or queue space. The host interface and
   the permit allocator are unchanged. The end-of-mapping permit telemetry
-  line in `Log.out` counts acquisitions up to the end of GEX mapping only;
-  with faster GEX mapping it includes less of any concurrent feature-arm
-  work, which is otherwise unchanged.
+  line in `Log.out` counts acquisitions up to the end of GEX mapping only, so
+  it can include a different share of concurrent feature-arm work than in
+  v1.10.0; the feature arm itself is unchanged.
 - `Log.out` gets a per-mate reader summary when the input closes.
 - Debug: with `STAR_INPUT_CHUNK_TRACE`, setting
   `STAR_INPUT_CHUNK_TRACE_DIGEST=1` adds the CRC32 of each mate's chunk text
@@ -75,8 +79,38 @@ remains.
   structure) and **mates in different formats** (FASTQ in one, FASTA in
   another) are now fatal.
 
+## Launchpad fixes from 1.9.5.b
+
+- The portable configuration and forms, the relocatable installed launcher
+  (`star-suite-launchpad`), bundled browser assets, the runtime capability
+  report (`STAR --build-features`) and the Launchpad release test gate are
+  included.
+- The pinned catalog's legacy Multiome recipe gains input and runtime
+  validation, and managed jobs, logs and cancellation, for an explicitly
+  selected external 1.9.5.b runtime. Standalone STAR reports
+  `chromap_atac:false` and cannot run it.
+- The built-in `morphic_multiome` schema and the native Chromap integration
+  removed in 1.10.0 stay removed. Multiome processing belongs to Multiomics
+  Suite.
+
+## Multiome compatibility guide
+
+[Multiome ownership and compatibility](LAUNCHPAD_MULTIOME.md) documents the
+tested STAR 1.9.5.b build and its Launchpad and command-line setup. It shows
+how to check the ATAC barcode read's length and orientation, and when to use
+`--chromap-atac-read-format bc:0:15:+` (16-base barcode reads in forward
+orientation, as in the public 10x Genomics PBMC 3k Multiome dataset).
+
+## Continuous integration
+
+- The Tier A test image installs `binutils`, which
+  `tests/test_flex_gdna_removed.py` needs for `nm`.
+
 ## Known limitations
 
+- The pinned official recipe catalog still lists the legacy
+  `starsuite.official/multiome` recipe. It needs separately built 1.9.5.b
+  executables, and STAR 1.10 and later refuse it before writing any output.
 - Unchanged from v1.10.0: with several FASTA input files per mate, a lane
   marker right after a read's sequence lines is read as sequence (the FASTA
   loop stops only at `@`, `>`, a space or a newline). With the readers
@@ -88,7 +122,9 @@ remains.
 ## Validation
 
 The validated code is commit `81e03b6` on branch
-`design/rna-mate-threads-20260929`; later commits change documentation only.
+`design/rna-mate-threads-20260929`. The release commits after it change the
+version number, packaging metadata, the Tier A test image and documentation
+only.
 Comparisons are against the v1.10.0 code at `0f9701a` (under `core/` it
 differs from the `v1.10.0` tag only by the `--build-features` flag, which
 does not affect mapping). Runs used the shared host lock; no timing
