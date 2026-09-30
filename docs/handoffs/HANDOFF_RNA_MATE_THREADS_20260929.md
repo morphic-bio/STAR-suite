@@ -13,11 +13,24 @@ milestone 6 gates against the release merge commit. No tag, no push, no
 GitHub release until the author's go.
 
 - Release commits on this branch: `c37a988` (binutils in the Tier A image),
-  `63a661a` (Multiome guide: ATAC barcode read layout; draft paragraph
-  marking 1.9.5.b as an interim build, **for the author's review before any
-  push**), `1cc3906` (version 1.11.0, `debian/changelog` 1.11.0-1,
-  distribution entry, final notes with the unreleased 1.10.1 content folded
-  in, `RELEASE_NOTES_v1.10.1.md` removed).
+  `63a661a` (Multiome guide: ATAC barcode read layout and the paragraph
+  marking 1.9.5.b as an interim build), `1cc3906` (version 1.11.0,
+  `debian/changelog` 1.11.0-1, distribution entry, final notes with the
+  unreleased 1.10.1 content folded in, `RELEASE_NOTES_v1.10.1.md` removed),
+  `11520f1` (the installer bundle carries and installs
+  `star-suite-launchpad`; notes updated), `a68d46d` (README Launchpad link
+  points at `mcp_server/README.md`), `86f6683` (review marker removed from
+  the interim paragraph).
+- Author decisions of 30 Sep on the first release-check report:
+  - installer-bundle fix approved (`11520f1`);
+  - the README link to `plans/star_launchpad_v1_runbook.md` (a design
+    runbook never in this repository) fixed to point at the Launchpad
+    server documentation (`a68d46d`). `mcp_server/README.md` line 14 still
+    names that runbook in plain text (not a link); left as is;
+  - **the interim paragraph and the ATAC barcode note in
+    `docs/LAUNCHPAD_MULTIOME.md` approved as written (30 Sep).** The
+    "Draft for review" marker is removed; the texts are otherwise
+    unchanged (`86f6683`).
 - Version pins: only `core/legacy/source/VERSION`, `debian/changelog` and
   `docs/Star-binary-distribution.md` carry the version; the Dockerfile and
   workflows take it from the tag, and the repository has no other
@@ -25,46 +38,23 @@ GitHub release until the author's go.
 - Merge: `--no-ff` onto `master`'s tip `0f9701a` (= `origin/master`), in the
   style of the v1.10.0 merge. The local `master` ref is checked out in the
   shared checkout `/mnt/pikachu/STAR-suite` (at `81ade02`, behind
-  `origin/master`), which this work must not touch; the merge is made in a
-  release clone, and this branch is fast-forwarded to it so the commit is in
-  the shared repository. Moving `master` is then
+  `origin/master`), which this work must not touch; the merge is made in the
+  release clone `$W/release/STAR-suite`, and this branch is fast-forwarded
+  to it so the commit is in the shared repository. Moving `master` is then
   `git -C /mnt/pikachu/STAR-suite merge --ff-only <merge>` (as in the v1.10.0
   procedure), for the author.
-- Code validated by the gates: `81e03b6` (sections below).
-- Release checks on the merge `d28a897` (clean clone
-  `$W/release/check_P`, driver `$W/release/run_release_checks.sh`, results
-  in `$W/release/checks/status.tsv` and per-step logs). All pass except the
-  two installer-bundle validations and one pre-existing link:
-  - notes, version and `debian/changelog` (1.11.0-1), snapshot validation
-    (11 recipes, 10 evidence records), dependency-generation tests: pass;
-  - relative links: fail on the README link to
-    `plans/star_launchpad_v1_runbook.md`, broken since v1.10.0, not fixed;
-  - Launchpad: `app.js` check and pytest (125 passed, 19 skipped; the skips
-    need a sibling `bwb-nextflow-utils` checkout): pass;
-  - partial builds (9 targets) and scRNA exact counts on core and
-    core-static: pass; STAR reports 1.11.0;
-  - Tier A in the Tier A image: 14 of 14 pass, without
-    `run_flex_tiny_public_smoke` (author's decision, 30 Sep); `nm` present;
-  - release artifacts: build images, both tarballs, installer bundle, the
-    three tarball runtime checks, tarball and bundle release smokes (the
-    smokes without the two tiny-public smokes, from clone
-    `$W/release/check_Q`), both debs, the three deb install checks, source
-    package and checksums: pass;
-  - **installer-bundle validation on Ubuntu 22.04 and 24.04: fail (exit
-    127).** `container_check_installer_bundle.sh` runs
-    `$prefix/bin/star-suite-launchpad --help`, but the installer bundle does
-    not carry the launcher. The 1.9.5.b Launchpad commit `9a856e5` added the
-    launcher to the tarballs, the tarball installer and this check, not to
-    `build_installer_bundle.sh` (fixed tool list) or
-    `install_compat_bundle.sh` (`COMPANION_TOOLS`). Pre-existing on
-    `origin/master`; the release workflow would stop at "Validate installer
-    bundle". Proposed fix, not committed (outside the authorized release
-    steps): add `star-suite-launchpad` to both lists
-    (`$W/release/installer_bundle_launchpad_fix.patch`). With it, a bundle
-    rebuilt from the same tarballs passes both installer validations and
-    the bundle smokes (`$W/release/checks_fixprobe/`). Committing it changes
-    the merge hash, so Multiomics should not pin `d28a897` until the author
-    decides.
+- The first merge, `d28a897`, is superseded. The branch was rebased off it
+  (its handoff commit `3713ab9` became `8ee533b`) so the new merge does not
+  contain it.
+- Code validated by the gates: `81e03b6` (sections below). The release
+  commits after it change no code under `core/`.
+- First release-check run, on `d28a897` (results in `$W/release/checks/`):
+  everything passed except the two installer-bundle validations (exit 127:
+  the bundle lacked `star-suite-launchpad`; `9a856e5` had added it to the
+  tarballs, the tarball installer, the debs and the check, not to
+  `build_installer_bundle.sh` or `install_compat_bundle.sh`) and the
+  relative-link check (the README link above). The fix was probed on the
+  same tarballs in `$W/release/checks_fixprobe/`.
 
 Earlier stop (resolved): the first F2 dry run was denied ("[Safety Bypass
 Flag]") because of `--skip-active-check`; the coordinator pointed out that
@@ -341,17 +331,10 @@ f7vanilla, f7modern, f7modernbam.
 
 ## Next steps
 
-1. Author: decide the installer-bundle fix above. If approved, commit the
-   patch on this branch, redo the `--no-ff` merge onto `0f9701a`, and rerun
-   the release checks on the new merge (at least the installer bundle build,
-   both installer validations and the bundle smokes). Multiomics pins the
-   final merge hash.
-2. Author: review the draft interim paragraph and the barcode note in
-   `docs/LAUNCHPAD_MULTIOME.md` before any push.
-3. Author: move `master` in the shared checkout
+1. Author: move `master` in the shared checkout
    (`git -C /mnt/pikachu/STAR-suite merge --ff-only <merge>`), then tag and
    push per the v1.10.0 procedure. Not done here.
-4. Optional, if the author wants it: a G-M1 rerun with a Multiomics
+2. Optional, if the author wants it: a G-M1 rerun with a Multiomics
    development build against `81e03b6` (G-M1 ran against `4bc3b8f`, before
    the buffered parser).
 
