@@ -10,7 +10,9 @@
 #include "input/FastxInputModule.h"
 #include "input/CbqStarAdapter.h"
 #include "input/BgzfStarAdapter.h"
+#include "input/FastxMateReaders.h"
 #include "SpatialR1FastqTap.h"
+#include <zlib.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -161,7 +163,36 @@ const char* inputChunkTraceSource(const Parameters& P) {
     if (P.readFilesTypeN == 1 && P.fastxInputActive) {
         return "fastx";
     }
+    if (P.fastxMateReaders) {
+        return "mate-threads";
+    }
     return "legacy";
+}
+
+// STAR_INPUT_CHUNK_TRACE_DIGEST=1 adds the CRC32 of each mate's chunk text to
+// the trace, so two builds can be shown to hand mapping the same input.
+bool inputChunkTraceDigest() {
+    static const char* value = std::getenv("STAR_INPUT_CHUNK_TRACE_DIGEST");
+    return value != nullptr && std::strcmp(value, "1") == 0;
+}
+
+void writeChunkDigest(std::ofstream& out, const ReadAlignChunk& chunk, uint32 imate) {
+    const Parameters& P = chunk.P;
+    const bool textChunk = !P.bgzfCoreActive && !(P.readFilesTypeN == 20 && P.cbqInputActive);
+    if (!textChunk || imate >= P.readNends) {
+        out << '-';
+        return;
+    }
+    const uint64 size = chunk.chunkInSizeBytesTotal[imate];
+    uLong crc = crc32(0L, Z_NULL, 0);
+    const Bytef* data = reinterpret_cast<const Bytef*>(chunk.chunkIn[imate]);
+    uint64 done = 0;
+    while (done < size) {
+        const uInt step = static_cast<uInt>(std::min<uint64>(size - done, 1U << 30));
+        crc = crc32(crc, data + done, step);
+        done += step;
+    }
+    out << std::hex << crc << std::dec;
 }
 
 void writeInputChunkTrace(const ReadAlignChunk& chunk,
@@ -184,7 +215,11 @@ void writeInputChunkTrace(const ReadAlignChunk& chunk,
     if (out.good()) {
         if (!headerWritten) {
             out << "chunk_index\tthread\tsource\tread_start\tread_end\tread_count"
-                << "\tmate1_bytes\tmate2_bytes\twork_bytes\tread_files_index\tno_reads_left\n";
+                << "\tmate1_bytes\tmate2_bytes\twork_bytes\tread_files_index\tno_reads_left";
+            if (inputChunkTraceDigest()) {
+                out << "\tmate1_crc32\tmate2_crc32";
+            }
+            out << "\n";
             headerWritten = true;
         }
         const uint64 readStart = chunkReadN == 0 ? chunkReadStart : chunkReadStart + 1;
@@ -204,7 +239,14 @@ void writeInputChunkTrace(const ReadAlignChunk& chunk,
             << mate2Bytes << '\t'
             << chunkWorkBytes << '\t'
             << readFilesIndex << '\t'
-            << (noReadsLeft ? 1 : 0) << '\n';
+            << (noReadsLeft ? 1 : 0);
+        if (inputChunkTraceDigest()) {
+            out << '\t';
+            writeChunkDigest(out, chunk, 0);
+            out << '\t';
+            writeChunkDigest(out, chunk, 1);
+        }
+        out << '\n';
     }
     pthread_mutex_unlock(&traceMutex);
 }
@@ -825,6 +867,81 @@ void processCbqRangeChunks(ReadAlignChunk& chunk) {
     chunk.noReadsLeft = true;
 }
 
+// Some passes set their flags after the input was opened. Until the readers
+// start, the streams are untouched, so the single-threaded loop can still
+// take over. Called under mutexInRead.
+bool fastxMateReadersUsable(Parameters& P) {
+    if (!P.fastxMateReaders) {
+        return false;
+    }
+    if (P.fastxMateReaders->started()) {
+        return true;
+    }
+    string reason;
+    if (P.quant.slam.yes || P.quant.slam.autoTrimDetectionPass ||
+        P.quant.slam.perFileProcessing || P.quant.slam.skipToFileIndex > 0) {
+        reason = "SLAM passes read the input streams directly";
+    } else if (P.quant.transcriptVB.yes || P.quant.transcriptVB.inDetectionMode) {
+        reason = "TranscriptVB online model learning is order-sensitive";
+    }
+    if (reason.empty()) {
+        return true;
+    }
+    if (P.readFilesMateThreads == "on") {
+        exitWithError("EXITING because of fatal PARAMETER ERROR: --readFilesMateThreads on could not be activated: " +
+                          reason + "\nSOLUTION: use --readFilesMateThreads auto or off for this run.\n",
+                      std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+    P.inOut->logMain << "Fastx mate readers: not active (" << reason << ")\n";
+    P.fastxMateReaders->stopAndJoin();
+    P.fastxMateReaders.reset();
+    return false;
+}
+
+// Fills this chunk from the per-mate reader threads (input/FastxMateReaders).
+// The text, the chunk boundaries, iReadAll, readFilesIndex and the Log.out
+// lines are those of the single-threaded loop below; only the parsing has
+// moved to the reader threads. Called under mutexInRead.
+void fillChunkFromMateReaders(ReadAlignChunk& chunk) {
+    Parameters& P = chunk.P;
+    star::input::FastxChunkFillContext context;
+    context.chunkInSizeBytes = P.chunkInSizeBytes;
+    context.chunkArrayBytes = P.chunkInSizeBytesArray;
+    context.readMapNumber = P.readMapNumber;
+    context.fastqReadIdNumber = P.outSAMreadIDnumber;
+    context.fastaReadIdNumber = (P.outSAMreadID == "Number");
+    context.thread = chunk.iThread;
+    context.iReadAll = &P.iReadAll;
+    context.readFilesIndex = &P.readFilesIndex;
+    context.onLaneStart = [&P](int lane) {
+        pthread_mutex_lock(&g_threadChunks.mutexLogMain);
+        P.inOut->logMain << "Starting to map file # " << lane << "\n";
+        for (uint imate = 0; imate < P.readFilesNames.size(); imate++) {
+            P.inOut->logMain << "mate " << imate + 1 << ":   "
+                             << P.readFilesNames.at(imate).at(lane) << "\n";
+        }
+        P.inOut->logMain << flush;
+        pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
+    };
+    context.onLog = [&P](const string& line) {
+        P.inOut->logMain << line << endl;
+    };
+    context.onWarning = [&P](const string& text) {
+        warningMessage(text, std::cerr, P.inOut->logMain, P);
+    };
+    context.onBadRecordStart = [&P](const string& word, const string& rest) {
+        ostringstream errOut;
+        errOut << ERROR_OUT << " EXITING because of FATAL ERROR in input reads: wrong read ID line format: the read ID lines should start with @ or > \n";
+        errOut << "Offending line for read # " << P.iReadAll + 1 << "\n" << word << " " << rest << "\n";
+        errOut << "SOLUTION: verify and correct the input read files\n";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+    };
+    context.onFatal = [&P](const string& text) {
+        exitWithError(text, std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+    };
+    P.fastxMateReaders->fillChunk(chunk.chunkIn, chunk.chunkInSizeBytesTotal.data(), context);
+}
+
 } // namespace
 
 
@@ -1102,6 +1219,8 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
                     P.readFilesIndex = static_cast<int>(record.lane_index);
                     fastxAppendRecord(*this, record);
                 }
+            } else if (fastxMateReadersUsable(P)) {
+                fillChunkFromMateReaders(*this);
             } else {
             while (chunkInSizeBytesTotal[0] < P.chunkInSizeBytes && chunkInSizeBytesTotal[1] < P.chunkInSizeBytes && P.inOut->readIn[0].good() && P.inOut->readIn[1].good()) {
                 char nextChar=P.inOut->readIn[0].peek();

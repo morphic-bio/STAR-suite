@@ -132,7 +132,9 @@ CMD ["/usr/local/bin/STAR", "--version"]
 FROM suite-base AS test-tier-a
 
 ENV DEBIAN_FRONTEND=noninteractive
+# binutils provides nm for tests/test_flex_gdna_removed.py.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    binutils \
     git \
     git-lfs \
     python3 \

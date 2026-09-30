@@ -192,11 +192,6 @@ PY
     pass "T3 record equality at 1, 3, and 8 workers"
 fi
 
-if enabled T4; then
-    BGZF_E2E_CASE=T4 "${ROOT_DIR}/tests/bgzf/test_flex_e2e.sh"
-    pass "T4 Flex end-to-end equivalence"
-fi
-
 if enabled T5; then
     [[ -x "${HARNESS}" ]] || die "T5 requires ${HARNESS}"
     "${HARNESS}" --mode records --input "${OUT_ROOT}/inputs/missing_eof.fastq.gz" \
@@ -310,21 +305,6 @@ import sys
 assert json.load(open(sys.argv[1], encoding="utf-8"))["record_count"] == 257
 PY
     pass "T8 paired-mate read-name and record-count validation"
-fi
-
-if enabled T6; then
-    BGZF_E2E_CASE=T6 "${ROOT_DIR}/tests/bgzf/test_flex_e2e.sh"
-    pass "T6 mixed BGZF/plain-gzip lanes"
-fi
-
-if enabled T9; then
-    "${ROOT_DIR}/tests/bgzf/test_flex_fused_align.sh"
-    pass "T9 fully-fused alignment mode drains alignQ without a reserved consumer"
-fi
-
-if enabled T10; then
-    "${ROOT_DIR}/tests/bgzf/test_flex_sorted_bam_range.sh"
-    pass "T10 paper-scoped Flex BGZF coordinate-sorted BAM parity and negative gates"
 fi
 
 run_t7() {

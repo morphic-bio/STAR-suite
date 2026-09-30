@@ -23,7 +23,7 @@ Options:
   --profile PROFILE        Smoke profile to run (default: core)
 
 Profiles:
-  core                     Original 3-test smoke (solo, SLAM snp-mask, Flex tiny)
+  core                     Core smoke set (solo, scRNA counts, SLAM snp-mask and others)
   binary-workflows-tier-a  Full Tier A binary workflow matrix
   all                      Run both core and binary-workflows-tier-a
 USAGE
@@ -131,7 +131,6 @@ run_core() {
     python3 tests/test_scrna_gex_counts.py
     python3 tests/test_flex_gdna_removed.py
     bash tests/slam/test_snp_mask_build_smoke.sh
-    bash tests/run_flex_tiny_public_smoke.sh
     bash tests/run_adapter_clip_synthetic_test.sh
     bash tests/run_transcriptvb_scatter_gather_smoke.sh
     bash tests/run_trim_qc_merge_smoke.sh

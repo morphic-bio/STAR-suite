@@ -4,6 +4,7 @@
 #include "input/FastxInputModule.h"
 #include "input/BgzfBlockReader.h"
 #include "input/BgzfPipeGroup.h"
+#include "input/FastxMateReaders.h"
 #include "ThreadControl.h"
 #include "GlobalVariables.h"
 #include <fstream>
@@ -371,6 +372,98 @@ bool prepareCbqCoreRangeTasks(Parameters& P,
     return true;
 }
 
+// Per-mate reader threads (input/FastxMateReaders) for the established Fastx
+// path. Rejected runs keep the single-threaded fill loop.
+bool fastxMateThreadsGateReject(Parameters& P, string& reason) {
+    auto reject = [&](const string& message) {
+        reason = message;
+        return true;
+    };
+    if (P.readFilesMateThreads == "off") {
+        return reject("disabled by --readFilesMateThreads off");
+    }
+    if (P.readFilesTypeN != 1) {
+        return reject("input is not Fastx");
+    }
+    if (P.readNends < 1 || P.readNends > MAX_N_MATES || P.readFilesNames.size() != P.readNends) {
+        return reject("unsupported number of read mates");
+    }
+    if (P.bgzfCoreActive) {
+        return reject("the Flex BGZF core reader is active");
+    }
+    if (P.pSolo.flexMode || lowerCopyLocal(P.pSolo.flexModeStr) == "yes") {
+        return reject("Flex runs read their own lanes");
+    }
+    if (P.quant.slam.yes || P.quant.slam.autoTrimDetectionPass ||
+        P.quant.slam.perFileProcessing || P.quant.slam.skipToFileIndex > 0) {
+        return reject("SLAM passes read the input streams directly");
+    }
+    if (P.quant.transcriptVB.yes ||
+        std::find(P.quant.mode.begin(), P.quant.mode.end(), "TranscriptVB") != P.quant.mode.end()) {
+        return reject("TranscriptVB online model learning is order-sensitive");
+    }
+    if (P.batchMode || P.batchModeInt != 0 || P.quant.slam.batchMode ||
+        P.quant.slam.batchModeInt != 0) {
+        return reject("batch mode reopens its inputs per batch");
+    }
+    if (P.soloSpatialR1FastqTapEnabled || P.spatialR1FastqTapWriter != nullptr) {
+        return reject("the spatial raw-R1 tap requires the established Fastx path");
+    }
+    reason.clear();
+    return false;
+}
+
+// Reader threads take MAP-domain decode permits exactly as the BGZF inflate
+// workers do, and only while they parse bytes already in memory.
+star::input::BgzfWorkPermitHooks mapDecodePermitHooks() {
+    star::input::BgzfWorkPermitHooks hooks;
+    hooks.acquire = [](void*) -> uint64_t {
+        return g_threadChunks.mapPermitEnabled() ? g_threadChunks.mapPermitAcquireForDomain(
+            ThreadControl::PermitDomain::MAP, ThreadControl::PermitWork::BGZF) : UINT64_MAX;
+    };
+    hooks.release = [](void*, uint64_t wait, uint64_t units, uint64_t bytes, uint64_t ns) {
+        if (wait != UINT64_MAX) g_threadChunks.mapPermitReleaseForDomain(
+            ThreadControl::PermitDomain::MAP, wait, units, bytes, ns, ThreadControl::PermitWork::BGZF);
+    };
+    hooks.observe = [](void*, const void* reader, uint64_t ready, uint64_t outstanding,
+                       uint64_t capacity, unsigned workers, int waiting, int live) {
+        g_threadChunks.mapPermitObserveDecode(ThreadControl::PermitDomain::MAP,
+            reader, ready, outstanding, capacity, workers, waiting, live);
+    };
+    return hooks;
+}
+
+void prepareFastxMateReaders(Parameters& P) {
+    P.fastxMateReaders.reset();
+    string reason;
+    if (fastxMateThreadsGateReject(P, reason)) {
+        if (P.readFilesMateThreads == "on") {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETER ERROR: --readFilesMateThreads on could not be activated: "
+                   << reason << "\n";
+            errOut << "SOLUTION: use --readFilesMateThreads auto or off for this run.\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+        P.inOut->logMain << "Fastx mate readers: not active (" << reason << ")\n";
+        return;
+    }
+    std::vector<std::istream*> streams;
+    for (uint imate = 0; imate < P.readNends; ++imate) {
+        streams.push_back(&P.inOut->readIn[imate]);
+    }
+    star::input::FastxMateLimits limits;
+    limits.nameSeqLineMax = DEF_readNameSeqLengthMax;
+    limits.seqLineMax = DEF_readSeqLengthMax;
+    limits.fastaReadIdNumber = (P.outSAMreadID == "Number");
+    P.fastxMateReaders.reset(new star::input::FastxMateReaderGroup(
+        streams, P.readFilesIndex, mapDecodePermitHooks(), limits, P.readFilesNames));
+    P.inOut->logMain << "Fastx mate readers: active (" << P.readNends << " mate"
+                     << (P.readNends == 1 ? "" : "s") << ", batches of "
+                     << star::input::kFastxMateBatchRecords << " reads counted from the start of each file, "
+                     << star::input::kFastxMateBatchesInFlight << " batches in flight per mate; "
+                     << "reader threads take MAP decode permits when the permit pool is enabled)\n";
+}
+
 void fatalCbqRangeMode(Parameters& P, const string& reason) {
     ostringstream errOut;
     errOut << "EXITING because of fatal input ERROR: --readFilesCbqRangeMode range could not be activated.\n";
@@ -385,6 +478,10 @@ void Parameters::openReadsFiles()
     // Reset FIFO list to avoid stale entries when reopening (e.g. SLAM auto-trim detection pass)
     readFilesInTmp.clear();
     bgzfPipes.reset();
+    if (fastxMateReaders) {
+        fastxMateReaders->stopAndJoin();
+        fastxMateReaders.reset();
+    }
     // Check number of mates BEFORE opening files
     // Use readNends if available (set during readFilesInit), otherwise count readFilesIn
     uint readFilesNmates = readNends;
@@ -767,5 +864,6 @@ void Parameters::openReadsFiles()
     if (readFilesTypeN==10) {//SAM file - skip header lines
         readSAMheader(readFilesCommandString, readFilesNames.at(0));
     };
- 
+
+    prepareFastxMateReaders(*this);
 };

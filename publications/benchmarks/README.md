@@ -51,4 +51,3 @@ checks rather than the full paper fixtures:
 - `tests/run_solo_smoke.sh`
 - `tests/slam/test_snp_mask_build_smoke.sh`
 - `scripts/run_slam_100k_se_pe_smoke.sh` (private local FASTQ fixture; use for pre-production PE validation, not public CI)
-- `tests/run_flex_tiny_public_smoke.sh`

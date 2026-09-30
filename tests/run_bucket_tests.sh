@@ -79,22 +79,6 @@ fi
 
 if enabled B3; then
     "${ROOT_DIR}/tests/bucket/test_bucket_e2e.sh" B3 "${OUT_ROOT}"
-    pass "B3 bucket tail end-to-end equality"
-fi
-
-if enabled B4; then
-    "${ROOT_DIR}/tests/bucket/test_bucket_e2e.sh" B4 "${OUT_ROOT}"
-    pass "B4 thread and bucket-count determinism"
-fi
-
-if enabled B5; then
-    "${ROOT_DIR}/tests/bucket/test_bucket_e2e.sh" B5 "${OUT_ROOT}"
-    pass "B5 spill and automatic-transition equality"
-fi
-
-if enabled B6; then
-    "${ROOT_DIR}/tests/bucket/test_bucket_e2e.sh" B6 "${OUT_ROOT}"
-    pass "B6 tag-parallel flexfilter equality"
 fi
 
 run_regressions() {

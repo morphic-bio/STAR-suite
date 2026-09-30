@@ -4,6 +4,24 @@
 
 Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction install and clear provenance.
 
+## Minor Release v1.11.0 (2026-09-30)
+
+- Release tag: `v1.11.0`; notes: `docs/RELEASE_NOTES_v1.11.0.md`.
+- Debian source version: `1.11.0-1`; Ubuntu binaries:
+  `1.11.0-1~ubuntu22.04.1` and `1.11.0-1~ubuntu24.04.1`.
+- Scope: each FASTQ/FASTA mate is parsed on its own reader thread with a
+  buffered parser (`--readFilesMateThreads auto|off|on`, default `auto`);
+  malformed input is handled the same way in every mate; the Launchpad fixes
+  from 1.9.5.b and the Multiome compatibility guide, carried on `master`
+  since 1.10.0, are included; the public tiny Flex smoke and its test-data
+  fetch are removed.
+- `STAR --version` reports `1.11.0`; upstream and genome compatibility remain
+  `2.7.11b` and `2.7.4a`. Existing indexes do not need rebuilding.
+- The bundled catalog is still the pinned 1.9.5 snapshot; its legacy
+  `starsuite.official/multiome` recipe needs separately built 1.9.5.b
+  executables and is refused by STAR 1.10 and later before any output is
+  written.
+
 ## Minor Release v1.10.0 (2026-09-29)
 
 - Release tag: `v1.10.0`; notes: `docs/RELEASE_NOTES_v1.10.0.md`. The tag is

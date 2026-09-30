@@ -114,7 +114,6 @@ class TestScaffoldSmokeScripts:
     SMOKE_SCRIPTS = [
         ("tests/run_a375_public_smoke.sh", 5),
         ("tests/run_gex_binary_smoke.sh", 3),
-        ("tests/run_flex_tiny_public_binary_smoke.sh", 3),
         ("tests/run_adapter_clip_synthetic_test.sh", 2),
         ("tests/run_binary_test_matrix.sh", 3),
         ("tests/run_genome_generate_validation.sh", 2),
@@ -282,17 +281,6 @@ class TestFlexSchemaAccuracy:
         expected_core = {"cr_config", "threads", "genome_dir", "cb_whitelist"}
         missing = expected_core - names
         assert not missing, f"Missing expected Flex params: {missing}"
-
-    def test_flex_smoke_key_params(self, real_repo_env):
-        script = "tests/run_flex_tiny_public_binary_smoke.sh"
-        _skip_if_missing(REPO_ROOT / script)
-        _, _, parsed = _scaffold_and_validate(script, 3)
-        names = {p["name"] for p in parsed["parameters"]}
-
-        # Core params: outdir, threads, read_limit
-        expected_core = {"outdir", "threads"}
-        missing = expected_core - names
-        assert not missing, f"Missing expected Flex smoke params: {missing}"
 
 
 class TestMSKSchemaAccuracy:

@@ -83,20 +83,7 @@ Non-pipeline FLEX CBQ runs continue to use the standard STAR CBQ adapter path.
    tests/run_cbq_star_input_smoke.sh
    ```
 
-3. Run the public tiny FLEX CBQ smoke:
-
-   ```bash
-   tests/run_cbq_flex_tiny_public_smoke.sh
-   ```
-
-   This builds the generated public tiny FLEX fixture, encodes cDNA R2 plus
-   barcode R1 into an ordered CBQ, runs FASTQ and CBQ STAR-Flex, compares
-   `Barcodes.stats`, and compares BAM bodies when `samtools` is available.
-   This tiny fixture uses the standard non-hash-screen path, so the key log
-   assertion is `readFilesType Binseq PE` plus `--flex yes`, not a hash-screen
-   pipeline activation message.
-
-4. For production-scale validation, encode a FLEX FASTQ fixture with
+3. For production-scale validation, encode a FLEX FASTQ fixture with
    `cbq_ordered_encoder`, using the same
    mate order as the working FLEX command:
 
@@ -106,14 +93,14 @@ Non-pipeline FLEX CBQ runs continue to use the standard STAR CBQ adapter path.
      --outFile flex_R2_R1.cbq
    ```
 
-5. Run the FLEX command twice, once from FASTQ and once from CBQ:
+4. Run the FLEX command twice, once from FASTQ and once from CBQ:
 
    ```bash
    STAR ... --flex yes --readFilesIn flex_R2.fastq.gz flex_R1.fastq.gz ...
    STAR ... --flex yes --readFilesType Binseq PE --readFilesIn flex_R2_R1.cbq ...
    ```
 
-6. Compare stable outputs by read/count identity. Use source-order-preserving
+5. Compare stable outputs by read/count identity. Use source-order-preserving
    CBQ when testing chunk-boundary parity.
 
 ## Host-Local Validation

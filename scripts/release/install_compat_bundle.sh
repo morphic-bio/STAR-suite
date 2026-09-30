@@ -7,6 +7,7 @@ MANIFEST_FILE="${SCRIPT_DIR}/compat-manifest.tsv"
 COMPANION_TOOLS=(
   molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize
   transcriptvb_finalize trim_qc_fastq trim_qc_merge
+  star-suite-launchpad
 )
 SRC_SHARE="${SCRIPT_DIR}/share/star-suite"
 

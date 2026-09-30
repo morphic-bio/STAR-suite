@@ -42,6 +42,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 - **Transcriptome Output** (`--quantTranscriptomeSAMoutput`): Replaces the former `--quantTranscriptomeBan` with more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
 - **Reference Automation** (`--autoIndex Yes`): Automated reference download/build with `--cellrangerStyleIndex Yes` formatting and `--genomeGenerateTranscriptome Yes` for transcript-level quant workflows.
 - **Native Gzip FASTQ Handling**: Automatic detection of `.gz` FASTQ inputs with internal zlib streaming — no `--readFilesCommand zcat` needed for correctness. FLEX FASTQ production recipes use this path by default; legacy external helper mode remains available via `--readFilesLegacyZcat Yes`.
+- **Per-mate FASTQ/FASTA Reader Threads** (`--readFilesMateThreads auto|off|on`, default `auto`): Each mate is parsed on its own reader thread by a buffered parser, outside the mapping threads' input lock; the mapping threads pair reads by count from the start of each file and receive the same input as the single-threaded loop (`off`). The readers stand down for Flex, SLAM, TranscriptVB, batch mode and non-FASTQ/FASTA input. A single blank line before a read header, and blank lines at the end of a file, are skipped with a WARNING; two blank lines in a row before the end of a file are fatal.
 - **CBQ/BINSEQ Input** (`--readFilesType Binseq PE|SE`): Native C++ CBQ reader plus an order-preserving FASTQ/FASTQ.gz-to-CBQ encoder for STAR mapper, STARsolo, OCM, Flex, SLAM, and process_features adapter workflows. Exact FASTQ-vs-CBQ parity smokes are registered in the production regression manifest. See [`docs/CBQ_FORMAT_AND_IMPLEMENTATION.md`](docs/CBQ_FORMAT_AND_IMPLEMENTATION.md) for the format and adapter reference.
 - **Cutadapt-Compatible Trimming** (`--trimCutadapt Yes`): Native cutadapt-style trimming for bulk/PE workflows. Compatibility mode: `--trimCutadaptCompat Cutadapt3`.
 - **Poly-G Trimming** (`--clip3pPolyG yes|no|auto`): Trims poly-G artifacts common on NovaSeq/NextSeq platforms. Default `auto` activates in CellRanger4 mode. Without this, poly-G reads can inflate specific genes (e.g., LINC00486) and degrade gene-level correlations.
@@ -787,7 +788,7 @@ legacy Multiome recipe requires an external STAR 1.9.5.b runtime; its managed
 job checks reject the standalone STAR 1.10 executable. See
 [Multiome ownership and compatibility](docs/LAUNCHPAD_MULTIOME.md).
 
-Design details: [`plans/star_launchpad_v1_runbook.md`](plans/star_launchpad_v1_runbook.md)
+Server, API and launcher details: [`mcp_server/README.md`](mcp_server/README.md)
 
 ## Codespaces Walkthroughs
 

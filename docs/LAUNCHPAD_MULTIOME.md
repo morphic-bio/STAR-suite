@@ -20,6 +20,13 @@ and its compatibility runtime.
 
 ## STAR 1.9.5.b compatibility instructions
 
+> STAR Suite 1.9.5.b
+> is an interim compatibility build for running the integrated RNA + ATAC
+> engine from source, as described below. It is not an official STAR Suite
+> release. Multiomics Suite supersedes it once Multiomics Suite is available;
+> from then on, use Multiomics Suite for Multiome processing instead of these
+> instructions.
+
 **Version scope:** STAR Suite 1.9.x is the last line that hosts the integrated
 RNA + ATAC engine. From **STAR Suite 1.10 onward**, Multiome support is maintained
 in the separate **Multiomics Suite** repository, which builds the combined
@@ -135,6 +142,40 @@ directories before starting the server, or list them in a site config.
 
 This recipe takes explicit paired RNA/ATAC inputs; it does not require an OCM
 `--ocmMultiConfig` file. It retains the recipe's RNA `CellRanger4` clipping mode.
+
+### ATAC barcode read layout
+
+The default ATAC barcode format, `bc:8:23:-`, expects the raw ARC v1 barcode
+read: 24 bases, with the 16-base barcode at bases 9-24 in reverse-complement
+orientation relative to the ATAC whitelist. Some public datasets provide a
+16-base barcode read instead. The ATAC R2 of the public 10x Genomics PBMC 3k
+Multiome dataset is 16 bases in forward orientation, so no barcode matches with
+the default. Run it with the recipe option
+`--chromap-atac-read-format bc:0:15:+` (direct STAR:
+`--chromapAtacReadFormat "bc:0:15:+"`); that run completed and called 3,011
+cells.
+
+To check a dataset, count the ATAC R2 read lengths and test which orientation
+matches the ATAC whitelist, using the variables from the example below:
+
+```bash
+zcat "$ATAC_R2" | awk 'NR % 4 == 2' | head -n 2000 > r2_sample.txt
+awk '{ print length($0) }' r2_sample.txt | sort | uniq -c
+awk 'BEGIN { c["A"] = "T"; c["C"] = "G"; c["G"] = "C"; c["T"] = "A"; c["N"] = "N" }
+     function rc(s,   i, o) { o = ""; for (i = length(s); i > 0; i--) o = o c[substr(s, i, 1)]; return o }
+     NR == FNR { wl[$1]; next }
+     { bc = (length($0) >= 24) ? substr($0, 9, 16) : substr($0, 1, 16)
+       f += (bc in wl); r += (rc(bc) in wl) }
+     END { print "reads:", FNR, " forward:", f, " reverse-complement:", r }' \
+  "$ATAC_WHITELIST" r2_sample.txt
+```
+
+Most reads should match in one orientation. Keep the default for 24-base reads
+that match in reverse complement. Use `bc:0:15:+` for 16-base reads that match
+forward, or `bc:0:15:-` if they match in reverse complement. The format is
+`bc:<first>:<last>:<strand>` with 0-based positions. The Launchpad form always
+uses the default; for another layout, run the command-line recipe with
+`--chromap-atac-read-format`.
 
 ## Validate and run
 
@@ -253,7 +294,8 @@ mkdir -p "$DIRECT_OUT/run" "$DIRECT_OUT/chromap_tmp"
 `--readFilesIn` is **RNA R2 followed by RNA R1**. ATAC genomic reads are R1/R3;
 the raw ATAC R2 barcode read is supplied separately. `bc:8:23:-` performs the
 ARC v1 barcode extraction/reverse-complement; do not pre-trim that read for this
-example. `--outSAMtype None` suppresses the RNA alignment BAM while retaining
+example. For a 16-base barcode read, see
+[ATAC barcode read layout](#atac-barcode-read-layout). `--outSAMtype None` suppresses the RNA alignment BAM while retaining
 RNA counting; the separately configured ATAC BAM is still written.
 
 ## Validation of these instructions

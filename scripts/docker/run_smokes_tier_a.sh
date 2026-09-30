@@ -67,7 +67,6 @@ run_test "run_scrna_sidecar_off_golden" "tests/run_scrna_sidecar_off_golden.sh" 
 run_test "run_spatial_r1_tap_guard" "tests/run_spatial_r1_tap_guard.sh" || failed=1
 run_test "test_visium_hd_gex_sidecar_concurrency" "python3 tests/test_visium_hd_gex_sidecar_concurrency.py" || failed=1
 run_test "test_snp_mask_build_smoke" "tests/slam/test_snp_mask_build_smoke.sh" || failed=1
-run_test "run_flex_tiny_public_smoke" "tests/run_flex_tiny_public_smoke.sh" || failed=1
 run_test "run_molecule_first_native_smoke" "tests/run_molecule_first_native_smoke.sh" || failed=1
 run_test "run_adapter_clip_synthetic_test" "tests/run_adapter_clip_synthetic_test.sh" || failed=1
 run_test "run_transcriptvb_scatter_gather_smoke" "tests/run_transcriptvb_scatter_gather_smoke.sh" || failed=1

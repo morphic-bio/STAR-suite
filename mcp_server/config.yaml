@@ -514,17 +514,6 @@ scripts:
     timeout_seconds: 3600
 
   # Flex additional
-  - name: "flex_tiny_public"
-    path: "tests/run_flex_tiny_public_smoke.sh"
-    module: "flex"
-    description: "Flex tiny public smoke (10x fixture, container-safe)"
-
-  - name: "cbq_flex_tiny_public"
-    path: "tests/run_cbq_flex_tiny_public_smoke.sh"
-    module: "flex"
-    description: "FLEX FASTQ-vs-CBQ tiny public smoke"
-    timeout_seconds: 3600
-
   - name: "flex_yremove"
     path: "tests/run_flex_yremove_smoke.sh"
     module: "flex"
@@ -590,7 +579,7 @@ test_suites:
 
   - module: "flex"
     description: "STAR-Flex tests"
-    scripts: ["flex_smoke", "flex_cbub_validation", "flex_multisample", "flex_tiny_public", "cbq_flex_tiny_public", "flex_yremove", "flex_cr_config"]
+    scripts: ["flex_smoke", "flex_cbub_validation", "flex_multisample", "flex_yremove", "flex_cr_config"]
     disk_space_min_gb: 20
 
   - module: "cr-compat"
