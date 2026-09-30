@@ -7,26 +7,25 @@ the runbook where they differ. The runbook edits that were pending are done
 
 ## Current state (read first)
 
-- **C is `81e03b6`** (buffered parser, D5 included), rebuilt from clean in
-  `$W/src_c` with `libstar_suite.a`. Docs-only commits follow it.
-- FEATURE permit question: explained with evidence, no stop (section
-  below).
-- **M4b done and re-gated:** extended G-R0 passes; G-R1/G-R2 pass on all 21
-  M3 variants and on F3 (three C runs); G-R3 passes. Details in "M4b".
-- **M6:** README option bullet and final release notes committed
-  (`554c40d`); G-S2 rerun on the final C and **G-R5 running** (chain: G-S2,
-  then `tools/run_gs1_rna.sh b0`, then `c`, then
-  `tools/compare_gs1_rna.sh`; logs in `$W/gs1/`). Gate trees
-  `$W/gs1/src_{b0,c}` built in the gate container image `598e763f…`
-  (STAR sha256 B0 `6e3c1380…`, C `f922a815…`). Excluded from G-R5, with the
-  reason: Tier A `run_flex_tiny_public_smoke` (author, 30 Sep) and the
-  manifest row `cbq-flex-tiny-public`, which fetches the same third-party
-  test data; both are Flex paths where the readers stand down.
-- Stop and report at the end of M6. No tag, push, merge or release.
-- Lock: queue without a cutoff; stop only if a single wait passes about 3
-  hours. Batches may hold the lock (`RUN_STAR_LOCK_HELD=1`).
-- D6 was carried out and cleaned up (M5); build record in
-  `$W/m5/d6_record/`.
+**M6 is done except the release step; stopped at the end of M6 as
+instructed.** No tag, push, merge or release. No output difference from
+v1.10.0 outside the B0 variance classes was found.
+
+- **C is `81e03b6`** (buffered parser, D5 included); later commits are
+  documentation only. Rebuilt from clean in `$W/src_c`; gate-container
+  build in `$W/gs1/src_c` (STAR sha256 `f922a815…`); B0 gate build
+  `$W/gs1/src_b0` (`6e3c1380…`).
+- FEATURE permit question: explained with evidence, no stop (below).
+- M4b re-gated: G-R0, G-R1/G-R2 (21 variants and F3), G-R3, G-S2 pass.
+- **G-R5 (G-S1 plus Tier A): PASS with every difference dispositioned**
+  (section "G-R5 results").
+- README option bullet and final release notes committed; the release notes
+  record D5 as included and make no timing claims. Version bump, tag and
+  packaging belong to the separate release step.
+- Excluded, with reason: Tier A `run_flex_tiny_public_smoke` (author, 30
+  Sep) and manifest row `cbq-flex-tiny-public` (fetches the same
+  third-party test data; Flex path where the readers stand down).
+- D6 carried out and cleaned up (M5); record in `$W/m5/d6_record/`.
 
 Earlier stop (resolved): the first F2 dry run was denied ("[Safety Bypass
 Flag]") because of `--skip-active-check`; the coordinator pointed out that
@@ -265,12 +264,49 @@ f7vanilla, f7modern, f7modernbam.
   s waiting on input; wall 3:14-3:25 for both builds, one C run at 4:11
   (host noise). The ceiling is still mate 1's decompression.
 
+### G-R5 results (G-S1 plus Tier A, B0 `0f9701a` vs C `81e03b6`)
+
+- Drivers: `$W/tools/run_gs1_rna.sh` and `compare_gs1_rna.sh` (copies of
+  the v1.10.0 gate's `run_gs1.sh` and `compare_gs1.sh`, roots and labels
+  changed, the two tiny-public tests removed); trees built with
+  `build_in_container.sh` in image `598e763f…`. Outputs `$W/gs1/run_{b0,c}`.
+- Both trees: every manifest row (B0 24, C 25 including
+  `fastx-mate-readers`) and all 12 Tier A tests exit 0.
+- Captures: 106 each, all paired by normalized argv (audit
+  `$W/tools/capture_audit_rna.py`, a copy of the v1.10.0 gate's
+  `complete_capture_audit.py`; report `$W/gs1/capture_audit.json`). 95
+  pairs match. The 11 others, with B0 repeat runs (`run_b0r*`, `run_cr*`;
+  `$W/gs1/repeat_audit.json`, `slam_repeatability.json`):
+  - 00063 (pf-dynamic, readers active): `feature_per_cell.csv` row order;
+    the B0 repeat differs the same way.
+  - 00066, 00067, 00069 (slam-pe-100k TranscriptVB, 16 threads, readers not
+    active) and 00101, 00102 (Tier A TranscriptVB scatter/gather, readers
+    not active): quantification files; the B0 repeat differs the same way.
+  - 00071, 00072, 00074, 00075 (SLAM divergence harness, 4 threads, readers
+    not active: the open-time gate accepted before the SLAM flag was set and
+    the late check stood them down before any read): SLAM QC, dump and
+    weights files. Over four B0 and three C runs, both builds take the same
+    set of output states (for example 00075 C produced B0's state in its
+    repeats); 00078 shows B0 alone taking three states.
+  - 00065 (Flex, readers not active): a captured stdout with the compile
+    time and build host.
+- Kept outputs: 165 strict differences, 61 after the audit's log filter
+  and normalizations, all dispositioned: feature-arm files (barcode
+  multiset and keyed MEX equal; one row-order pair as above); PBMC
+  `report.json` (`source_revision` only); timestamps (`PASS`,
+  `RUN_COMPLETE.ok`, `RUN_MANIFEST.txt`); elapsed times (CBQ adapter
+  `stdout.tsv`); binseq upstream fixture (the row does not run STAR:
+  external decoder output order and a cloned repository's git metadata);
+  UCSF unseeded downstream analysis (its STAR capture is identical). The
+  244 C-only files are the new `fastx-mate-readers` row's harness files.
+
 ## Next steps
 
-1. Wait for the G-R5 chain; classify any G-S1 difference against the B0
-   variance classes (stop and report on any other difference).
-2. Fill the release notes' G-S1 line; update this handoff; stop and report
-   (end of M6).
+1. Author review of M6. The STAR 1.11.0 release (version bump, tag,
+   packaging, merge, push) is a separate go.
+2. Optional, if the author wants it: a G-M1 rerun with a Multiomics
+   development build against `81e03b6` (G-M1 ran against `4bc3b8f`, before
+   the buffered parser).
 
 ## For the author
 

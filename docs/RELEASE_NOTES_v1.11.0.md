@@ -120,9 +120,22 @@ results are claimed.
   plain FASTQ; the three scRNA 100K regression profiles.
 - **Flex unchanged (G-R3).** The Flex half-probe 100K smoke reproduces all
   121 outputs of the preserved reference; the readers report "not active".
-- **Host (G-S2, G-M1).** The host API tests pass, with the readers active
-  in all 31 runs. A Multiomics Suite development build against the
-  candidate passed G-M1 on all five fixtures (run on the candidate before
+- **Host (G-S2, G-M1).** The host API tests pass on the validated commit,
+  with the readers active in all 31 runs. A Multiomics Suite development
+  build against the candidate passed G-M1 on all five fixtures (run before
   the buffered parser; the parser change was then re-gated with G-R0 to
-  G-R3).
-- **Regression (G-S1).** Pending.
+  G-R3 and G-S2).
+- **Regression (G-S1).** Both gate trees were built in the v1.10.0 gate
+  container image. All 25 non-multiome manifest rows (24 for v1.10.0, which
+  lacks the new reader-harness row) and 12 Tier A tests pass in both trees.
+  All 106 STAR invocations pair up; 95 match, and the other 11 differ only
+  in files that also differ between repeated runs of the v1.10.0 code:
+  feature-arm row order; multi-thread TranscriptVB quantification (readers
+  not active); multi-thread SLAM outputs (readers not active; seven repeated
+  runs show both builds taking the same set of output states); and one
+  captured stdout with build provenance. Every other kept-output difference
+  is a log, timestamp, elapsed time, build revision, an external decoder's
+  output order, a cloned repository's metadata, or the unseeded downstream
+  analysis after identical STAR outputs. The two Tier A and manifest tests
+  that download third-party test data were not run (the
+  readers stand down for their Flex path).

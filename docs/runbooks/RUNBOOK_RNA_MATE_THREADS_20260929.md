@@ -1,9 +1,9 @@
 # Runbook: RNA mate reader threads for STAR Suite 1.11.0 (2026-09-29)
 
 Status: **approved; implementation in progress.** M1 and M2 are committed
-and G-R0 passes; M0 and M3-M5 (G-R1, G-R2, G-R3, G-S2, G-M1) are done
-with no difference outside the B0 variance classes; stopped before G-S1
-(see the handoff). Handoff (current state, supersedes this
+and G-R0 passes; M0, M3-M5, M4b (D5 included) and M6 (G-R5) are done
+with no difference outside the B0 variance classes; stopped at the end of
+M6, before the release step (see the handoff). Handoff (current state, supersedes this
 file where they differ): `docs/handoffs/HANDOFF_RNA_MATE_THREADS_20260929.md`.
 
 - Worktree `/mnt/pikachu/STAR-suite-rna-mate-threads-20260929`, branch
