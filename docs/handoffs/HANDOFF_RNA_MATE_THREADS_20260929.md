@@ -258,6 +258,47 @@ f7vanilla, f7modern, f7modernbam.
 - **Log.out "not active" checks for SLAM, TranscriptVB and CBQ** (runbook
   4.2) were not run here; those modes are G-S1 rows (M6).
 
+## FEATURE permit drop: explained, no stop (30 Sep)
+
+**Question.** The `Log.out` line "Dynamic thread telemetry" showed about
+1.6M permit acquisitions on B0 against about 30k on C at F3 (FEATURE:
+about 1.6M against about 0.1k).
+
+**Answer.** Nothing is skipped or bypassed and FEATURE is not starved. That
+line is a snapshot taken when MAP is marked complete at the end of GEX
+mapping (`mapThreadsSpawn.cpp`, after `mapPermitMarkDomainComplete(MAP)`),
+so it counts only acquisitions made before GEX mapping ends. The feature
+arms (ADT, then HTO, then CT; `policy=full_budget_sequential`) open their
+permit windows at about the same time in both builds, set by their own
+setup; with C, GEX mapping ends about 13 s earlier, so only the first ~3 s
+of the ADT arm (its slow start) fall inside the snapshot, against ~19 s on
+B0. After MAP completes, FEATURE keeps taking permits from the enabled
+allocator at the same pace in both builds.
+
+**Evidence.**
+- Per-arm permit deltas (`cr_assign/*/assignBarcodes.api_run.txt`, F3, two
+  B0 and two C runs): every arm makes 3.58M-3.86M FEATURE acquisitions and
+  accounts exactly 20,000,000 work units (one per read) in both builds; ADT
+  FEATURE wait 0.45 s on C against 0.57-0.59 s on B0; zero blocked
+  acquisitions in C's ADT window. GEX pairs mapped inside the ADT window:
+  10.8M-10.9M on B0, 0.9M-1.2M on C.
+- Two instrumented F3 runs under the lock (scratch builds of B0 and C with
+  logging only: steady-clock timestamps and existing permit counters;
+  diffs and timelines in `$W/m5/permit_investigation/`; the scratch clones
+  are deleted). Times from mapping-thread spawn:
+
+  | build | ADT permit window opens | MAP complete | FEATURE acquisitions at MAP complete | FEATURE pace after |
+  |---|---|---|---|---|
+  | B0 | +18.7 s (9.4M GEX pairs mapped) | +38.1 s | 1,524,834 | ~105k/s |
+  | C | +21.7 s (17.1M GEX pairs mapped) | +24.7 s | 1,068 | ~107k/s |
+
+  In both, the first 250k FEATURE acquisitions take about 7 s (the arm's
+  start), then about 2.35 s per 250k. The feature hook's pool-disabled path
+  (`!mapPermitEnabled()`) was taken 0 times in both runs: every FEATURE
+  acquisition went through the allocator.
+- No change to the allocator design, Flex, CBQ or the feature readers is
+  implied. Timings are informal (shared host).
+
 ## Author answers to the M5 report (30 Sep)
 
 1. **FEATURE permit drop: find the cause first** (about 1.57M acquisitions on
