@@ -5,22 +5,29 @@ Updated: 2026-09-29, second implementation session. Runbook:
 the runbook where they differ. The runbook edits that were pending are done
 (status, decisions, sections 3.3 steps 2, 7 and 8, 3.5, 3.6, 3.7, 4.1).
 
-## Where the work stopped (read first)
+## Current state (read first)
 
-**Stopped at 00:59 UTC, 30 Sep, in M3: blocked on the benchmark lock for 30
-minutes** (the coordinator's limit). My queue's next run (`b0 f6d`) waited on
-`/mnt/pikachu/e2e_bench_20260926/pikachu_timed.lock` from 00:29:54. The
-holder was the single-run agent's `validation/single_run/run_gates.py` (held
-31 minutes by then), with its `gs4.py` and `gs5.py` queued behind it. My queue
-chains were stopped; no process of this work is running or waiting, and the
-empty `runs/f6d/b0_r1` was removed. An earlier wait (23:45-00:05, behind its
-`gs1.py`) cleared after 20 minutes.
-
-**Resume:** `$W/tools/run_queue.sh $W/queues/m3_resume.txt` (remaining B0
-variants, the B1 F6c rerun, every C run with traces), then
-`$W/tools/m3_report.sh f1a f1a1 f1b f1c f1d f1e f1f f2 f4 f5a f5b f6a f6a1
-f6b f6c f6d f6e f6f f7vanilla f7modern f7modernbam`, then
-`tools/run_flex_smoke.sh b0` and `c` (G-R3), then queue `m4` (F3).
+- C is now `4bc3b8f` (blank-line rule refined per the author's decisions of
+  30 Sep), rebuilt from clean in `$W/src_c` with `libstar_suite.a`; G-R0
+  passes there (272 identity runs, behaviour, blank-line part: 0 failures).
+- The earlier stop (30 minutes on the lock at 00:59 UTC) is superseded: the
+  coordinator removed the 30-minute cutoff. Queue behind the lock; stop only
+  if a single wait passes about 3 hours. `run_star.sh` waits up to 3 hours;
+  with `RUN_STAR_LOCK_HELD=1` it skips its own lock when the caller holds it
+  for a batch (`flock <lock> env RUN_STAR_LOCK_HELD=1 run_queue.sh <queue>`),
+  as the single-run agent holds it for a whole gate run.
+- Running (background chain): queue `m3_resume2` (B1 F6c rerun, all C runs
+  with traces) as one lock-held batch, then G-R3 (`run_flex_smoke.sh b0`,
+  `c`), then queue `m4` as one batch.
+- M5 prepared (D6): scratch clones in `$W/scratch/d6` (STAR Suite at C with
+  the local, unpushed tag `v1.11.0-dev.rna-mate-threads`; `multiomics-suite`
+  master `79b5899`, clean), scratch manifest `$W/scratch/d6/manifest_c.json`
+  and `local_sources.json`. The Multiomics development build is done:
+  `$W/scratch/d6/multiomics/build/native/multiomics`, receipt status
+  complete, STAR tag verified as `local-override`, input digest `efc07e37…`.
+  G-M1 driver: `$W/tools/run_g_m1_c.py` (the committed perf-lane driver with
+  only ROOT, OUT, BIN, HERE changed). G-S2 not run yet. After M5, delete
+  `$W/scratch/d6` (the tag lives only there).
 
 Earlier stop (resolved): the first F2 dry run was denied ("[Safety Bypass
 Flag]") because of `--skip-active-check`; the coordinator pointed out that
@@ -102,7 +109,7 @@ an incremental rebuild keeps the old revision string).
 |---|---|---|---|
 | B0 | `$W/src_b0` | `0f9701a4d5145f211dc51797b0b21c3d551912c0` | `$W/src_b0/core/legacy/source/STAR` |
 | B1 | `$W/src_b1` | `130af40050b954cb3acc905946918c832603b7dc` | `$W/src_b1/core/legacy/source/STAR` |
-| C | `$W/src_c` | `4329a6ab3b4147688875a09ea75d73a4a3cd5b8d` | `$W/src_c/core/legacy/source/STAR` (also `libstar_suite.a`) |
+| C | `$W/src_c` | `4bc3b8f2db8cf889c226117ce19b8b0531d93dd7` | `$W/src_c/core/legacy/source/STAR` (also `libstar_suite.a`) |
 
 ## Gate tooling (in `$W/tools`, untracked)
 
@@ -130,7 +137,7 @@ an incremental rebuild keeps the old revision string).
 | M0 | **Done.** Fixtures staged; argv in `$W/argv`; B0 pairs run (queue `m0`, all exit 0). Variance classes and diagnostic below. |
 | M1 | Committed (`130af40`). **B1 = B0 on F1 and F2: PASS** (F1a fully identical; F2 within the Multiomics lists, Solo.out exact). Also PASS on every other variant with both runs: f1a1, f1b-f1f, f4, f5a, f5b, f6a, f6a1, f6b, f7vanilla, f7modern, f7modernbam. B1 traces collected for every variant except f6c: its first B1 run used a misspelled option (`--twoPassMode`; STAR's is `--twopassMode`), failed with exit 102 and is kept as `runs/f6c/failed_b1_twoPassMode_typo`; the argv is fixed and the rerun is in `m3_resume`. |
 | M2 | Committed (`75608c3`), blank-line rule `4329a6a`; G-R0 passes (272 identity runs, behaviour, blank-line part). |
-| M3 | **Partly run.** B0 done for f1a1, f1b-f1f, f5b, f6a1, f6b, f6c (two-pass ran both passes); f6d-f6f and all C runs not yet (stopped on the lock). No G-R1/G-R2 result yet. |
+| M3 | **Running.** B0 done for every variant (f6c two-pass ran both passes); B1 = B0 PASS on every variant with both runs (f6c B1 rerun pending). C runs with traces in queue `m3_resume2`. |
 | M4-M5 | C built at `4329a6a` (`libstar_suite.a` too); queue `m4`, G-R3 wrapper `tools/run_flex_smoke.sh`, report script `tools/m3_report.sh` ready. Not run. |
 | M6 | Not started; stop before G-S1 and the release. |
 
@@ -165,8 +172,9 @@ so the parse is the larger part. The runbook's M0 stop condition is not met.
 
 ## Next steps
 
-1. Queue `m3_resume` (see "Where the work stopped"), then
-   `tools/m3_report.sh <variants>`.
+1. After queue `m3_resume2`: `tools/m3_report.sh f1a f1a1 f1b f1c f1d f1e
+   f1f f2 f4 f5a f5b f6a f6a1 f6b f6c f6d f6e f6f f7vanilla f7modern
+   f7modernbam`.
 2. G-R3: `tools/run_flex_smoke.sh b0` and `c`; check C's `Log.out` for
    "Fastx mate readers: not active (Flex ...)".
 3. M4: queue `m4` (F3), G-R1/G-R2 on F3, informal measurements.
