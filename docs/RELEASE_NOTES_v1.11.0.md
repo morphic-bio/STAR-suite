@@ -85,6 +85,8 @@ remains.
   (`star-suite-launchpad`), bundled browser assets, the runtime capability
   report (`STAR --build-features`) and the Launchpad release test gate are
   included.
+- The compatibility installer bundle installs `star-suite-launchpad`
+  alongside STAR, as the tarballs and Debian packages do.
 - The pinned catalog's legacy Multiome recipe gains input and runtime
   validation, and managed jobs, logs and cancellation, for an explicitly
   selected external 1.9.5.b runtime. Standalone STAR reports
@@ -123,8 +125,8 @@ orientation, as in the public 10x Genomics PBMC 3k Multiome dataset).
 
 The validated code is commit `81e03b6` on branch
 `design/rna-mate-threads-20260929`. The release commits after it change the
-version number, packaging metadata, the Tier A test image and documentation
-only.
+version number, packaging metadata, the installer bundle scripts, the Tier A
+test image and documentation only.
 Comparisons are against the v1.10.0 code at `0f9701a` (under `core/` it
 differs from the `v1.10.0` tag only by the `--build-features` flag, which
 does not affect mapping). Runs used the shared host lock; no timing
