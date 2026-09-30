@@ -1,6 +1,6 @@
 # Handoff: RNA mate reader threads (STAR Suite 1.11.0)
 
-Updated: 2026-09-29, second implementation session. Runbook:
+Updated: 2026-09-30, release preparation. Runbook:
 `docs/runbooks/RUNBOOK_RNA_MATE_THREADS_20260929.md`. This handoff supersedes
 the runbook where they differ. The runbook edits that were pending are done
 (status, decisions, sections 3.3 steps 2, 7 and 8, 3.5, 3.6, 3.7, 4.1).
@@ -31,6 +31,40 @@ GitHub release until the author's go.
   `git -C /mnt/pikachu/STAR-suite merge --ff-only <merge>` (as in the v1.10.0
   procedure), for the author.
 - Code validated by the gates: `81e03b6` (sections below).
+- Release checks on the merge `d28a897` (clean clone
+  `$W/release/check_P`, driver `$W/release/run_release_checks.sh`, results
+  in `$W/release/checks/status.tsv` and per-step logs). All pass except the
+  two installer-bundle validations and one pre-existing link:
+  - notes, version and `debian/changelog` (1.11.0-1), snapshot validation
+    (11 recipes, 10 evidence records), dependency-generation tests: pass;
+  - relative links: fail on the README link to
+    `plans/star_launchpad_v1_runbook.md`, broken since v1.10.0, not fixed;
+  - Launchpad: `app.js` check and pytest (125 passed, 19 skipped; the skips
+    need a sibling `bwb-nextflow-utils` checkout): pass;
+  - partial builds (9 targets) and scRNA exact counts on core and
+    core-static: pass; STAR reports 1.11.0;
+  - Tier A in the Tier A image: 14 of 14 pass, without
+    `run_flex_tiny_public_smoke` (author's decision, 30 Sep); `nm` present;
+  - release artifacts: build images, both tarballs, installer bundle, the
+    three tarball runtime checks, tarball and bundle release smokes (the
+    smokes without the two tiny-public smokes, from clone
+    `$W/release/check_Q`), both debs, the three deb install checks, source
+    package and checksums: pass;
+  - **installer-bundle validation on Ubuntu 22.04 and 24.04: fail (exit
+    127).** `container_check_installer_bundle.sh` runs
+    `$prefix/bin/star-suite-launchpad --help`, but the installer bundle does
+    not carry the launcher. The 1.9.5.b Launchpad commit `9a856e5` added the
+    launcher to the tarballs, the tarball installer and this check, not to
+    `build_installer_bundle.sh` (fixed tool list) or
+    `install_compat_bundle.sh` (`COMPANION_TOOLS`). Pre-existing on
+    `origin/master`; the release workflow would stop at "Validate installer
+    bundle". Proposed fix, not committed (outside the authorized release
+    steps): add `star-suite-launchpad` to both lists
+    (`$W/release/installer_bundle_launchpad_fix.patch`). With it, a bundle
+    rebuilt from the same tarballs passes both installer validations and
+    the bundle smokes (`$W/release/checks_fixprobe/`). Committing it changes
+    the merge hash, so Multiomics should not pin `d28a897` until the author
+    decides.
 
 Earlier stop (resolved): the first F2 dry run was denied ("[Safety Bypass
 Flag]") because of `--skip-active-check`; the coordinator pointed out that
@@ -307,9 +341,17 @@ f7vanilla, f7modern, f7modernbam.
 
 ## Next steps
 
-1. Author review of M6. The STAR 1.11.0 release (version bump, tag,
-   packaging, merge, push) is a separate go.
-2. Optional, if the author wants it: a G-M1 rerun with a Multiomics
+1. Author: decide the installer-bundle fix above. If approved, commit the
+   patch on this branch, redo the `--no-ff` merge onto `0f9701a`, and rerun
+   the release checks on the new merge (at least the installer bundle build,
+   both installer validations and the bundle smokes). Multiomics pins the
+   final merge hash.
+2. Author: review the draft interim paragraph and the barcode note in
+   `docs/LAUNCHPAD_MULTIOME.md` before any push.
+3. Author: move `master` in the shared checkout
+   (`git -C /mnt/pikachu/STAR-suite merge --ff-only <merge>`), then tag and
+   push per the v1.10.0 procedure. Not done here.
+4. Optional, if the author wants it: a G-M1 rerun with a Multiomics
    development build against `81e03b6` (G-M1 ran against `4bc3b8f`, before
    the buffered parser).
 
