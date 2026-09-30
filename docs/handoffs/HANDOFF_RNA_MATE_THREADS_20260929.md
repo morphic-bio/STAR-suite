@@ -82,10 +82,11 @@ GitHub release until the author's go.
   and v1.9.4 release notes, and the frozen Tier A list of the 28 Sep gate
   batch in `tests/host_api/audit_gate_batch.py`.
 
-- **Final release merge: `5d3df7acaa724aa57a7a4fb1e09f877622205141`**
+- Merge `5d3df7acaa724aa57a7a4fb1e09f877622205141`, superseded by the
+  fixture-test removal below
   (`--no-ff` onto `0f9701a`, second parent `6a002a7`; its tree equals the
   branch tip; `d28a897`, `ea60370` and an unchecked third merge `e8e0582`
-  are not in its history). This is the commit for Multiomics to pin. The
+  are not in its history). The
   removal commit is `6949225`; it was rebuilt once before the checks to also
   drop the tiny smoke from the release-smoke usage text.
 - Release checks on `5d3df7a` (fresh clone `$W/release/check_P3`, driver
@@ -110,6 +111,34 @@ GitHub release until the author's go.
     only matches under `$W/release/checks_v3` are in the partial-build
     source exports: the historical documents and the frozen audit list
     named above.
+
+- **Author decisions (30 Sep) on the `5d3df7a` report.** Remove the tests
+  that read the vendor's tiny fixtures from a local Cell Ranger install, in
+  1.11.0, in a separate commit (`b38108a` before the rebase); historical
+  records (dated runbooks, summaries, handoffs, old release notes, the
+  frozen 28 Sep audit list) stay as they are. Removed:
+  - `tests/bgzf/test_flex_e2e.sh` and the tests that only reused its
+    fixture: BGZF cases T4, T6, T9 (`test_flex_fused_align.sh`, the fused
+    alignQ deadlock regression) and T10 (`test_flex_sorted_bam_range.sh`);
+    CB bucket cases B4, B5 and B6. B3 keeps its host-local JAX 800k
+    off-versus-RAM comparison and prints SKIP when that data is absent
+    (its gold-fixture part is removed);
+  - `tests/run_dynamic_threads_tiny_fixture.sh` and
+    `tests/run_dynamic_threads_variable_sequences_smoke.sh` (its only
+    input). The parser `tests/dynamic_threads/mock_consumer_report.py` and
+    its unit test stay;
+  - `flex/test/test_flex_probe_index_parity.sh`; the helper
+    `test_flex_probe_index` and its unit script stay, with the usage
+    comment's fixture paths replaced by placeholders;
+  - `scripts/codespaces/generate_tiny_flex_demo.py` (no other users) and
+    `docs/DYNAMIC_THREADS_TINY_FIXTURE_RUNBOOK_20260217.md`;
+  - the phase-list rows, `tests/ARTIFACTS.md` entries and link-manifest
+    lines for them. No Makefile, CMake or CI target ran them; the
+    repository has no ctest targets.
+  Still naming the removed tests, as historical records: the dated
+  handoffs and runbooks of 2026-02-17, 2026-09-01 and 2026-09-11,
+  `docs/VALIDATION_V195A_DIAGNOSTIC_REMOVAL_20260927.md`, the v1.9.4 notes,
+  and `plans/STAR-core-dynamic-threads-upstream-plan.md`.
 
 Earlier stop (resolved): the first F2 dry run was denied ("[Safety Bypass
 Flag]") because of `--skip-active-check`; the coordinator pointed out that
