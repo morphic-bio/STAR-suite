@@ -221,7 +221,6 @@ update this file with its output location.
 - `/tmp/star_suite_libchromap_cbq_contract_smoke` (synthetic STAR libchromap CBQ contract smoke: generated ATAC FASTQ/CBQ inputs, Chromap index, FASTQ-vs-CBQ contract-runner fragments, and parity dumps)
 - `/tmp/star_suite_cbq_e2e_module_regression_*` (aggregate CBQ E2E/module regression wrapper logs for BINSEQ probe, native CBQ reader, STAR mapper, STARsolo, process_features, and Chromap adapter smokes)
 - `/tmp/star_suite_bgzf_ingest_tests` (BGZF ingest T1-T7 fixtures, reference-scanner JSON, harness output, truncation diagnostics, and T7 regression outputs)
-- `/tmp/star_suite_bgzf_flex_e2e` (public tiny Flex gzip-path, BGZF range-reader, and mixed-lane equivalence runs for T4/T6)
 - `/home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901` (full JAX SC2300771 gzip/BGZF/CBQ SSD benchmark output directories plus excluded diagnostic runs; committed timing and STAR logs are under `docs/benchmarks/bgzf_ingest_20260901/`)
 - `/tmp/star_suite_cbq_flex_100k_*` (host-local SC2300771 100K FLEX FASTQ-vs-CBQ runs: ordered lane CBQs, FASTQ and CBQ STAR-Flex outputs, count parity diffs, and order-normalized BAM-body parity dumps)
 - `/tmp/star_suite_cbq_flex_range_100k_*` (host-local SC2300771 800K FLEX no-genome FASTQ-vs-indexed-CBQ-range parity runs: ordered lane CBQs, count-only STAR-Flex outputs, range activation logs, and byte-level count-output parity)
@@ -609,28 +608,6 @@ These scripts validate that default bundles work with minimal explicit parameter
 - `tests/run_default_bundle_bulk_fixture.sh`
   - Outputs: `/tmp/default_bundle_bulk_*/` (cleaned up after test)
   - Validates `--defaultBulk` sets `outSAMtype BAM SortedByCoordinate`, etc.
-
-## Dynamic Thread Interface Tiny Fixture Smoke
-
-- Harness: `tests/run_dynamic_threads_tiny_fixture.sh`
-- Mock consumer parser: `tests/dynamic_threads/mock_consumer_report.py`
-- Outputs: `/tmp/dynamic_threads_tiny_*/`
-  - `off/` baseline run logs
-  - `on/` dynamic run logs
-  - `dynamic_thread_report.json` (machine-readable telemetry summary)
-  - `dynamic_thread_report.txt` (human-readable telemetry summary)
-  - `log_final.diff` (canonical `Log.final.out` metric diff; expected empty)
-  - `bam_parity_summary.txt` (optional BAM parity metrics when enabled)
-- Status: untracked
-
-## Dynamic Thread Variable Sequence Smoke
-
-- Harness: `tests/run_dynamic_threads_variable_sequences_smoke.sh`
-- Uses: `tests/run_dynamic_threads_tiny_fixture.sh`
-- Outputs: `/tmp/dynamic_threads_variable_sequences_*/`
-  - `sequence_3_2_4/` (runThreadN=4, initial permits=3, sequence 2->4)
-  - `sequence_1_2_1/` (runThreadN=2, initial permits=1, sequence 2->1)
-- Status: untracked
 
 ## PF Dynamic Permit 100K Smoke
 

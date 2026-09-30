@@ -462,7 +462,6 @@ source/twoPassRunPass1.cpp
 source/twoPassRunPass1.h
 test/test_flex_probe_index
 test/test_flex_probe_index.cpp
-test/test_flex_probe_index_parity.sh
 test/test_flex_probe_index_unit.sh
 tests/flex_smoke/run_flex_smoke.sh
 tests/run_baseline_test.sh

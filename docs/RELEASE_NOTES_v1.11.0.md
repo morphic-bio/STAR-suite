@@ -113,6 +113,10 @@ orientation, as in the public 10x Genomics PBMC 3k Multiome dataset).
   production regression manifest and the MCP test registry no longer list
   them. Flex validation for this release uses the Flex half-probe 100K
   smoke (see Validation).
+- Tests that read fixtures from a locally installed third-party package are
+  removed too: the BGZF Flex end-to-end cases T4, T6, T9 and T10, the CB
+  bucket cases B4 to B6 and the gold-fixture part of B3, the dynamic-threads
+  fixture smokes and the Flex probe-index parity script.
 
 ## Known limitations
 
@@ -132,8 +136,7 @@ orientation, as in the public 10x Genomics PBMC 3k Multiome dataset).
 The validated code is commit `81e03b6` on branch
 `design/rna-mate-threads-20260929`. The release commits after it change the
 version number, packaging metadata, the installer bundle scripts, the Tier A
-test image, the removal of the public tiny Flex smoke, and documentation
-only.
+test image, test removals, and documentation only.
 Comparisons are against the v1.10.0 code at `0f9701a` (under `core/` it
 differs from the `v1.10.0` tag only by the `--build-features` flag, which
 does not affect mapping). Runs used the shared host lock; no timing

@@ -4,11 +4,7 @@
  * Usage: ./test_flex_probe_index <probe_csv> <gtf> <base_fasta> <output_dir>
  * 
  * Example:
- *   ./test_flex_probe_index \
- *     /mnt/pikachu/Chromium_Human_Transcriptome_Probe_Set_v2.0.0_GRCh38-2024-A.csv \
- *     /home/lhhung/cellranger-9.0.1/external/cellranger_tiny_ref/genes/genes.gtf.gz \
- *     /home/lhhung/cellranger-9.0.1/external/cellranger_tiny_ref/fasta/genome.fa \
- *     ./test_flex_probe_output
+ *   ./test_flex_probe_index probes.csv genes.gtf.gz genome.fa ./test_flex_probe_output
  */
 
 #include <iostream>

@@ -6,7 +6,7 @@ OUT_ROOT="${2:-/tmp/star_suite_cb_bucket_tests}"
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 STAR_BIN="${STAR_BIN:-${ROOT_DIR}/core/legacy/source/STAR}"
 
-case "${CASE}" in B3|B4|B5|B6) ;; *) echo "usage: $0 B3|B4|B5|B6 [out-root]" >&2; exit 2 ;; esac
+case "${CASE}" in B3) ;; *) echo "usage: $0 B3 [out-root]" >&2; exit 2 ;; esac
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 [[ -x "${STAR_BIN}" ]] || die "STAR binary is absent: ${STAR_BIN}"
@@ -54,64 +54,6 @@ compare_runs() {
     canonical_manifest "${observed}" "${observed_manifest}"
     diff -u "${expected_manifest}" "${observed_manifest}" \
         || die "canonical output mismatch: ${label}"
-}
-
-make_env_wrapper() {
-    local wrapper="$1"
-    local mode="$2"
-    local bucket_count="$3"
-    local memory_gb="$4"
-    local spill_dir="$5"
-    python3 - "${wrapper}" "${STAR_BIN}" "${mode}" "${bucket_count}" \
-        "${memory_gb}" "${spill_dir}" <<'PY'
-import os
-import shlex
-import sys
-from pathlib import Path
-
-wrapper, star, mode, bucket_count, memory_gb, spill_dir = sys.argv[1:]
-args = [
-    star,
-    "--soloBucketMode", mode,
-    "--soloBucketCount", bucket_count,
-    "--soloBucketMemGB", memory_gb,
-    "--soloBucketSpillDir", spill_dir,
-]
-text = "#!/usr/bin/env bash\nexec " + " ".join(shlex.quote(arg) for arg in args)
-text += " \"$@\"\n"
-Path(wrapper).write_text(text, encoding="utf-8")
-os.chmod(wrapper, 0o755)
-PY
-}
-
-run_gold_case() {
-    local label="$1"
-    local mode="$2"
-    local threads="$3"
-    local bucket_count="$4"
-    local memory_gb="${5:-32}"
-    local case_root="${OUT_ROOT}/gold_${label}"
-    local wrapper="${OUT_ROOT}/STAR-${label}"
-    local spill_dir="${OUT_ROOT}/spill_${label}"
-    if [[ -f "${case_root}/PASS" ]]; then
-        return
-    fi
-    make_env_wrapper "${wrapper}" "${mode}" "${bucket_count}" \
-        "${memory_gb}" "${spill_dir}"
-    if ! STAR_BIN="${wrapper}" BGZF_E2E_CASE=T4 \
-        BGZF_E2E_THREADS="${threads}" BGZF_E2E_READ_LIMIT=2000 \
-        BGZF_E2E_OUT_ROOT="${case_root}" \
-        "${ROOT_DIR}/tests/bgzf/test_flex_e2e.sh" \
-        >"${case_root}.log" 2>&1; then
-        tail -100 "${case_root}.log" >&2 || true
-        die "gold fixture failed for ${label}"
-    fi
-    if [[ "${mode}" != off ]]; then
-        grep -F "Flex streaming CB buckets: active (${mode}, ${bucket_count} buckets" \
-            "${case_root}/runs/plain/Log.out" >/dev/null \
-            || die "bucket path did not activate for ${label}"
-    fi
-    printf 'status=pass\n' > "${case_root}/PASS"
 }
 
 make_jax_800k_fixture() {
@@ -203,11 +145,6 @@ run_jax_case() {
 
 case "${CASE}" in
 B3)
-    run_gold_case off off 4 256
-    run_gold_case ram ram 4 256
-    compare_runs "${OUT_ROOT}/gold_off/runs/plain" \
-                 "${OUT_ROOT}/gold_ram/runs/plain" "B3_gold_off_vs_ram"
-
     jax_fixture="${OUT_ROOT}/jax800k_fixture"
     if make_jax_800k_fixture "${jax_fixture}" \
         && run_jax_case off off "${jax_fixture}" \
@@ -218,59 +155,9 @@ B3)
         ram_counters="$(grep -F 'Flex pipeline complete:' "${OUT_ROOT}/jax800k_ram/Log.out" | tail -1)"
         [[ "${off_counters}" == "${ram_counters}" ]] \
             || die "JAX 800k pipeline counters differ"
-        echo "PASS: B3 gold fixture and JAX 800k RAM-bucket equality"
+        echo "PASS: B3 JAX 800k RAM-bucket equality"
     else
-        echo "SKIP: B3 JAX 800k subcase (host fixture or reference assets absent)"
-        echo "PASS: B3 gold fixture RAM-bucket equality"
+        echo "SKIP: B3 JAX 800k (host fixture or reference assets absent)"
     fi
-    ;;
-B4)
-    run_gold_case off off 4 256
-    baseline="${OUT_ROOT}/gold_off/runs/plain"
-    for threads in 1 8 32; do
-        for buckets in 64 256 1024; do
-            label="ram_t${threads}_p${buckets}"
-            run_gold_case "${label}" ram "${threads}" "${buckets}"
-            compare_runs "${baseline}" "${OUT_ROOT}/gold_${label}/runs/plain" \
-                         "B4_${label}"
-        done
-    done
-    echo "PASS: B4 RAM-bucket equality at 1/8/32 threads and 64/256/1024 buckets"
-    ;;
-B5)
-    run_gold_case off off 4 256
-    run_gold_case spill spill 4 256
-    run_gold_case auto_transition auto 4 256 0.000001
-    baseline="${OUT_ROOT}/gold_off/runs/plain"
-    compare_runs "${baseline}" "${OUT_ROOT}/gold_spill/runs/plain" \
-                 "B5_off_vs_spill"
-    compare_runs "${OUT_ROOT}/gold_spill/runs/plain" \
-                 "${OUT_ROOT}/gold_auto_transition/runs/plain" \
-                 "B5_spill_vs_auto_transition"
-    grep -F "[CB-BUCKET] backend=spill transitioned=no" \
-        "${OUT_ROOT}/gold_spill/runs/plain/Log.out" >/dev/null \
-        || die "spill-from-start backend marker is absent"
-    grep -F "[CB-BUCKET] backend=spill transitioned=yes" \
-        "${OUT_ROOT}/gold_auto_transition/runs/plain/Log.out" >/dev/null \
-        || die "automatic RAM-to-spill transition marker is absent"
-    if find "${OUT_ROOT}/spill_spill" "${OUT_ROOT}/spill_auto_transition" \
-        -type f -name '*.cbb' -print -quit | grep -q .; then
-        die "CB bucket spill files were not cleaned after a successful run"
-    fi
-    echo "PASS: B5 spill and auto-transition output equality"
-    ;;
-B6)
-    run_gold_case tag_serial ram 1 256
-    run_gold_case tag_parallel ram 8 256
-    compare_runs "${OUT_ROOT}/gold_tag_serial/runs/plain" \
-                 "${OUT_ROOT}/gold_tag_parallel/runs/plain" \
-                 "B6_serial_vs_parallel_tags"
-    grep -F "[FlexFilter] Processing 2 tags with 1 tag threads" \
-        "${OUT_ROOT}/gold_tag_serial.log" >/dev/null \
-        || die "serial flexfilter tag-thread marker is absent"
-    grep -F "[FlexFilter] Processing 2 tags with 2 tag threads" \
-        "${OUT_ROOT}/gold_tag_parallel.log" >/dev/null \
-        || die "parallel flexfilter tag-thread marker is absent"
-    echo "PASS: B6 serial and parallel-across-tag output equality"
     ;;
 esac
