@@ -268,12 +268,17 @@ f7vanilla, f7modern, f7modernbam.
    the allocator design, Flex, CBQ or the feature readers, or a permit path
    is being bypassed: stop and report without changing anything. Put the
    explanation, with evidence, in this handoff.
-2. **D5 (fast parser) is still open.** Until the coordinator sends the
-   answer, it is not in 1.11.0; do not start M4b.
-3. **M6 is approved** once the permit question is resolved without a stop:
-   first the parts that do not depend on D5 (README option list, final
-   release notes with the D5 line left open), then G-R5 (G-S1 plus Tier A)
-   unless D5 is in by then. Stop and report at the end of M6. No tag, push,
+2. **D5 (fast parser): decided later on 30 Sep: implement M4b in 1.11.0.**
+   Reasoning (author): simple, will help in some cases; FASTQ is not text,
+   so `\r` is an ordinary byte (as on the current getline path), with no
+   special handling. Everything else matches the current reader exactly;
+   the harness keeps the iostream path as an oracle; extended G-R0; commit
+   M4b on its own; rebuild C from clean; rerun G-R1/G-R2 (M3 variants, F3)
+   and G-R3; then M6 with D5 recorded as included. Order: finish the
+   FEATURE-permit investigation first (its stop conditions apply).
+3. **M6 is approved** once the permit question is resolved without a stop
+   and M4b is re-gated: README option list, final release notes (D5
+   included; no timing claims), then G-R5 (G-S1 plus Tier A) on the final C. Stop and report at the end of M6. No tag, push,
    merge or release (the STAR 1.11.0 release is a separate go).
 4. Lock: batching under the lock is fine; wait without a cutoff; stop only
    if a single wait passes about 3 hours.
