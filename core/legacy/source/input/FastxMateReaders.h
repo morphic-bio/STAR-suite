@@ -13,9 +13,13 @@
 // downstream sees identical input.
 //
 // The parse repeats the single-threaded loop's istream calls, in the same
-// order, on each mate's stream, through a stream buffer that gives back the
-// reader's compute permit while it waits for input bytes. A reader never
-// holds a permit while it waits for input or for queue space.
+// order, on each mate's stream. By default it runs on FastxMateByteStream, a
+// buffered parser that scans the raw bytes for '\n' and reproduces those
+// calls' results and stream states exactly ('\r' is an ordinary byte, as for
+// getline); the iostream path is kept as an oracle for the harness. Either
+// way the input buffer gives back the reader's compute permit while it waits
+// for input bytes, so a reader never holds a permit while it waits for input
+// or for queue space.
 //
 // Blank lines where a read header is expected (the author's decisions of 29
 // and 30 Sep, a deliberate change from v1.10.0, which ended the input at such
@@ -55,11 +59,16 @@ static constexpr size_t kFastxMateReadBufferBytes = size_t(1) << 20;
 static constexpr uint32_t kFastxMateMaxMates = 3;
 
 // STAR's line limits (IncludeDefine.h), passed in so this module does not
-// depend on STAR's global headers.
+// depend on STAR's global headers, and the parser settings.
 struct FastxMateLimits {
     long long nameSeqLineMax = 0;  // DEF_readNameSeqLengthMax
     long long seqLineMax = 0;      // DEF_readSeqLengthMax
+    bool fastaReadIdNumber = false;  // --outSAMreadID Number (FASTA header skip)
+    size_t readBufferBytes = kFastxMateReadBufferBytes;  // input buffer per mate
+    bool iostreamParser = false;   // harness oracle: parse through std::istream
 };
+
+class FastxMateByteStream;
 
 // One record of one mate. Offsets index the batch arena. seq/qual hold the
 // exact bytes the single-threaded loop copies for that line, including the
@@ -182,6 +191,8 @@ public:
     std::string fileName(int lane) const;
 
 private:
+    friend class FastxMateByteStream;
+
     class InputBuf : public std::streambuf {
     public:
         InputBuf(FastxMateReader* owner, std::streambuf* source);
@@ -194,17 +205,24 @@ private:
     };
 
     void run();
-    bool fillBatch(FastxMateBatch* batch, std::istream& in);
+    template <class In> void runWith(In& in);
+    // The parse, on std::istream (oracle) or FastxMateByteStream.
+    template <class In> bool fillBatch(FastxMateBatch* batch, In& in);
     // headerRest: the header text after the token when the header line was
     // already read whole (a header line that starts with whitespace);
     // nullptr when the stream is positioned just after the token.
-    bool parseFastq(FastxMateBatch* batch, std::istream& in, FastxMateRecord* record,
+    template <class In>
+    bool parseFastq(FastxMateBatch* batch, In& in, FastxMateRecord* record,
                     const std::string& token, const std::string* headerRest);
-    void parseFasta(FastxMateBatch* batch, std::istream& in, FastxMateRecord* record,
+    template <class In>
+    void parseFasta(FastxMateBatch* batch, In& in, FastxMateRecord* record,
                     const std::string& token, bool headerRead);
     void noteBlankLine(FastxMateBatch* batch);
     bool failAfterBlank(FastxMateBatch* batch, uint64_t line);
-    bool appendLine(FastxMateBatch* batch, std::istream& in, uint32_t* offset, uint32_t* length);
+    template <class In>
+    bool appendLine(FastxMateBatch* batch, In& in, uint32_t* offset, uint32_t* length);
+    // Input wait with the permit given back (both parsers).
+    std::streamsize readInput(std::streambuf* source, char* buffer, std::streamsize size);
     void markLane(FastxMateBatch* batch, int nextLane);
     FastxMateBatch* takeFree();
     void pushReady(FastxMateBatch* batch);

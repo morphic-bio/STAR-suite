@@ -584,6 +584,38 @@ Multiomics needs no change; the option passes through its argv adapter.
 Optionally, Multiomics could later own or pin it as it does the BGZF modes
 (Multiomics follow-up, not part of this change).
 
+### 3.11 Buffered parser (M4b, D5 decided 30 Sep)
+
+- `FastxMateByteStream` (in `input/FastxMateReaders.cpp`) is the default
+  parser. It reads each mate's stream into a buffer (1 MiB) and implements
+  the istream operations the reader uses: `peek`, `getline(buf, n)` with its
+  `gcount`, `ignore(n, '\n')`, `>>` into a string and into an int (lane
+  markers), `std::getline` into a string. Results, `gcount` and stream states
+  (good, eof, fail; a failed sentry extracts nothing) are those of libstdc++
+  (GCC 12). It scans with `memchr` for `\n`; `\r` and every other byte are
+  ordinary bytes, as for getline, with no special handling.
+- The parse code is shared: `fillBatch`, `parseFastq`, `parseFasta` and
+  `appendLine` are templates over the stream, instantiated for the byte
+  stream and for `std::istream`. The iostream path is kept as the harness
+  oracle (`FastxMateLimits::iostreamParser`).
+- Permits are unchanged: the input read (`readInput`) gives the permit back
+  before any blocking read and takes it again afterwards, for both parsers.
+- Identity fix found by the extended G-R0 (present since M2, not in any
+  gate's real data): with `--outSAMreadID Number`, v1.10.0 skipped up to
+  `DEF_readNameSeqLengthMax` characters of a FASTA header from the start of
+  the line (it does not read the ID token in that mode); the reader skipped
+  that many after the token. They differed only for a header longer than the
+  limit. The reader now skips `limit - token length` in that mode
+  (`FastxMateLimits::fastaReadIdNumber`).
+- Extended G-R0: new identity cases (`\r` bytes inside lines, a `+` line at
+  and just under the `ignore` limit, a FASTQ sequence line at the `getline`
+  limit, a FASTA header past the `ignore` limit); every threaded run is
+  repeated with the iostream oracle and with a 7-byte buffer and must agree
+  exactly; part 4 reruns the identity cases with 1, 2, 3, 61 and 4,096-byte
+  buffers against the copy of the old loop, and compares the two parsers on
+  malformed inputs (over-limit sequence line, truncated record, odd lane
+  markers, vertical-tab and form-feed record starts, tab-led lines).
+
 ## 4. Output-identity gates against v1.10.0
 
 ### 4.1 Builds

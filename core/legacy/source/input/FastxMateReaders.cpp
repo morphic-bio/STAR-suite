@@ -69,13 +69,6 @@ std::string trimHeaderExtra(std::string extra) {
     return extra;
 }
 
-// Same as fastqHeaderExtraFromCurrentLine in ReadAlignChunk_processChunks.cpp.
-std::string headerExtra(std::istream& in) {
-    std::string extra;
-    std::getline(in, extra);
-    return trimHeaderExtra(extra);
-}
-
 const char* headerKind(char format) {
     if (format == '@') {
         return "a FASTQ read header ('@')";
@@ -106,7 +99,8 @@ const char* formatName(char format) {
 // ---------------------------------------------------------------- InputBuf
 
 FastxMateReader::InputBuf::InputBuf(FastxMateReader* owner, std::streambuf* source)
-    : owner_(owner), source_(source), buffer_(kFastxMateReadBufferBytes) {
+    : owner_(owner), source_(source),
+      buffer_(std::max<size_t>(owner->limits_.readBufferBytes, 1)) {
     setg(buffer_.data(), buffer_.data(), buffer_.data());
 }
 
@@ -117,24 +111,326 @@ FastxMateReader::InputBuf::int_type FastxMateReader::InputBuf::underflow() {
     if (gptr() < egptr()) {
         return traits_type::to_int_type(*gptr());
     }
-    const bool held = owner_->holding_;
-    if (held) {
-        owner_->releasePermit();
-    }
-    const uint64_t start = nowNs();
-    const std::streamsize got =
-        source_->sgetn(buffer_.data(), static_cast<std::streamsize>(buffer_.size()));
-    owner_->stats_.inputWaitNs += nowNs() - start;
-    if (held) {
-        owner_->acquirePermit();
-    }
+    const std::streamsize got = owner_->readInput(
+        source_, buffer_.data(), static_cast<std::streamsize>(buffer_.size()));
     if (got <= 0) {
         return traits_type::eof();
     }
-    owner_->stats_.bytes += static_cast<uint64_t>(got);
     setg(buffer_.data(), buffer_.data(), buffer_.data() + got);
     return traits_type::to_int_type(*gptr());
 }
+
+// Reads the next input bytes. The permit is given back for the wait, so a
+// reader never holds one while its producer (which may itself need a permit)
+// is behind.
+std::streamsize FastxMateReader::readInput(std::streambuf* source, char* buffer,
+                                           std::streamsize size) {
+    const bool held = holding_;
+    if (held) {
+        releasePermit();
+    }
+    const uint64_t start = nowNs();
+    const std::streamsize got = source->sgetn(buffer, size);
+    stats_.inputWaitNs += nowNs() - start;
+    if (held) {
+        acquirePermit();
+    }
+    if (got > 0) {
+        stats_.bytes += static_cast<uint64_t>(got);
+    }
+    return got;
+}
+
+// ------------------------------------------------------- FastxMateByteStream
+
+// The buffered parser: the std::istream operations the reader uses, on a raw
+// byte buffer, with the same results, gcount and stream states as libstdc++
+// (goodbit/eofbit/failbit; a failed sentry sets failbit and extracts nothing).
+// '\r' and every other byte are ordinary bytes; only '\n' ends a line.
+class FastxMateByteStream {
+public:
+    FastxMateByteStream(FastxMateReader* owner, std::streambuf* source, size_t bufferBytes)
+        : owner_(owner), source_(source), buffer_(std::max<size_t>(bufferBytes, 1)) {}
+
+    bool good() const { return state_ == 0; }
+    explicit operator bool() const { return (state_ & kFail) == 0; }
+    bool operator!() const { return (state_ & kFail) != 0; }
+    std::streamsize gcount() const { return gcount_; }
+
+    // istream::peek
+    int peek() {
+        gcount_ = 0;
+        if (state_ != 0) {
+            state_ |= kFail;
+            return EOF;
+        }
+        if (!available()) {
+            state_ |= kEof;
+            return EOF;
+        }
+        return static_cast<unsigned char>(buffer_[pos_]);
+    }
+
+    // istream::getline(s, n) with delimiter '\n'
+    FastxMateByteStream& getline(char* s, std::streamsize n) {
+        gcount_ = 0;
+        if (state_ != 0) {
+            state_ |= kFail;
+            if (n > 0) {
+                *s = '\0';
+            }
+            return *this;
+        }
+        std::streamsize stored = 0;
+        for (;;) {
+            if (!available()) {
+                state_ |= kEof;
+                break;
+            }
+            const std::streamsize room = n - 1 - stored;
+            if (room <= 0) {
+                if (buffer_[pos_] == '\n') {
+                    ++pos_;
+                    ++gcount_;
+                } else {
+                    state_ |= kFail;
+                }
+                break;
+            }
+            const size_t span = std::min(end_ - pos_, static_cast<size_t>(room));
+            const char* from = buffer_.data() + pos_;
+            const char* newline = static_cast<const char*>(std::memchr(from, '\n', span));
+            const size_t take = newline != nullptr ? static_cast<size_t>(newline - from) : span;
+            std::memcpy(s + stored, from, take);
+            stored += static_cast<std::streamsize>(take);
+            gcount_ += static_cast<std::streamsize>(take);
+            pos_ += take;
+            if (newline != nullptr) {
+                ++pos_;
+                ++gcount_;
+                break;
+            }
+        }
+        if (n > 0) {
+            s[stored] = '\0';
+        }
+        if (gcount_ == 0) {
+            state_ |= kFail;
+        }
+        return *this;
+    }
+
+    // istream::ignore(n, delim) (GCC 12 semantics: with a finite n, stop after
+    // n characters without extracting a following delimiter; eofbit only if
+    // the end of input comes first).
+    FastxMateByteStream& ignore(std::streamsize n, int delim) {
+        gcount_ = 0;
+        if (state_ != 0) {
+            state_ |= kFail;
+            return *this;
+        }
+        if (n <= 0) {
+            return *this;
+        }
+        const bool unlimited = n == std::numeric_limits<std::streamsize>::max();
+        for (;;) {
+            if (!unlimited && gcount_ >= n) {
+                return *this;
+            }
+            if (!available()) {
+                state_ |= kEof;
+                return *this;
+            }
+            size_t span = end_ - pos_;
+            if (!unlimited) {
+                span = std::min(span, static_cast<size_t>(n - gcount_));
+            }
+            const char* from = buffer_.data() + pos_;
+            const char* hit = static_cast<const char*>(
+                std::memchr(from, static_cast<unsigned char>(delim), span));
+            if (hit != nullptr) {
+                const size_t take = static_cast<size_t>(hit - from) + 1;
+                pos_ += take;
+                if (!unlimited) {
+                    gcount_ += static_cast<std::streamsize>(take);
+                }
+                return *this;
+            }
+            pos_ += span;
+            if (!unlimited) {
+                gcount_ += static_cast<std::streamsize>(span);
+            }
+        }
+    }
+
+    // operator>>(istream&, std::string&): skip whitespace, read a word.
+    FastxMateByteStream& operator>>(std::string& word) {
+        if (!skipWhitespace()) {
+            return *this;
+        }
+        word.clear();
+        for (;;) {
+            if (!available()) {
+                state_ |= kEof;
+                break;
+            }
+            const size_t start = pos_;
+            while (pos_ < end_ && !isSpaceChar(static_cast<unsigned char>(buffer_[pos_]))) {
+                ++pos_;
+            }
+            word.append(buffer_.data() + start, pos_ - start);
+            if (pos_ < end_) {
+                break;
+            }
+        }
+        return *this;
+    }
+
+    // operator>>(int&) for the lane markers ("FILE <n>"): skip whitespace, an
+    // optional sign, decimal digits; no digits sets failbit and 0.
+    FastxMateByteStream& operator>>(int& value) {
+        if (!skipWhitespace()) {
+            return *this;
+        }
+        bool negative = false;
+        int c = buffer_[pos_];
+        if (c == '+' || c == '-') {
+            negative = c == '-';
+            ++pos_;
+        }
+        long long parsed = 0;
+        bool digits = false;
+        bool overflow = false;
+        for (;;) {
+            if (!available()) {
+                state_ |= kEof;
+                break;
+            }
+            c = static_cast<unsigned char>(buffer_[pos_]);
+            if (c < '0' || c > '9') {
+                break;
+            }
+            digits = true;
+            parsed = parsed * 10 + (c - '0');
+            if (parsed > static_cast<long long>(std::numeric_limits<int>::max()) + 1) {
+                overflow = true;
+                parsed = static_cast<long long>(std::numeric_limits<int>::max()) + 1;
+            }
+            ++pos_;
+        }
+        if (!digits) {
+            value = 0;
+            state_ |= kFail;
+            return *this;
+        }
+        const long long signedValue = negative ? -parsed : parsed;
+        if (overflow || signedValue > std::numeric_limits<int>::max() ||
+            signedValue < std::numeric_limits<int>::min()) {
+            value = signedValue < 0 ? std::numeric_limits<int>::min() : std::numeric_limits<int>::max();
+            state_ |= kFail;
+            return *this;
+        }
+        value = static_cast<int>(signedValue);
+        return *this;
+    }
+
+    // std::getline(istream&, std::string&)
+    FastxMateByteStream& getline(std::string& line) {
+        if (state_ != 0) {
+            state_ |= kFail;
+            return *this;
+        }
+        line.clear();
+        size_t extracted = 0;
+        for (;;) {
+            if (!available()) {
+                state_ |= kEof;
+                break;
+            }
+            const char* from = buffer_.data() + pos_;
+            const size_t span = end_ - pos_;
+            const char* newline = static_cast<const char*>(std::memchr(from, '\n', span));
+            const size_t take = newline != nullptr ? static_cast<size_t>(newline - from) : span;
+            line.append(from, take);
+            pos_ += take;
+            extracted += take;
+            if (newline != nullptr) {
+                ++pos_;
+                ++extracted;
+                break;
+            }
+        }
+        if (extracted == 0) {
+            state_ |= kFail;
+        }
+        return *this;
+    }
+
+private:
+    static constexpr unsigned kEof = 1;
+    static constexpr unsigned kFail = 2;
+
+    // True when a byte is available at pos_ (refilling as needed).
+    bool available() {
+        if (pos_ < end_) {
+            return true;
+        }
+        const std::streamsize got = owner_->readInput(
+            source_, buffer_.data(), static_cast<std::streamsize>(buffer_.size()));
+        pos_ = 0;
+        end_ = got > 0 ? static_cast<size_t>(got) : 0;
+        return end_ > 0;
+    }
+
+    // The formatted-input sentry: whitespace skipped; end of input sets
+    // eofbit and failbit. Returns true when a non-space byte is at pos_.
+    bool skipWhitespace() {
+        if (state_ != 0) {
+            state_ |= kFail;
+            return false;
+        }
+        for (;;) {
+            if (!available()) {
+                state_ |= kEof | kFail;
+                return false;
+            }
+            while (pos_ < end_ && isSpaceChar(static_cast<unsigned char>(buffer_[pos_]))) {
+                ++pos_;
+            }
+            if (pos_ < end_) {
+                return true;
+            }
+        }
+    }
+
+    FastxMateReader* owner_;
+    std::streambuf* source_;
+    std::vector<char> buffer_;
+    size_t pos_ = 0;
+    size_t end_ = 0;
+    unsigned state_ = 0;
+    std::streamsize gcount_ = 0;
+};
+
+namespace {
+
+void readLine(std::istream& in, std::string& line) {
+    std::getline(in, line);
+}
+
+void readLine(FastxMateByteStream& in, std::string& line) {
+    in.getline(line);
+}
+
+// Same as fastqHeaderExtraFromCurrentLine in ReadAlignChunk_processChunks.cpp.
+template <class In>
+std::string headerExtra(In& in) {
+    std::string extra;
+    readLine(in, extra);
+    return trimHeaderExtra(extra);
+}
+
+}  // namespace
 
 // --------------------------------------------------------- FastxMateReader
 
@@ -293,8 +589,18 @@ void FastxMateReader::releasePermit() {
 }
 
 void FastxMateReader::run() {
-    InputBuf buffer(this, source_->rdbuf());
-    std::istream in(&buffer);
+    if (limits_.iostreamParser) {
+        InputBuf buffer(this, source_->rdbuf());
+        std::istream in(&buffer);
+        runWith(in);
+    } else {
+        FastxMateByteStream in(this, source_->rdbuf(), limits_.readBufferBytes);
+        runWith(in);
+    }
+}
+
+template <class In>
+void FastxMateReader::runWith(In& in) {
     for (;;) {
         FastxMateBatch* batch = takeFree();
         if (batch == nullptr) {
@@ -400,7 +706,8 @@ bool FastxMateReader::failAfterBlank(FastxMateBatch* batch, uint64_t line) {
 // The single-threaded loop's fastqReadOneLine: getline with its limit, drop
 // one trailing byte below 33, end with a newline. For a one-byte result it
 // wrote the newline over the preceding newline and added nothing.
-bool FastxMateReader::appendLine(FastxMateBatch* batch, std::istream& in,
+template <class In>
+bool FastxMateReader::appendLine(FastxMateBatch* batch, In& in,
                                  uint32_t* offset, uint32_t* length) {
     in.getline(lineBuffer_.data(), static_cast<std::streamsize>(limits_.nameSeqLineMax + 1));
     const std::streamsize got = in.gcount();
@@ -423,7 +730,8 @@ bool FastxMateReader::appendLine(FastxMateBatch* batch, std::istream& in,
     return true;
 }
 
-bool FastxMateReader::parseFastq(FastxMateBatch* batch, std::istream& in,
+template <class In>
+bool FastxMateReader::parseFastq(FastxMateBatch* batch, In& in,
                                  FastxMateRecord* record, const std::string& token,
                                  const std::string* headerRest) {
     if (mate_ == 0) {
@@ -458,13 +766,23 @@ bool FastxMateReader::parseFastq(FastxMateBatch* batch, std::istream& in,
 
 // The single-threaded loop's FASTA branch: the header token, the rest of the
 // header ignored, then sequence lines joined until the next record start.
-void FastxMateReader::parseFasta(FastxMateBatch* batch, std::istream& in,
+template <class In>
+void FastxMateReader::parseFasta(FastxMateBatch* batch, In& in,
                                  FastxMateRecord* record, const std::string& token,
                                  bool headerRead) {
     record->idOff = batch->append(token.data(), token.size());
     record->idLen = static_cast<uint32_t>(token.size());
     if (!headerRead) {
-        in.ignore(static_cast<std::streamsize>(limits_.nameSeqLineMax), '\n');
+        // The single-threaded loop skipped up to DEF_readNameSeqLengthMax
+        // characters after the ID token, or, with --outSAMreadID Number
+        // (where it did not read the token), from the start of the header
+        // line. The two differ only for a header longer than that limit.
+        std::streamsize skip = static_cast<std::streamsize>(limits_.nameSeqLineMax);
+        if (limits_.fastaReadIdNumber) {
+            const std::streamsize read = static_cast<std::streamsize>(token.size());
+            skip = read < skip ? skip - read : 0;
+        }
+        in.ignore(skip, '\n');
         ++line_;
     }
     const size_t start = batch->arena.size();
@@ -491,7 +809,8 @@ void FastxMateReader::parseFasta(FastxMateBatch* batch, std::istream& in,
 }
 
 // Fills one batch. Returns true when this mate's input has ended (or failed).
-bool FastxMateReader::fillBatch(FastxMateBatch* batch, std::istream& in) {
+template <class In>
+bool FastxMateReader::fillBatch(FastxMateBatch* batch, In& in) {
     std::string token, word, rest, line;
     while (batch->records.size() < kFastxMateBatchRecords) {
         if (stop_.load(std::memory_order_relaxed)) {
@@ -511,7 +830,7 @@ bool FastxMateReader::fillBatch(FastxMateBatch* batch, std::istream& in) {
             // A line that starts with whitespace where a read header is
             // expected. A blank line is skipped (and counted) only if the
             // next non-blank line is a read header or the file ends.
-            std::getline(in, line);
+            readLine(in, line);
             ++line_;
             if (isBlankLine(line)) {
                 noteBlankLine(batch);
@@ -572,7 +891,7 @@ bool FastxMateReader::fillBatch(FastxMateBatch* batch, std::istream& in) {
                 if (afterBlank_) {
                     return failAfterBlank(batch, line_ + 1);
                 }
-                std::getline(in, rest);
+                readLine(in, rest);
                 batch->end = FastxMateEnd::Error;
                 batch->errorWord = word;
                 batch->errorRest = rest;

@@ -19,6 +19,15 @@
 // counted per file; a second blank line in a row before the end of the file,
 // or a blank line before anything but a header, is fatal, naming file and line.
 //
+// Every threaded run uses the buffered byte parser (the default) and is
+// repeated with the iostream parser (the oracle) and with the byte parser on
+// a 7-byte input buffer; all three must agree exactly (chunks, read numbers,
+// lanes, Log.out lines, warnings, fatal texts, blank-line counts). Part 4
+// repeats the identity cases with input buffers of 1 to 4096 bytes, so every
+// record is split across buffer refills, and compares the two parsers on
+// malformed inputs where the single-threaded loop's behaviour is not the
+// reference.
+//
 // Usage: fastx_mate_reader_harness <scratch dir>
 
 #include "input/FastxMateReaders.h"
@@ -54,6 +63,8 @@ struct Options {
     unsigned long long readMapNumber = static_cast<unsigned long long>(-1);
     bool readIdNumber = false;
     bool permits = false;
+    bool iostreamParser = false;       // the oracle
+    size_t readBufferBytes = 1 << 20;  // reader input buffer
 };
 
 struct Chunk {
@@ -285,7 +296,7 @@ std::string laneFileName(const std::string& path, int lane) {
     return path + "#" + std::to_string(lane);
 }
 
-Result runThreads(const std::vector<std::string>& files, const Options& options) {
+Result runThreadsWith(const std::vector<std::string>& files, const Options& options) {
     Result result;
     const size_t mates = files.size();
     std::ifstream in[3];
@@ -306,6 +317,9 @@ Result runThreads(const std::vector<std::string>& files, const Options& options)
     FastxMateLimits limits;
     limits.nameSeqLineMax = kNameSeqLengthMax;
     limits.seqLineMax = kSeqLengthMax;
+    limits.iostreamParser = options.iostreamParser;
+    limits.fastaReadIdNumber = options.readIdNumber;
+    limits.readBufferBytes = options.readBufferBytes;
     unsigned long long iReadAll = 0;
     int readFilesIndex = 0;
     const unsigned long long array = arrayBytes(options);
@@ -355,6 +369,47 @@ Result runThreads(const std::vector<std::string>& files, const Options& options)
         result.summary = group.summary();
     }
     result.reads = iReadAll;
+    return result;
+}
+
+// The summary lines that must not depend on the parser.
+std::string stableSummary(const std::string& summary) {
+    std::istringstream in(summary);
+    std::string line, out;
+    while (std::getline(in, line)) {
+        if (line.find("skipped") != std::string::npos || line.find(" reads") != std::string::npos) {
+            if (line.find("records=") == std::string::npos) {
+                out += line + "\n";
+            }
+        }
+    }
+    return out;
+}
+
+std::string compareFull(const Result& a, const Result& b, size_t mates);
+
+int g_parserMismatches = 0;
+
+// The byte parser, checked against the iostream oracle and against itself on
+// a 7-byte buffer (records split across refills).
+Result runThreads(const std::vector<std::string>& files, const Options& options) {
+    Options bytes = options;
+    bytes.iostreamParser = false;
+    const Result result = runThreadsWith(files, bytes);
+    Options oracle = options;
+    oracle.iostreamParser = true;
+    Options small = bytes;
+    small.readBufferBytes = 7;
+    const Result reference = runThreadsWith(files, oracle);
+    const Result split = runThreadsWith(files, small);
+    const std::string d1 = compareFull(reference, result, files.size());
+    const std::string d2 = compareFull(result, split, files.size());
+    if (!d1.empty() || !d2.empty()) {
+        ++g_parserMismatches;
+        std::cout << "FAIL parser " << files[0] << ": "
+                  << (d1.empty() ? "" : "iostream vs bytes: " + d1 + "; ")
+                  << (d2.empty() ? "" : "bytes vs 7-byte buffer: " + d2) << "\n";
+    }
     return result;
 }
 
@@ -546,6 +601,68 @@ std::vector<Case> identityCases() {
         cases.push_back(c);
     }
     {
+        // '\r' bytes inside header, sequence and quality lines: ordinary
+        // bytes for getline, the old loop and the byte parser alike.
+        Case c{"cr_inside_lines", {"", ""}};
+        for (size_t i = 0; i < 200; ++i) {
+            const std::string name = "q" + std::to_string(i);
+            const std::string seq0 = bases(rng, 40) + "\r" + bases(rng, 40);
+            c.mates[0] += "@" + name + " 1:N:0:A\rB\n" + seq0 + "\n+\r\n" +
+                          std::string(40, 'I') + "\r" + std::string(40, 'J') + "\n";
+            c.mates[1] += fastq(name, "2:N:0:A", bases(rng, 28), i % 3 ? "\n" : "\r\n");
+        }
+        cases.push_back(c);
+    }
+    {
+        // A '+' line just under the ignore() limit (DEF_readNameSeqLengthMax
+        // characters including its newline) and one exactly at it: ignore()
+        // stops after the limit and leaves that line's newline, which the old
+        // loop then reads as an empty quality line; the next line is not a
+        // record start, so the input ends with the read ID format error.
+        Case c{"plus_line_at_ignore_limit", {"", ""}};
+        pairedFastq(rng, 20, 0, 90, 28, &c.mates[0], &c.mates[1]);
+        c.mates[0] += "@u0 1:N:0:A\n" + bases(rng, 90) + "\n+" +
+                      std::string(static_cast<size_t>(kNameSeqLengthMax) - 2, 'P') + "\n" +
+                      std::string(90, 'I') + "\n";
+        c.mates[1] += fastq("u0", "2:N:0:A", bases(rng, 28));
+        pairedFastq(rng, 20, 21, 90, 28, &c.mates[0], &c.mates[1]);
+        c.mates[0] += "@u1 1:N:0:A\n" + bases(rng, 90) + "\n+" +
+                      std::string(static_cast<size_t>(kNameSeqLengthMax) - 1, 'P') + "\n" +
+                      std::string(90, 'I') + "\n";
+        c.mates[1] += fastq("u1", "2:N:0:A", bases(rng, 28));
+        pairedFastq(rng, 20, 42, 90, 28, &c.mates[0], &c.mates[1]);
+        cases.push_back(c);
+    }
+    {
+        // A FASTQ sequence line exactly at the getline() limit
+        // (DEF_readNameSeqLengthMax bytes before the newline).
+        Case c{"fastq_seq_line_at_limit", {"", ""}};
+        for (size_t i = 0; i < 4; ++i) {
+            const std::string name = "v" + std::to_string(i);
+            const size_t len = i == 2 ? static_cast<size_t>(kNameSeqLengthMax) : 90;
+            c.mates[0] += fastq(name, "1:N:0:A", std::string(len, 'A'));
+            c.mates[1] += fastq(name, "2:N:0:A", bases(rng, 28));
+        }
+        cases.push_back(c);
+    }
+    {
+        // A FASTA header whose description runs past the ignore() limit: the
+        // rest of the header is read as sequence lines, in both paths.
+        Case c{"fasta_header_over_ignore_limit", {"", ""}};
+        for (size_t i = 0; i < 6; ++i) {
+            const std::string name = "w" + std::to_string(i);
+            if (i == 3) {
+                c.mates[0] += ">" + name + " " +
+                              std::string(static_cast<size_t>(kNameSeqLengthMax) + 300, 'D') + "\n" +
+                              bases(rng, 70) + "\n";
+            } else {
+                c.mates[0] += fasta(name, bases(rng, 70), 1000);
+            }
+            c.mates[1] += fasta(name, bases(rng, 40), 1000);
+        }
+        cases.push_back(c);
+    }
+    {
         // Several refills of the reader's 1 MiB input buffer.
         Case c{"big", {"", ""}};
         pairedFastq(rng, 40000, 0, 90, 28, &c.mates[0], &c.mates[1]);
@@ -615,6 +732,24 @@ std::string compare(const Result& a, const Result& b, size_t mates) {
     }
     if (a.reads != b.reads) {
         return "read count " + std::to_string(a.reads) + " vs " + std::to_string(b.reads);
+    }
+    return "";
+}
+
+std::string compareFull(const Result& a, const Result& b, size_t mates) {
+    std::string d = compare(a, b, mates);
+    if (!d.empty()) {
+        return d;
+    }
+    if (a.fatalText != b.fatalText) {
+        return "fatal text differs";
+    }
+    if (a.warnings != b.warnings) {
+        return "warnings differ (" + std::to_string(a.warnings.size()) + " vs " +
+               std::to_string(b.warnings.size()) + ")";
+    }
+    if (stableSummary(a.summary) != stableSummary(b.summary)) {
+        return "summary differs";
     }
     return "";
 }
@@ -927,6 +1062,115 @@ int blankLinePart(const std::string& dir) {
     return failures;
 }
 
+// ---- part 4: buffer splits and parser equivalence on malformed input --------
+
+int bufferPart(const std::string& dir) {
+    int failures = 0;
+    int runs = 0;
+    const size_t sizes[] = {1, 2, 3, 61, 4096};
+    for (const Case& c : identityCases()) {
+        if (c.name == "big" || c.name == "long_extras" || c.name == "line_limits_fastq" ||
+            c.name == "plus_line_at_ignore_limit" || c.name == "fastq_seq_line_at_limit" ||
+            c.name == "fasta_header_over_ignore_limit") {
+            continue;  // large inputs: covered by the 7-byte buffer in every run
+        }
+        const std::vector<std::string> files = writeCase(dir, c);
+        Options options;
+        const Result legacy = runLegacy(files, options);
+        for (const size_t size : sizes) {
+            Options bytes = options;
+            bytes.readBufferBytes = size;
+            bytes.permits = size == 3;
+            const Result r = runThreadsWith(files, bytes);
+            std::string difference = compare(legacy, r, files.size());
+            ++runs;
+            if (!difference.empty()) {
+                ++failures;
+                std::cout << "FAIL buffer " << c.name << " [" << size << " bytes]: " << difference << "\n";
+            }
+        }
+    }
+
+    // Malformed inputs where the single-threaded loop is not the reference:
+    // the byte parser must equal the iostream parser (runThreads compares).
+    std::mt19937 rng(23);
+    std::vector<Case> odd;
+    {
+        Case c{"seq_line_over_limit", {"", ""}};
+        pairedFastq(rng, 5, 0, 90, 28, &c.mates[0], &c.mates[1]);
+        c.mates[0] += fastq("x5", "1:N:0:A", std::string(static_cast<size_t>(kNameSeqLengthMax) + 1, 'C'));
+        c.mates[1] += fastq("x5", "2:N:0:A", bases(rng, 28));
+        pairedFastq(rng, 5, 6, 90, 28, &c.mates[0], &c.mates[1]);
+        odd.push_back(c);
+    }
+    {
+        Case c{"truncated_record", {"", ""}};
+        pairedFastq(rng, 30, 0, 90, 28, &c.mates[0], &c.mates[1]);
+        c.mates[0] += "@t30 1:N:0:A\nACGT";
+        c.mates[1] += "@t30 2:N:0:A\nACGT\n+\n";
+        odd.push_back(c);
+    }
+    {
+        Case c{"odd_lane_markers", {"FILE 0\n", "FILE 0\n"}};
+        pairedFastq(rng, 10, 0, 90, 28, &c.mates[0], &c.mates[1]);
+        c.mates[0] += "FILE +1 trailing words\n";
+        c.mates[1] += "FILE 1\n";
+        pairedFastq(rng, 10, 10, 90, 28, &c.mates[0], &c.mates[1]);
+        c.mates[0] += "FILE x\n";
+        c.mates[1] += "FILE x\n";
+        pairedFastq(rng, 10, 20, 90, 28, &c.mates[0], &c.mates[1]);
+        odd.push_back(c);
+    }
+    {
+        Case c{"lane_marker_overflow", {"FILE 0\n", "FILE 0\n"}};
+        pairedFastq(rng, 10, 0, 90, 28, &c.mates[0], &c.mates[1]);
+        c.mates[0] += "FILE 99999999999\n";
+        c.mates[1] += "FILE 99999999999\n";
+        pairedFastq(rng, 10, 10, 90, 28, &c.mates[0], &c.mates[1]);
+        odd.push_back(c);
+    }
+    {
+        Case c{"marker_without_newline", {"FILE 0\n", "FILE 0\n"}};
+        pairedFastq(rng, 10, 0, 90, 28, &c.mates[0], &c.mates[1]);
+        c.mates[0] += "FILE 1";
+        c.mates[1] += "FILE 1";
+        odd.push_back(c);
+    }
+    {
+        Case c{"vt_ff_record_starts", {"", ""}};
+        pairedFastq(rng, 10, 0, 90, 28, &c.mates[0], &c.mates[1]);
+        c.mates[0] += "\v\n";
+        c.mates[1] += "\f@y 2:N:0:A\n" + bases(rng, 28) + "\n+\n" + std::string(28, 'I') + "\n";
+        pairedFastq(rng, 10, 11, 90, 28, &c.mates[0], &c.mates[1]);
+        odd.push_back(c);
+    }
+    {
+        Case c{"mate0_tab_led_lines", {"", ""}};
+        pairedFastq(rng, 10, 0, 90, 28, &c.mates[0], &c.mates[1]);
+        c.mates[0] += "\tFILE 1\n";
+        c.mates[1] += "FILE 1\n";
+        pairedFastq(rng, 10, 10, 90, 28, &c.mates[0], &c.mates[1]);
+        c.mates[0] += "\t@z rest of line\n";
+        odd.push_back(c);
+    }
+    for (const Case& c : odd) {
+        const std::vector<std::string> files = writeCase(dir, c);
+        for (int permits = 0; permits < 2; ++permits) {
+            Options options;
+            options.permits = permits != 0;
+            const int before = g_parserMismatches;
+            runThreads(files, options);
+            ++runs;
+            if (g_parserMismatches != before) {
+                ++failures;
+                std::cout << "FAIL parsers disagree on " << c.name << "\n";
+            }
+        }
+    }
+    std::cout << "buffer splits and malformed inputs: " << runs << " runs, " << failures << " failures\n";
+    return failures;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -935,7 +1179,9 @@ int main(int argc, char** argv) {
         return 2;
     }
     const std::string dir = argv[1];
-    const int failures = identityPart(dir) + behaviourPart(dir) + blankLinePart(dir);
+    int failures = identityPart(dir) + behaviourPart(dir) + blankLinePart(dir) + bufferPart(dir);
+    std::cout << "parsers (bytes vs iostream vs 7-byte buffer): " << g_parserMismatches << " mismatches\n";
+    failures += g_parserMismatches;
     std::cout << (failures == 0 ? "PASS" : "FAIL") << " fastx_mate_reader_harness"
               << " (one-permit pool acquires: " << g_pool.acquires << ")\n";
     return failures == 0 ? 0 : 1;

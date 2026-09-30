@@ -454,6 +454,7 @@ void prepareFastxMateReaders(Parameters& P) {
     star::input::FastxMateLimits limits;
     limits.nameSeqLineMax = DEF_readNameSeqLengthMax;
     limits.seqLineMax = DEF_readSeqLengthMax;
+    limits.fastaReadIdNumber = (P.outSAMreadID == "Number");
     P.fastxMateReaders.reset(new star::input::FastxMateReaderGroup(
         streams, P.readFilesIndex, mapDecodePermitHooks(), limits, P.readFilesNames));
     P.inOut->logMain << "Fastx mate readers: active (" << P.readNends << " mate"
