@@ -258,6 +258,26 @@ f7vanilla, f7modern, f7modernbam.
 - **Log.out "not active" checks for SLAM, TranscriptVB and CBQ** (runbook
   4.2) were not run here; those modes are G-S1 rows (M6).
 
+## Author answers to the M5 report (30 Sep)
+
+1. **FEATURE permit drop: find the cause first** (about 1.57M acquisitions on
+   B0 against about 0.1k on C at F3). Use existing logs and permit traces
+   plus at most one or two instrumented runs under the lock. Establish what
+   changed; confirm that the feature arm still takes permits as designed, so
+   every worker goes through the allocator. If the cause needs a change to
+   the allocator design, Flex, CBQ or the feature readers, or a permit path
+   is being bypassed: stop and report without changing anything. Put the
+   explanation, with evidence, in this handoff.
+2. **D5 (fast parser) is still open.** Until the coordinator sends the
+   answer, it is not in 1.11.0; do not start M4b.
+3. **M6 is approved** once the permit question is resolved without a stop:
+   first the parts that do not depend on D5 (README option list, final
+   release notes with the D5 line left open), then G-R5 (G-S1 plus Tier A)
+   unless D5 is in by then. Stop and report at the end of M6. No tag, push,
+   merge or release (the STAR 1.11.0 release is a separate go).
+4. Lock: batching under the lock is fine; wait without a cutoff; stop only
+   if a single wait passes about 3 hours.
+
 ## Author decisions of 30 Sep (implemented)
 
 - Blank lines (runbook 3.7): a single blank line followed by a header is
