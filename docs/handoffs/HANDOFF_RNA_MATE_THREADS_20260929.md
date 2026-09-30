@@ -56,6 +56,41 @@ GitHub release until the author's go.
   relative-link check (the README link above). The fix was probed on the
   same tarballs in `$W/release/checks_fixprobe/`.
 
+- **Final release merge: `ea60370943c17e2cf9c1e6f59e9dde5294825069`**
+  (`--no-ff` onto `0f9701a`, second parent `e575535`; its tree equals the
+  branch tip). This is the commit for Multiomics to pin. `d28a897` is not
+  in its history.
+- Release checks on `ea60370` (fresh clone `$W/release/check_P2`, driver
+  `$W/release/run_release_checks_final.sh`, results in
+  `$W/release/checks_final/status.tsv`): all 33 steps exit 0. The full set
+  was rerun, not carried over, because the tarballs, bundle and debs embed
+  the commit that the installer and deb checks compare against.
+  - notes, version and `debian/changelog` 1.11.0-1, snapshot validation,
+    relative links (none broken), dependency-generation tests: pass;
+  - Launchpad `app.js` check and pytest (125 passed, 19 skipped): pass;
+  - partial builds (9 targets), scRNA exact counts on core and
+    core-static: pass;
+  - Tier A: 14 of 14 pass (`run_flex_tiny_public_smoke` removed from the
+    local copy of the runner; it did not run);
+  - build and runtime images, both tarballs (metadata commit `ea60370`),
+    installer bundle (both variants carry `star-suite-launchpad`), three
+    tarball runtime checks, installer-bundle validation on Ubuntu 22.04
+    and 24.04 (1.11.0, source revision `ea60370`), tarball and bundle
+    release smokes, both debs, three deb install checks, source package,
+    checksums: pass.
+- **Deviation: the public tiny Flex smoke ran in the release smokes.** In
+  both release-check runs (`d28a897` and `ea60370`), the tarball and bundle
+  release smokes ran `tests/run_flex_tiny_public_smoke.sh` (it passed),
+  against the author's 30 Sep instruction not to run it. The local skip was
+  applied in clone `check_Q`/`check_Q2`, but the smoke container runs
+  `/usr/local/bin/container_check_release_smokes.sh` copied into the
+  runtime-check image, and that image was built from the unpatched clone
+  `check_P`/`check_P2`. The first report's statement that the smokes ran
+  without it was wrong. Nothing further was run after this was found. A
+  smoke run that honours the exclusion needs the runtime-check image built
+  from the patched clone. The tag workflow's release smokes (and Tier A in
+  CI) run this smoke unless the repository changes.
+
 Earlier stop (resolved): the first F2 dry run was denied ("[Safety Bypass
 Flag]") because of `--skip-active-check`; the coordinator pointed out that
 the lane runner's active-run check runs only without `--dry-run`
