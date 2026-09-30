@@ -788,7 +788,7 @@ legacy Multiome recipe requires an external STAR 1.9.5.b runtime; its managed
 job checks reject the standalone STAR 1.10 executable. See
 [Multiome ownership and compatibility](docs/LAUNCHPAD_MULTIOME.md).
 
-Design details: [`plans/star_launchpad_v1_runbook.md`](plans/star_launchpad_v1_runbook.md)
+Server, API and launcher details: [`mcp_server/README.md`](mcp_server/README.md)
 
 ## Codespaces Walkthroughs
 
