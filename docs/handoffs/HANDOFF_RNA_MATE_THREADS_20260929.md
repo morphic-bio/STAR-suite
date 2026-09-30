@@ -7,24 +7,26 @@ the runbook where they differ. The runbook edits that were pending are done
 
 ## Current state (read first)
 
-**M0-M5 are done; stopped before G-S1 as instructed.** No output difference
-from v1.10.0 outside the B0 variance classes was found in any gate.
-
-- C is `4bc3b8f` (blank-line rule per the author's decisions of 29 and 30
-  Sep), built from clean in `$W/src_c` with `libstar_suite.a`; G-R0 passes
-  there (272 identity runs, behaviour, blank-line part: 0 failures).
-- G-R1/G-R2 (M3, 21 variants; M4, F3 20M), G-R3 (Flex), G-S2 and G-M1 (5
-  fixtures) pass; details below.
-- D6 was carried out and cleaned up: the Multiomics development build used a
-  local, unpushed tag `v1.11.0-dev.rna-mate-threads` in a scratch STAR Suite
-  clone and a scratch manifest via `--manifest`; the scratch area
-  (`$W/scratch/d6`, clones, tag and build) is deleted. The tag never existed
-  outside that clone (checked: worktree, `/mnt/pikachu/STAR-suite`, GitHub).
-  Build record kept in `$W/m5/d6_record/` (receipt, inputs, sources lock,
-  scratch manifest, build log, binary sha256).
-- Lock policy: queue behind the lock with no cutoff; stop only if a single
-  wait passes about 3 hours. `run_star.sh` supports batch holding
-  (`flock <lock> env RUN_STAR_LOCK_HELD=1 run_queue.sh <queue>`).
+- **C is `81e03b6`** (buffered parser, D5 included), rebuilt from clean in
+  `$W/src_c` with `libstar_suite.a`. Docs-only commits follow it.
+- FEATURE permit question: explained with evidence, no stop (section
+  below).
+- **M4b done and re-gated:** extended G-R0 passes; G-R1/G-R2 pass on all 21
+  M3 variants and on F3 (three C runs); G-R3 passes. Details in "M4b".
+- **M6:** README option bullet and final release notes committed
+  (`554c40d`); G-S2 rerun on the final C and **G-R5 running** (chain: G-S2,
+  then `tools/run_gs1_rna.sh b0`, then `c`, then
+  `tools/compare_gs1_rna.sh`; logs in `$W/gs1/`). Gate trees
+  `$W/gs1/src_{b0,c}` built in the gate container image `598e763f…`
+  (STAR sha256 B0 `6e3c1380…`, C `f922a815…`). Excluded from G-R5, with the
+  reason: Tier A `run_flex_tiny_public_smoke` (author, 30 Sep) and the
+  manifest row `cbq-flex-tiny-public`, which fetches the same third-party
+  test data; both are Flex paths where the readers stand down.
+- Stop and report at the end of M6. No tag, push, merge or release.
+- Lock: queue without a cutoff; stop only if a single wait passes about 3
+  hours. Batches may hold the lock (`RUN_STAR_LOCK_HELD=1`).
+- D6 was carried out and cleaned up (M5); build record in
+  `$W/m5/d6_record/`.
 
 Earlier stop (resolved): the first F2 dry run was denied ("[Safety Bypass
 Flag]") because of `--skip-active-check`; the coordinator pointed out that
@@ -238,12 +240,37 @@ f7vanilla, f7modern, f7modernbam.
   (STAR v1.10.0) while the build used the scratch manifest; kept as
   `$W/g_m1_failed_manifest_env`, fixed, rerun.
 
+### M4b (buffered parser, `81e03b6`)
+
+- `FastxMateByteStream` replaces the iostream calls in the reader threads
+  (runbook 3.11). The parse code is templated over the stream; the iostream
+  path is the harness oracle. Permits unchanged (`readInput` gives the permit
+  back around every blocking read, for both parsers).
+- Identity fix found by the extended G-R0 (present since M2, never in gate
+  data): FASTA header longer than `DEF_readNameSeqLengthMax` with
+  `--outSAMreadID Number`; v1.10.0 skips from the line start in that mode.
+  Fixed to match (runbook 3.11).
+- G-R0 (from `$W/src_c`): 336 identity runs, behaviour, blank-line part,
+  89 buffer-split and malformed-input runs, 0 failures; 0 mismatches between
+  the byte parser, the iostream oracle and a 7-byte buffer on every run;
+  20 repeats and a ThreadSanitizer build clean.
+- Re-gate with C `81e03b6`: G-R1 and G-R2 PASS on all 21 M3 variants (B1 =
+  B0 still PASS); F3: trace equal (391 rows), G-R2 PASS for three C runs
+  against the two new B0 runs, and the new B0 pair is within its class;
+  G-R3 PASS (121 Flex outputs identical to the reference; readers not
+  active). Earlier C runs kept as `runs/*/c4bc3b8f_r*`, their reports in
+  `$W/compare_c4bc3b8f/`.
+- Informal F3 figures (shared host, no claims): average chunk read about 53
+  ms (C) against about 93 ms (B0); mate 1 parse about 7-9 s against 13.8-14.1
+  s waiting on input; wall 3:14-3:25 for both builds, one C run at 4:11
+  (host noise). The ceiling is still mate 1's decompression.
+
 ## Next steps
 
-1. Author review of the results and of the items in "For the author" below.
-2. M6 (after approval): README option list if it lists input options, final
-   1.11.0 release notes, G-R5 (G-S1 plus Tier A) with the new default in
-   force, final handoff. No tag, push, merge or release.
+1. Wait for the G-R5 chain; classify any G-S1 difference against the B0
+   variance classes (stop and report on any other difference).
+2. Fill the release notes' G-S1 line; update this handoff; stop and report
+   (end of M6).
 
 ## For the author
 
