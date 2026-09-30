@@ -7,25 +7,30 @@ the runbook where they differ. The runbook edits that were pending are done
 
 ## Current state (read first)
 
-**M6 is done except the release step; stopped at the end of M6 as
-instructed.** No tag, push, merge or release. No output difference from
-v1.10.0 outside the B0 variance classes was found.
+**Release preparation for STAR 1.11.0 (author's release plan, 30 Sep).**
+STAR 1.11.0 and Multiomics 1.0.0 are released together; Multiomics
+milestone 6 gates against the release merge commit. No tag, no push, no
+GitHub release until the author's go.
 
-- **C is `81e03b6`** (buffered parser, D5 included); later commits are
-  documentation only. Rebuilt from clean in `$W/src_c`; gate-container
-  build in `$W/gs1/src_c` (STAR sha256 `f922a815…`); B0 gate build
-  `$W/gs1/src_b0` (`6e3c1380…`).
-- FEATURE permit question: explained with evidence, no stop (below).
-- M4b re-gated: G-R0, G-R1/G-R2 (21 variants and F3), G-R3, G-S2 pass.
-- **G-R5 (G-S1 plus Tier A): PASS with every difference dispositioned**
-  (section "G-R5 results").
-- README option bullet and final release notes committed; the release notes
-  record D5 as included and make no timing claims. Version bump, tag and
-  packaging belong to the separate release step.
-- Excluded, with reason: Tier A `run_flex_tiny_public_smoke` (author, 30
-  Sep) and manifest row `cbq-flex-tiny-public` (fetches the same
-  third-party test data; Flex path where the readers stand down).
-- D6 carried out and cleaned up (M5); record in `$W/m5/d6_record/`.
+- Release commits on this branch: `c37a988` (binutils in the Tier A image),
+  `63a661a` (Multiome guide: ATAC barcode read layout; draft paragraph
+  marking 1.9.5.b as an interim build, **for the author's review before any
+  push**), `1cc3906` (version 1.11.0, `debian/changelog` 1.11.0-1,
+  distribution entry, final notes with the unreleased 1.10.1 content folded
+  in, `RELEASE_NOTES_v1.10.1.md` removed).
+- Version pins: only `core/legacy/source/VERSION`, `debian/changelog` and
+  `docs/Star-binary-distribution.md` carry the version; the Dockerfile and
+  workflows take it from the tag, and the repository has no other
+  CHANGELOG.
+- Merge: `--no-ff` onto `master`'s tip `0f9701a` (= `origin/master`), in the
+  style of the v1.10.0 merge. The local `master` ref is checked out in the
+  shared checkout `/mnt/pikachu/STAR-suite` (at `81ade02`, behind
+  `origin/master`), which this work must not touch; the merge is made in a
+  release clone, and this branch is fast-forwarded to it so the commit is in
+  the shared repository. Moving `master` is then
+  `git -C /mnt/pikachu/STAR-suite merge --ff-only <merge>` (as in the v1.10.0
+  procedure), for the author.
+- Code validated by the gates: `81e03b6` (sections below).
 
 Earlier stop (resolved): the first F2 dry run was denied ("[Safety Bypass
 Flag]") because of `--skip-active-check`; the coordinator pointed out that
