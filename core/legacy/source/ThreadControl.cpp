@@ -336,6 +336,11 @@ void ThreadControl::mapPermitConfigureRetunePlan(const std::vector<int> &permitS
 ThreadControl::~ThreadControl() { mapPermitStopHierarchy(); }
 
 bool ThreadControl::mapPermitChildAdmissibleLocked(size_t domain, PermitWork work) const {
+    if (mapPermitInputPairsEnabled && work == PermitWork::PROCESS) {
+        const int reserve = mapPermitPairInputReservationLocked(domain);
+        if (reserve > 0 && mapPermitDomainInUse[domain] - mapPermitDecode[domain].inUse >=
+                mapPermitUsableBudgetLocked(domain) - reserve) return false;
+    }
     if (!mapPermitHierarchyEnabledFlag.load()) return true;
     if (work == PermitWork::BGZF)
         return mapPermitDecode[domain].inUse < mapPermitDecode[domain].limit;
@@ -365,7 +370,8 @@ int ThreadControl::mapPermitDecodeReservationLocked(size_t domain) const {
 }
 
 bool ThreadControl::mapPermitHasAdmissibleWaiterLocked(size_t domain) const {
-    if (!mapPermitHierarchyEnabledFlag.load()) return mapPermitDomainWaiters[domain] > 0;
+    if (!mapPermitHierarchyEnabledFlag.load() && !mapPermitInputPairsEnabled)
+        return mapPermitDomainWaiters[domain] > 0;
     for (const auto* waiter : mapPermitWaitQueue) {
         if (permitDomainIndex(waiter->domain) == domain &&
             mapPermitChildAdmissibleLocked(domain, waiter->work)) return true;
@@ -646,6 +652,23 @@ bool ThreadControl::mapPermitPairWantsInputLocked(size_t domain) const {
     return inputs < inputShare;
 }
 
+int ThreadControl::mapPermitPairInputReservationLocked(size_t domain) const {
+    if (mapPermitDomainComplete[domain]) return 0;
+    int workers = 0;
+    for (const auto& entry : mapPermitDecodeQueues) {
+        const auto& q = entry.second;
+        if (q.domain == domain && q.capacity > 0) workers += q.workers;
+    }
+    const int budget = mapPermitUsableBudgetLocked(domain);
+    // Long consumer leases must not borrow the last input capacity, even
+    // while readers are temporarily in I/O or their small queues are full.
+    // Otherwise a reader cannot reacquire until a long mapping chunk ends.
+    // Other parents can borrow it through ordinary root admission. EOF
+    // unregisters readers and releases the reservation. A one-permit pool
+    // uses alternating child grants instead of reserving an impossible slot.
+    return std::min(workers, std::min(std::max(0, budget - 1), (budget + 3) / 4));
+}
+
 void ThreadControl::mapPermitMarkDomainComplete(PermitDomain domain) {
     std::vector<PermitWaiter*> toWake;
     {
@@ -687,7 +710,7 @@ void ThreadControl::grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake) {
     // below-floor domain bypass a head waiter that's already at-floor.
     while (mapPermitAvailable > 0 && !mapPermitWaitQueue.empty()) {
         auto pickIt = mapPermitWaitQueue.end();
-        if (!mapPermitFloorsActive && !mapPermitHierarchyEnabledFlag.load()) {
+        if (!mapPermitFloorsActive && !mapPermitHierarchyEnabledFlag.load() && !mapPermitInputPairsEnabled) {
             pickIt = mapPermitWaitQueue.begin();
         } else {
             for (auto it = mapPermitWaitQueue.begin();
@@ -730,7 +753,8 @@ void ThreadControl::grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake) {
                 ? PermitWork::BGZF : PermitWork::PROCESS;
             if ((*pickIt)->work != wanted) {
                 for (auto child = std::next(pickIt); child != mapPermitWaitQueue.end(); ++child) {
-                    if (permitDomainIndex((*child)->domain) == parent && (*child)->work == wanted) {
+                    if (permitDomainIndex((*child)->domain) == parent && (*child)->work == wanted &&
+                            mapPermitChildAdmissibleLocked(parent, wanted)) {
                         std::iter_swap(pickIt, child);
                         break;
                     }
@@ -1258,7 +1282,9 @@ void ThreadControl::mapPermitObserveDecode(PermitDomain domain, const void* read
         queue.workers = workers;
         queue.waitStartNs = waiting ? now : 0;
     }
-    if (mapPermitHierarchyEnabledFlag.load() && mapPermitAvailable > 0 && !mapPermitWaitQueue.empty()) {
+    if ((mapPermitHierarchyEnabledFlag.load() || mapPermitInputPairsEnabled) &&
+            mapPermitAvailable > 0 && !mapPermitWaitQueue.empty()) {
+        mapPermitAccountStateLocked(now);
         std::vector<PermitWaiter*> wake;
         grantFifoWaitersLocked(wake);
     }

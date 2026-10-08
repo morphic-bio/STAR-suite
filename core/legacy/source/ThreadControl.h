@@ -194,6 +194,7 @@ private:
     bool mapPermitInputPairsEnabled = false;
     PermitWork mapPermitPairLastWork[mapPermitDomainCount]{};
     bool mapPermitPairWantsInputLocked(size_t domain) const;
+    int mapPermitPairInputReservationLocked(size_t domain) const;
     struct PermitWaiter {
       std::condition_variable cv;
       bool granted = false;

@@ -66,6 +66,39 @@ struct Pipeline {
     std::atomic<int> next{0}, consumed{0};
 };
 
+// A buffered reader or one temporarily in I/O may have no queued acquire.
+// A long mapper must still leave its parent's input slot reclaimable. Other
+// parents can borrow it; unregistering the reader gives the slot to mapping.
+static void protectsInputBeforeAcquire() {
+    ThreadControl pool;
+    pool.mapPermitConfigure(true, 4, 4, true, false);
+    pool.mapPermitConfigureInputPairs(true);
+    int reader;
+    pool.mapPermitObserveDecode(D::MAP, &reader, 8, 8, 8, 1, 0, 1);
+    std::vector<uint64_t> held;
+    for (int i = 0; i < 3; ++i) held.push_back(pool.mapPermitAcquireForDomain(D::MAP));
+    std::atomic<bool> mapped{false};
+    std::thread consumer([&] {
+        auto token = pool.mapPermitAcquireForDomain(D::MAP);
+        mapped = true;
+        pool.mapPermitReleaseForDomain(D::MAP, token, 1, 1, 1);
+    });
+    waitFor([&] { return pool.mapPermitSnapshot().mapDomain.currentWaiters == 1; });
+    assert(!mapped && pool.mapPermitSnapshot().availablePermits == 1);
+    auto external = pool.mapPermitAcquireForDomain(D::EXTERNAL);
+    assert(!mapped && pool.mapPermitSnapshot().externalDomain.inUse == 1);
+    pool.mapPermitReleaseForDomain(D::EXTERNAL, external, 1, 1, 1);
+    auto input = pool.mapPermitAcquireForDomain(D::MAP, W::BGZF);
+    assert(!mapped && pool.mapPermitSnapshot().mapDomain.inUse == 4);
+    pool.mapPermitReleaseForDomain(D::MAP, input, 1, 1, 1, W::BGZF);
+    assert(!mapped);
+    pool.mapPermitObserveDecode(D::MAP, &reader, 0, 0, 0, 0, 0, 0);
+    waitFor([&] { return mapped.load(); });
+    consumer.join();
+    for (auto token : held) pool.mapPermitReleaseForDomain(D::MAP, token, 1, 1, 1);
+    assert(pool.mapPermitSnapshot().availablePermits == 4);
+}
+
 // Real bounded producer/consumer queues compete with independent EXTERNAL
 // work. Consumers never hold a compute permit while waiting for input; input
 // never holds one while waiting for buffer space. Every item must finish,
@@ -171,6 +204,7 @@ static void pipelineProgress(int budget, bool floors) {
 }
 
 int main() {
+    protectsInputBeforeAcquire();
     for (int budget : {1, 4}) for (bool low : {false, true}) ticketOrder(budget, low);
     for (int budget : {1, 4, 16}) pipelineProgress(budget, budget > 1);
 }
