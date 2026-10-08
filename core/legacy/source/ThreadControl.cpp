@@ -628,17 +628,19 @@ void ThreadControl::mapPermitConfigureInputPairs(bool enabled) {
     if (mapPermitInputPairsEnabled) mapPermitFifoEnabled = true;
 }
 
-bool ThreadControl::mapPermitPairWantsInputLocked(size_t domain) const {
-    bool inputLow = false;
+bool ThreadControl::mapPermitPairInputLowLocked(size_t domain) const {
     for (const auto& entry : mapPermitDecodeQueues) {
         const auto& q = entry.second;
         if (q.domain == domain && q.capacity > 0 && q.ready <= q.capacity / 4 &&
                 (q.outstanding > q.ready || q.waitStartNs != 0)) {
-            inputLow = true;
-            break;
+            return true;
         }
     }
-    if (!inputLow) return false;
+    return false;
+}
+
+bool ThreadControl::mapPermitPairWantsInputLocked(size_t domain) const {
+    if (!mapPermitPairInputLowLocked(domain)) return false;
     const int inputs = mapPermitDecode[domain].inUse;
     const int consumers = mapPermitDomainInUse[domain] - inputs;
     // Keep a consumer progressing too, including when the parent receives
@@ -671,7 +673,8 @@ int ThreadControl::mapPermitPairInputReservationLocked(size_t domain) const {
 
 int ThreadControl::mapPermitAdmissionFloorLocked(size_t domain) const {
     const int floor = mapPermitDomainFloor[domain];
-    if (!mapPermitInputPairsEnabled || mapPermitDecode[domain].waiters == 0) return floor;
+    if (!mapPermitInputPairsEnabled || mapPermitDecode[domain].waiters == 0 ||
+            !mapPermitPairInputLowLocked(domain)) return floor;
     const int reserve = mapPermitPairInputReservationLocked(domain);
     // Input capacity loaned to another parent must be reclaimable on its next
     // release. Protect only the input minimum, not the parent's consumer
