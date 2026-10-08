@@ -666,7 +666,18 @@ int ThreadControl::mapPermitPairInputReservationLocked(size_t domain) const {
     // Other parents can borrow it through ordinary root admission. EOF
     // unregisters readers and releases the reservation. A one-permit pool
     // uses alternating child grants instead of reserving an impossible slot.
-    return std::min(workers, std::min(std::max(0, budget - 1), (budget + 3) / 4));
+    return workers > 0 && budget > 1 ? 1 : 0;
+}
+
+int ThreadControl::mapPermitAdmissionFloorLocked(size_t domain) const {
+    const int floor = mapPermitDomainFloor[domain];
+    if (!mapPermitInputPairsEnabled || mapPermitDecode[domain].waiters == 0) return floor;
+    const int reserve = mapPermitPairInputReservationLocked(domain);
+    // Input capacity loaned to another parent must be reclaimable on its next
+    // release. Protect only the input minimum, not the parent's consumer
+    // demand. Once a reader holds that share, normal root admission resumes.
+    const int consumers = mapPermitDomainInUse[domain] - mapPermitDecode[domain].inUse;
+    return std::max(floor, consumers + reserve);
 }
 
 void ThreadControl::mapPermitMarkDomainComplete(PermitDomain domain) {
@@ -717,7 +728,7 @@ void ThreadControl::grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake) {
                  it != mapPermitWaitQueue.end(); ++it) {
                 const size_t di = permitDomainIndex((*it)->domain);
                 if (!mapPermitChildAdmissibleLocked(di, (*it)->work)) continue;
-                if (mapPermitDomainInUse[di] < mapPermitDomainFloor[di]) {
+                if (mapPermitDomainInUse[di] < mapPermitAdmissionFloorLocked(di)) {
                     pickIt = it; break;
                 }
                 bool blockedByFloor = false;
@@ -725,7 +736,7 @@ void ThreadControl::grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake) {
                     if (j == di) continue;
                     if (mapPermitHasAdmissibleWaiterLocked(j)
                             && mapPermitDomainInUse[j]
-                                    < mapPermitDomainFloor[j]) {
+                                    < mapPermitAdmissionFloorLocked(j)) {
                         blockedByFloor = true; break;
                     }
                 }

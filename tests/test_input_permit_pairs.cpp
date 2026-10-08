@@ -99,6 +99,41 @@ static void protectsInputBeforeAcquire() {
     assert(pool.mapPermitSnapshot().availablePermits == 4);
 }
 
+// Independent work may borrow an idle input slot, but must repay the loan
+// before taking another lease when that input becomes runnable. Only that
+// slot gets reclaimed; the independent job receives it again after input.
+static void reclaimsBorrowedInput() {
+    ThreadControl pool;
+    pool.mapPermitConfigure(true, 4, 4, true, false);
+    pool.mapPermitConfigureInputPairs(true);
+    int reader;
+    pool.mapPermitObserveDecode(D::MAP, &reader, 0, 1, 8, 2, 1, 1);
+    std::vector<uint64_t> mapping;
+    for (int i = 0; i < 3; ++i) mapping.push_back(pool.mapPermitAcquireForDomain(D::MAP));
+    auto loan = pool.mapPermitAcquireForDomain(D::EXTERNAL);
+    std::atomic<int> order{0};
+    std::atomic<bool> inputDone{false};
+    std::thread independent([&] {
+        auto token = pool.mapPermitAcquireForDomain(D::EXTERNAL);
+        assert(order.fetch_add(1) == 1);
+        pool.mapPermitReleaseForDomain(D::EXTERNAL, token, 1, 1, 1);
+    });
+    waitFor([&] { return pool.mapPermitSnapshot().externalDomain.currentWaiters == 1; });
+    std::thread input([&] {
+        auto token = pool.mapPermitAcquireForDomain(D::MAP, W::BGZF);
+        assert(order.fetch_add(1) == 0);
+        inputDone = true;
+        pool.mapPermitReleaseForDomain(D::MAP, token, 1, 1, 1, W::BGZF);
+    });
+    waitFor([&] { return pool.mapPermitSnapshot().mapDomain.decode.waiters == 1; });
+    pool.mapPermitReleaseForDomain(D::EXTERNAL, loan, 1, 1, 1);
+    input.join(); independent.join();
+    assert(inputDone && order == 2);
+    for (auto token : mapping) pool.mapPermitReleaseForDomain(D::MAP, token, 1, 1, 1);
+    pool.mapPermitObserveDecode(D::MAP, &reader, 0, 0, 0, 0, 0, 0);
+    assert(pool.mapPermitSnapshot().availablePermits == 4);
+}
+
 // Real bounded producer/consumer queues compete with independent EXTERNAL
 // work. Consumers never hold a compute permit while waiting for input; input
 // never holds one while waiting for buffer space. Every item must finish,
@@ -205,6 +240,7 @@ static void pipelineProgress(int budget, bool floors) {
 
 int main() {
     protectsInputBeforeAcquire();
+    reclaimsBorrowedInput();
     for (int budget : {1, 4}) for (bool low : {false, true}) ticketOrder(budget, low);
     for (int budget : {1, 4, 16}) pipelineProgress(budget, budget > 1);
 }
