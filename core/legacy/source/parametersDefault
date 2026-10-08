@@ -70,6 +70,15 @@ dynamicThreadFeatureWorkEstimate 0
          probe order and ETA balancing. 0 leaves FEATURE ETA unavailable (an
          explicit FEATURE floor, if any, remains a fixed borrowable reservation).
 
+dynamicThreadInputPairs         0
+    int: opt-in input/consumer pairing within each parent's permit allocation.
+         Root FIFO admission and borrowable domain floors choose the parent;
+         low input queues prefer a reader within that grant. Full input queues
+         prefer consumers. Both children can borrow unused capacity. No extra
+         permits, outer controller or sampler thread. Supports concurrent hosts.
+         Requires dynamicThreadInterface=1, dynamicThreadBgzfHierarchy=0,
+         variableThreads=0 and PF controller off. Enables FIFO admission.
+
 dynamicThreadBgzfHierarchy      0
     int: opt-in BGZF child admission under MAP/FEATURE parent budgets.
          Maximizes processed-read rate using ordered-buffer pressure and throughput feedback.

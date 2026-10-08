@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdio>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 namespace {
@@ -125,6 +126,7 @@ void ThreadControl::mapPermitConfigure(
     mapPermitRetuneTraceDropped = 0;
     mapPermitFloorsActive = false;
     mapPermitFifoEnabled = false;
+    mapPermitInputPairsEnabled = false;
     mapPermitWaitQueue.clear();
     mapPermitDecodeQueues.clear();
 
@@ -163,6 +165,7 @@ void ThreadControl::mapPermitConfigure(
     mapPermitFloorChangeCalls = 0;
     for (size_t domain = 0; domain < mapPermitDomainCount; ++domain) {
         mapPermitDecode[domain] = DecodeSnapshot{};
+        mapPermitPairLastWork[domain] = PermitWork::PROCESS;
         mapPermitCompletedPairs[domain] = 0;
         mapPermitDomainFloor[domain] = 0;
         mapPermitDomainInUse[domain] = 0;
@@ -611,6 +614,38 @@ void ThreadControl::mapPermitConfigureFifoWaiters(bool enabled) {
     mapPermitFifoEnabled = enabled && mapPermitEnabledFlag;
 }
 
+void ThreadControl::mapPermitConfigureInputPairs(bool enabled) {
+    std::lock_guard<std::mutex> lock(mapPermitMutex);
+    if (enabled && mapPermitHierarchyEnabledFlag.load())
+        throw std::invalid_argument("Input pairs and BGZF hierarchy are separate admission modes");
+    mapPermitInputPairsEnabled = enabled && mapPermitEnabledFlag;
+    if (mapPermitInputPairsEnabled) mapPermitFifoEnabled = true;
+}
+
+bool ThreadControl::mapPermitPairWantsInputLocked(size_t domain) const {
+    bool inputLow = false;
+    for (const auto& entry : mapPermitDecodeQueues) {
+        const auto& q = entry.second;
+        if (q.domain == domain && q.capacity > 0 && q.ready <= q.capacity / 4 &&
+                (q.outstanding > q.ready || q.waitStartNs != 0)) {
+            inputLow = true;
+            break;
+        }
+    }
+    if (!inputLow) return false;
+    const int inputs = mapPermitDecode[domain].inUse;
+    const int consumers = mapPermitDomainInUse[domain] - inputs;
+    // Keep a consumer progressing too, including when the parent receives
+    // only one permit. This is a preference, never a non-borrowable quota.
+    if (consumers == 0 && mapPermitPairLastWork[domain] == PermitWork::BGZF)
+        return false;
+    // Use the parent's actual allocation, not the whole machine's capacity.
+    // At low water, prefer input for up to a quarter of that allocation,
+    // rounded up. With no competing child, either side borrows everything.
+    const int inputShare = std::max(1, (mapPermitDomainInUse[domain] + 4) / 4);
+    return inputs < inputShare;
+}
+
 void ThreadControl::mapPermitMarkDomainComplete(PermitDomain domain) {
     std::vector<PermitWaiter*> toWake;
     {
@@ -685,8 +720,26 @@ void ThreadControl::grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake) {
                 break;
             }
         }
+        if (mapPermitInputPairsEnabled) {
+            // The outer scheduler has granted this ticket to a parent. Only
+            // subassign within that parent; unrelated domains retain their
+            // queue positions and borrowable floors. Consume the chosen
+            // parent ticket, moving a displaced child to its sibling's slot.
+            const size_t parent = permitDomainIndex((*pickIt)->domain);
+            const auto wanted = mapPermitPairWantsInputLocked(parent)
+                ? PermitWork::BGZF : PermitWork::PROCESS;
+            if ((*pickIt)->work != wanted) {
+                for (auto child = std::next(pickIt); child != mapPermitWaitQueue.end(); ++child) {
+                    if (permitDomainIndex((*child)->domain) == parent && (*child)->work == wanted) {
+                        std::iter_swap(pickIt, child);
+                        break;
+                    }
+                }
+            }
+        }
         PermitWaiter *waiter = *pickIt;
         const size_t di = permitDomainIndex(waiter->domain);
+        mapPermitPairLastWork[di] = waiter->work;
         mapPermitWaitQueue.erase(pickIt);
         --mapPermitDomainWaiters[di];
         ++mapPermitDomainInUse[di];
@@ -703,7 +756,7 @@ void ThreadControl::grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake) {
         }
         waiter->granted = true;
         --mapPermitAvailable;
-        if (mapPermitHierarchyEnabledFlag.load()) {
+        if (mapPermitHierarchyEnabledFlag.load() || mapPermitInputPairsEnabled) {
             // Waiters live on acquiring threads' stacks. Keep the lock until
             // notification so a timeout/spurious wake cannot destroy one first.
             waiter->cv.notify_one();
@@ -831,6 +884,7 @@ uint64_t ThreadControl::mapPermitAcquireForDomain(PermitDomain domain, PermitWor
             mapPermitAccountStateLocked(steadyNowNs());
             --mapPermitAvailable;
             ++mapPermitDomainInUse[domainIndex];
+            mapPermitPairLastWork[domainIndex] = work;
             if (work == PermitWork::BGZF) {
                 ++mapPermitDecode[domainIndex].inUse;
                 mapPermitDecode[domainIndex].maxInUse = std::max<uint64_t>(
@@ -860,7 +914,7 @@ uint64_t ThreadControl::mapPermitAcquireForDomain(PermitDomain domain, PermitWor
             const uint64_t waiters =
                 mapPermitCurrentWaiters.fetch_add(1, std::memory_order_relaxed) + 1;
             atomicStoreMax(mapPermitMaxWaiters, waiters);
-            if (mapPermitHierarchyEnabledFlag.load()) {
+            if (mapPermitHierarchyEnabledFlag.load() || mapPermitInputPairsEnabled) {
                 std::vector<PermitWaiter*> wake;
                 grantFifoWaitersLocked(wake);
                 for (auto* queued : wake) queued->cv.notify_one();

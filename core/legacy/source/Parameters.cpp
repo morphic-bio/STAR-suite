@@ -172,6 +172,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadMapWorkEstimate", &dynamicThreadMapWorkEstimate));
     parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadFeatureWorkEstimate", &dynamicThreadFeatureWorkEstimate));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFifoWaiters", &dynamicThreadFifoWaiters));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadInputPairs", &dynamicThreadInputPairs));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadBgzfHierarchy", &dynamicThreadBgzfHierarchy));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadBalance", &dynamicThreadBalance));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreads", &variableThreads));
@@ -1790,6 +1791,18 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         errOut <<"EXITING: fatal input ERROR: --dynamicThreadFifoWaiters must be 0 or 1, user-defined value="
                <<dynamicThreadFifoWaiters<<"\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadInputPairs != 0 && dynamicThreadInputPairs != 1) {
+        exitWithError("--dynamicThreadInputPairs must be 0 or 1\n", std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadInputPairs == 1) {
+        if (dynamicThreadInterface != 1 || dynamicThreadBgzfHierarchy != 0 ||
+                variableThreads != 0 || dynamicThreadPfControllerMode != "off") {
+            exitWithError("Input pairs require --dynamicThreadInterface 1, --dynamicThreadBgzfHierarchy 0, "
+                "--variableThreads 0 and --dynamicThreadPfControllerMode off\n",
+                std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        dynamicThreadFifoWaiters = 1;
     }
     if (dynamicThreadBgzfHierarchy != 0 && dynamicThreadBgzfHierarchy != 1) {
         exitWithError("--dynamicThreadBgzfHierarchy must be 0 or 1\n", std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);

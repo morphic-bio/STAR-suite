@@ -196,7 +196,7 @@ inc=("${hts[@]}" -I"$SRC" -I"$ROOT/flex/source" -I"$ROOT/flex/source/libflex"
      -I"$ROOT/core/features/libscrna/include" -I"$ROOT/core/features/vbem/source"
      -I"$ROOT/core/features/vbem/source/libem" -I"$ROOT/slam/source"
      -I"$ROOT/core/features/bamsort/source" -I"$ROOT/core/features/process_features/include")
-for t in test_thread_control_permit_instrumentation test_bgzf_permit_hierarchy; do
+for t in test_thread_control_permit_instrumentation test_bgzf_permit_hierarchy test_input_permit_pairs; do
     # shellcheck disable=SC2046
     g++ -std=c++11 -O2 -fopenmp "${inc[@]}" "$ROOT/tests/$t.cpp" "$SRC/libstar_suite.a" \
         $(cat "$SRC/libstar_suite.link") -o "$OUT/$t" || fail "build $t"
@@ -206,5 +206,7 @@ done
 "$OUT/test_bgzf_permit_hierarchy" "$OUT/bgzf_hierarchy" > "$OUT/bgzf_hierarchy.log" 2>&1 \
     || { tail -5 "$OUT/bgzf_hierarchy.log"; fail "test_bgzf_permit_hierarchy"; }
 echo "permit unit tests passed"
+timeout 60 "$OUT/test_input_permit_pairs" > "$OUT/input_pairs.log" 2>&1 \
+    || { tail -5 "$OUT/input_pairs.log"; fail "test_input_permit_pairs"; }
 
 echo "PASS: STAR host API tests (G-S2); outputs in $OUT"

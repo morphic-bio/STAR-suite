@@ -975,6 +975,7 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     // queued waiters in strict arrival order; new arrivals cannot
     // fast-path past existing waiters.
     g_threadChunks.mapPermitConfigureFifoWaiters(P.dynamicThreadFifoWaiters == 1);
+    g_threadChunks.mapPermitConfigureInputPairs(P.dynamicThreadInputPairs == 1);
     } else {
         const auto initial = g_threadChunks.mapPermitSnapshot();
         configuredMapFloor = initial.mapDomain.floor;
@@ -999,6 +1000,7 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
                          << configuredFeatureFloor << "/"
                          << configuredExternalFloor
                          << ", fifo=" << ((P.dynamicThreadFifoWaiters == 1) ? "on" : "off")
+                         << ", inputPairs=" << ((P.dynamicThreadInputPairs == 1) ? "on" : "off")
                          << ")\n" << flush;
         pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
     }

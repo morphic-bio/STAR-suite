@@ -88,6 +88,10 @@ public:
     //
     // Disabled by default; opt-in via --dynamicThreadFifoWaiters 1.
     void mapPermitConfigureFifoWaiters(bool enabled);
+    // Root admission chooses a parent domain as before. Within that grant,
+    // an input/consumer pair can use queue pressure to choose its child.
+    // Configure once before mapping; no extra root permits or sampler thread.
+    void mapPermitConfigureInputPairs(bool enabled);
     // Publish durable application completion and release this domain's
     // borrowable floor. A transient zero-work interval must not call this.
     void mapPermitMarkDomainComplete(PermitDomain domain);
@@ -187,6 +191,9 @@ private:
     // when no floor is active; per-domain FIFO with floor-aware grant
     // selection when any domain floor is set (see grantFifoWaitersLocked).
     bool mapPermitFifoEnabled = false;
+    bool mapPermitInputPairsEnabled = false;
+    PermitWork mapPermitPairLastWork[mapPermitDomainCount]{};
+    bool mapPermitPairWantsInputLocked(size_t domain) const;
     struct PermitWaiter {
       std::condition_variable cv;
       bool granted = false;
