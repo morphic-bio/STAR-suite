@@ -276,6 +276,8 @@ typedef struct cf_ambient_fdr_config {
     double fdr_threshold;        /* Default FDR threshold for calls (default: 0.01) */
     int min_umi;                 /* Minimum observed UMI count for a call (default: 1) */
     int emit_sparse_qvalues;     /* Write guide_qvalues.mtx and axes (default: 1) */
+    double ambient_pseudocount;  /* Optional count per guide in ambient profile (default: 0).
+                                  This does not estimate the cell's ambient fraction. */
 } cf_ambient_fdr_config;
 
 /**

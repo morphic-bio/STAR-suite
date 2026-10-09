@@ -1954,3 +1954,17 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
 - These are synthetic functional checks, not biological or performance evidence.
   The user-facing instructions and validation scope are in
   `docs/LAUNCHPAD_MULTIOME.md`.
+
+## Standalone guide-caller diagnostics (2026-10-09)
+
+- `/mnt/pikachu/guide_caller_validation_20261009/`: local copies of caller-only
+  public-fixture evidence; no GEX or ATAC execution is needed.
+- Cloud `/mnt/pikachu/cloud_e2e_110_20261006/guide-caller-validation-20261009/`:
+  clean caller build, frozen Zhao/CAT guide matrices, independent expectations,
+  and `guard-validation-v3-min3/COMPLETE.json` (29 checks). A separate mandatory
+  zero-background override rejection passed on worker 2 under
+  `native-other-20261009-v1/zero-background-test/COMPLETE.json`.
+- Current comparisons use three guide UMIs; explicitly labelled min-1 tests
+  preserve historical regression evidence only. No model calibration claim is
+  implied by these operational checks. See
+  `docs/GUIDE_CALLER_BACKGROUND_DIAGNOSTICS_20261009.md`.

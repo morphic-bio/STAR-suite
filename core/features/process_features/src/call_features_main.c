@@ -43,6 +43,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "      --raw-mex-dir DIR      Raw MEX for ambient estimation (required for ambient-fdr/both)\n");
     fprintf(stderr, "      --guide-fdr <float>    Default FDR threshold (default: 0.01)\n");
     fprintf(stderr, "      --guide-fdr-min-umi N  Minimum observed UMI count for calls (default: 1)\n");
+    fprintf(stderr, "      --guide-fdr-pseudocount X  Experimental ambient profile pseudocount (default: 0)\n");
     fprintf(stderr, "      --guide-fdr-emit-qvalues <sparse|none>  Sparse q-value output (default: sparse)\n\n");
     fprintf(stderr, "NB-EM mode options:\n");
     fprintf(stderr, "      --moi <auto|low|high>  MOI mode (default: auto)\n");
@@ -118,6 +119,7 @@ int main(int argc, char *argv[]) {
         OPT_RAW_MEX_DIR,
         OPT_GUIDE_FDR,
         OPT_GUIDE_FDR_MIN_UMI,
+        OPT_GUIDE_FDR_PSEUDOCOUNT,
         OPT_GUIDE_FDR_EMIT_QVALUES
     };
     
@@ -132,6 +134,7 @@ int main(int argc, char *argv[]) {
         {"raw-mex-dir", required_argument, 0, OPT_RAW_MEX_DIR},
         {"guide-fdr", required_argument, 0, OPT_GUIDE_FDR},
         {"guide-fdr-min-umi", required_argument, 0, OPT_GUIDE_FDR_MIN_UMI},
+        {"guide-fdr-pseudocount", required_argument, 0, OPT_GUIDE_FDR_PSEUDOCOUNT},
         {"guide-fdr-emit-qvalues", required_argument, 0, OPT_GUIDE_FDR_EMIT_QVALUES},
         {"min_umi", required_argument, 0, 'u'},
         {"moi", required_argument, 0, OPT_MOI},
@@ -215,6 +218,17 @@ int main(int argc, char *argv[]) {
             case OPT_GUIDE_FDR_MIN_UMI:
                 ambient_config->min_umi = atoi(optarg);
                 break;
+            case OPT_GUIDE_FDR_PSEUDOCOUNT: {
+                char *end = NULL;
+                ambient_config->ambient_pseudocount = strtod(optarg, &end);
+                if (!end || end == optarg || *end ||
+                    !isfinite(ambient_config->ambient_pseudocount) ||
+                    ambient_config->ambient_pseudocount < 0) {
+                    fprintf(stderr, "Error: --guide-fdr-pseudocount must be finite and nonnegative\n");
+                    return 1;
+                }
+                break;
+            }
             case OPT_GUIDE_FDR_EMIT_QVALUES:
                 if (strcmp(optarg, "sparse") == 0) {
                     ambient_config->emit_sparse_qvalues = 1;

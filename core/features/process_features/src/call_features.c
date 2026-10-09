@@ -1989,9 +1989,14 @@ int cf_process_mex_dir_ambient_fdr(const char *raw_mex_dir,
         default_config.fdr_threshold = 0.01;
         default_config.min_umi = 1;
         default_config.emit_sparse_qvalues = 1;
+        default_config.ambient_pseudocount = 0.0;
         config = &default_config;
     }
     double fdr_threshold = config->fdr_threshold;
+    if (!isfinite(config->ambient_pseudocount) || config->ambient_pseudocount < 0.0) {
+        fprintf(stderr, "Ambient pseudocount must be finite and nonnegative\n");
+        return -1;
+    }
     if (!(fdr_threshold > 0.0 && fdr_threshold <= 1.0)) {
         fprintf(stderr, "Invalid Ambient-FDR threshold %.17g; expected 0 < FDR <= 1\n", fdr_threshold);
         return -1;
@@ -2156,7 +2161,8 @@ int cf_process_mex_dir_ambient_fdr(const char *raw_mex_dir,
     }
 
     for (int g = 0; g < n_guides; g++) {
-        ambient_rates[g] = (double)ambient_counts[g] / (double)ambient_total;
+        ambient_rates[g] = ((double)ambient_counts[g] + config->ambient_pseudocount) /
+                          ((double)ambient_total + n_guides * config->ambient_pseudocount);
     }
 
     cf_ambient_entry *entries = NULL;
@@ -2216,6 +2222,35 @@ int cf_process_mex_dir_ambient_fdr(const char *raw_mex_dir,
     }
 
     int ret = 0;
+    /* Report model assumptions and degenerate estimates independently of the call table.
+       A workflow can reject these results without relabelling GMM calls as FDR calls. */
+    {
+        int zero_guides = 0, zero_rate_guides = 0;
+        size_t zero_rate_calls = 0;
+        for (int g = 0; g < n_guides; g++) {
+            zero_guides += ambient_counts[g] == 0;
+            zero_rate_guides += ambient_rates[g] == 0.0;
+        }
+        for (size_t i = 0; i < n_entries; i++)
+            if (entries[i].count >= (uint64_t)min_umi && entries[i].qvalue <= fdr_threshold &&
+                ambient_rates[entries[i].guide] == 0.0) zero_rate_calls++;
+        char path[MAX_LINE_LENGTH];
+        snprintf(path, sizeof(path), "%s/guide_ambient_model.json", output_dir);
+        FILE *fp = fopen(path, "w");
+        if (!fp) ret = -1;
+        else {
+            fprintf(fp, "{\n  \"schema\": \"ambient-model/1\",\n");
+            fprintf(fp, "  \"model\": \"guide_composition_poisson\",\n");
+            fprintf(fp, "  \"null_depth\": \"total_observed_cell_guide_umis\",\n");
+            fprintf(fp, "  \"ambient_fraction_fitted\": false,\n");
+            fprintf(fp, "  \"ambient_pseudocount\": %.17g,\n", config->ambient_pseudocount);
+            fprintf(fp, "  \"zero_observed_background_guides\": %d,\n", zero_guides);
+            fprintf(fp, "  \"zero_estimated_background_guides\": %d,\n", zero_rate_guides);
+            fprintf(fp, "  \"called_pairs_at_zero_estimated_background\": %zu,\n", zero_rate_calls);
+            fprintf(fp, "  \"requires_zero_background_review\": %s\n}\n", zero_rate_calls ? "true" : "false");
+            if (fclose(fp) != 0) ret = -1;
+        }
+    }
     if (cf_write_ambient_rates(output_dir, guide_ids, guide_names, ambient_counts, ambient_rates, n_guides) != 0) ret = -1;
     if (cf_write_ambient_calls(output_dir, filtered_matrix, cell_calls, cell_num_features,
                                cell_num_umis, cell_min_called_umi, cell_max_called_umi,
