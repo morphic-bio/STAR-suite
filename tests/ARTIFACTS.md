@@ -1954,3 +1954,10 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
 - These are synthetic functional checks, not biological or performance evidence.
   The user-facing instructions and validation scope are in
   `docs/LAUNCHPAD_MULTIOME.md`.
+
+## Feature FASTQ discovery regression
+
+`make -C core/features/process_features test-fastq-discovery` builds
+`core/features/process_features/tests/test_fastq_discovery`. The test creates
+and removes temporary `pf-discovery-*` and `pf-triplets-*` directories. Build
+products and external validation logs are untracked.

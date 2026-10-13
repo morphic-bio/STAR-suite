@@ -1,6 +1,7 @@
 #include "../include/io.h"
 #include <sys/stat.h>
 #include <limits.h>
+#include <strings.h>
 
 static void parse_feature_pattern(const char *pattern, int *offset, const char **prefix_start, int *prefix_len, const char **suffix_start, int *suffix_len) {
     if (offset) *offset = -1;
@@ -936,6 +937,24 @@ int count_files_with_pattern(const char *directory_path, const char *pattern) {
     closedir(dir);
     return count;  // Return the count of matching files
 }
+/* Both feature readers use gzopen: plain FASTQ, gzip and BGZF are readable.
+ * Match the directory-entry name, never the resolved symlink target. */
+static int has_fastq_suffix(const char *name) {
+    static const char *suffixes[] = {
+        ".fastq", ".fq", ".fastq.gz", ".fq.gz",
+        ".fastq.bgz", ".fq.bgz", ".fastq.bgzf", ".fq.bgzf"
+    };
+    const size_t length = strlen(name);
+    for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); ++i) {
+        const size_t suffix_length = strlen(suffixes[i]);
+        if (length >= suffix_length &&
+            strcasecmp(name + length - suffix_length, suffixes[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 char **find_files_with_pattern(const char *directory_path, const char *pattern, int *num_files_found) {
     DIR *dir = opendir(directory_path);
     if (!dir) {
@@ -964,8 +983,8 @@ char **find_files_with_pattern(const char *directory_path, const char *pattern, 
 
         // Check if the entry is a regular file (not a directory)
         if (stat(filepath, &file_stat) == 0 && S_ISREG(file_stat.st_mode)) {
-            // Check if the filename contains the pattern
-            if (strstr(entry->d_name, pattern) != NULL) {
+            // All callers discover FASTQ reads, not companion metadata files.
+            if (strstr(entry->d_name, pattern) != NULL && has_fastq_suffix(entry->d_name)) {
                 // Store the matching filepath in the array
                 filepaths = realloc(filepaths, (*num_files_found + 1) * sizeof(char *));
                 if (!filepaths) {

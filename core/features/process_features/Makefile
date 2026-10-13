@@ -86,6 +86,16 @@ TEST_CATATAC_SPLIT_TARGET=tests/test_catatac_split_read
 TEST_FEATURE_DUPLICATES_TARGET=tests/test_feature_duplicate_names
 TEST_ZERO_N_FALLBACK_TARGET=tests/test_zero_n_fallback
 TEST_FASTQ_PAIRING_TARGET=tests/test_fastq_pairing
+TEST_FASTQ_DISCOVERY_TARGET=tests/test_fastq_discovery
+
+$(TEST_FASTQ_DISCOVERY_TARGET): tests/test_fastq_discovery.c src/pf_api.c src/io.c
+	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections -o $@ tests/test_fastq_discovery.c src/io.c -Wl,--gc-sections $(LDFLAGS)
+
+.PHONY: test-fastq-discovery
+test-fastq-discovery: $(TEST_FASTQ_DISCOVERY_TARGET)
+	./$(TEST_FASTQ_DISCOVERY_TARGET)
+
+test: test-fastq-discovery
 
 PF_BGZF_TEST = ../../../tests/pf_bgzf_harness
 $(PF_BGZF_TEST): ../../../tests/pf_bgzf_harness.cpp $(LIB_TARGET) $(LIBSCRNA)
@@ -237,5 +247,6 @@ test-hash-demux-mex: $(TARGET)
 	@./tests/test_hash_demux_mex.sh
 
 clean:
+	rm -f $(TEST_FASTQ_DISCOVERY_TARGET)
 	rm -f $(TEST_ZERO_N_FALLBACK_TARGET)
 	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(INTEGRATED_LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) $(TEST_CATATAC_SPLIT_TARGET) $(TEST_FEATURE_DUPLICATES_TARGET) $(TEST_FASTQ_PAIRING_TARGET) tests/*.o $(PF_BGZF_TEST)
