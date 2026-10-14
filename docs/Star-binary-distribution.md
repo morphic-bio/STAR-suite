@@ -4,6 +4,17 @@
 
 Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction install and clear provenance.
 
+## Minor Release v1.12.0 (2026-10-14)
+
+- Release tag: `v1.12.0`; notes: [release notes](RELEASE_NOTES_v1.12.0.md).
+- Debian source version: `1.12.0-1`; Ubuntu binaries:
+  `1.12.0-1~ubuntu22.04.1` and `1.12.0-1~ubuntu24.04.1`.
+- Feature-read discovery accepts `.fastq` and `.fq`, optionally followed by
+  `.gz`, `.bgz` or `.bgzf`, ignoring case. Receipts and unsupported suffixes
+  are excluded; symbolic links are selected by their directory-entry names.
+- Reader behavior, pairing and triplet validation are unchanged. Upstream
+  STAR and genome-index compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Minor Release v1.11.0 (2026-09-30)
 
 - Release tag: `v1.11.0`; notes: `docs/RELEASE_NOTES_v1.11.0.md`.

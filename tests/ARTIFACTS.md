@@ -4,6 +4,14 @@ This file tracks where **test outputs and artifacts** should live and what is
 expected to be **untracked** in git. If you add a new smoke/regression test,
 update this file with its output location.
 
+## Feature module namespace and context tests (2026-10-14)
+
+- `test_filtered_barcode_namespace` creates a temporary whitelist with the
+  prefix `/tmp/pf-filtered-namespace-` and removes it on success.
+- `test_pf_api_context_isolation` creates feature tables and a whitelist in
+  `/tmp/pf-context-isolation-*` and removes the directory on success.
+- Test executables and captured output remain untracked.
+
 ## Host API 1.10 Release Gates (2026-09-28)
 
 - Local rc1 source handoff:
