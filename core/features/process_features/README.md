@@ -44,6 +44,14 @@ Alternatively, you can use the Docker container `biodepot/process_features:lates
 
 ## Usage
 
+Directory discovery accepts names ending in `.fastq` or `.fq`, optionally
+followed by `.gz`, `.bgz` or `.bgzf` (case-insensitive). The feature readers use
+zlib and accept plain FASTQ, gzip and BGZF content. Receipt files such as
+`sample_R1_001.fastq.gz.receipt.json` are not reads. Symbolic links are selected
+by their entry name and must resolve to a regular file. Explicit file lists
+retain their existing behavior. Discovery preserves the alphabetical order,
+mate pairing and split-read validation of the selected files.
+
 ```bash
 assignBarcodes [options] [directory1 directory2 ...]
 ```

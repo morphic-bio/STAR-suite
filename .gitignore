@@ -202,3 +202,6 @@ AGENTS_local.md
 # Standalone replay executables (source and historical oracle stay tracked).
 /flex/tools/hash_screen_replay/hash_screen_replay
 /flex/tools/hash_screen_replay/test_hash_screen
+
+# Feature FASTQ discovery test executable
+/core/features/process_features/tests/test_fastq_discovery
