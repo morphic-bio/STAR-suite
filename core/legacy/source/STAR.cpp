@@ -1668,9 +1668,9 @@ static int starRunMain(int argInN, char *argIn[], const star::host::Hooks *hooks
             // Estimate read length from processed reads
             uint32_t mateLen0 = 100;
             uint32_t mateLen1 = 0;
-            if (RAdetect->RA != nullptr && RAdetect->RA->readLength[0] > 0) {
+            if (RAdetect->RA != nullptr && RAdetect->RA->hasProcessedRead && RAdetect->RA->readLength[0] > 0) {
                 mateLen0 = static_cast<uint32_t>(RAdetect->RA->readLength[0]);
-                mateLen1 = static_cast<uint32_t>(RAdetect->RA->readLength[1]);
+                mateLen1 = RAdetect->RA->readNmates > 1 ? static_cast<uint32_t>(RAdetect->RA->readLength[1]) : 0;
             }
             const uint32_t readLengthConcat = mateLen0 + mateLen1;
 
@@ -2003,9 +2003,9 @@ static int starRunMain(int argInN, char *argIn[], const star::host::Hooks *hooks
             if (RAdetect->slamQuant != nullptr && RAdetect->slamQuant->varianceAnalysisEnabled()) {
                 uint32_t mateLen0 = 100;
                 uint32_t mateLen1 = 0;
-                if (RAdetect->RA != nullptr && RAdetect->RA->readLength[0] > 0) {
+                if (RAdetect->RA != nullptr && RAdetect->RA->hasProcessedRead && RAdetect->RA->readLength[0] > 0) {
                     mateLen0 = static_cast<uint32_t>(RAdetect->RA->readLength[0]);
-                    mateLen1 = static_cast<uint32_t>(RAdetect->RA->readLength[1]);
+                    mateLen1 = RAdetect->RA->readNmates > 1 ? static_cast<uint32_t>(RAdetect->RA->readLength[1]) : 0;
                 }
                 const uint32_t readLengthConcat = mateLen0 + mateLen1;
 
@@ -3347,9 +3347,10 @@ static int starRunMain(int argInN, char *argIn[], const star::host::Hooks *hooks
             uint32_t mateLen1_qc = 0;
             for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
                 if (RAchunk[ichunk] != nullptr && RAchunk[ichunk]->RA != nullptr &&
-                    RAchunk[ichunk]->RA->readLength[0] > 0) {
+                    RAchunk[ichunk]->RA->hasProcessedRead && RAchunk[ichunk]->RA->readLength[0] > 0) {
                     mateLen0_qc = static_cast<uint32_t>(RAchunk[ichunk]->RA->readLength[0]);
-                    mateLen1_qc = static_cast<uint32_t>(RAchunk[ichunk]->RA->readLength[1]);
+                    mateLen1_qc = RAchunk[ichunk]->RA->readNmates > 1
+                        ? static_cast<uint32_t>(RAchunk[ichunk]->RA->readLength[1]) : 0;
                     break;
                 }
             }
