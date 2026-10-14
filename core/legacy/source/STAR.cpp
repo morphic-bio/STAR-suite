@@ -1670,7 +1670,7 @@ static int starRunMain(int argInN, char *argIn[], const star::host::Hooks *hooks
             uint32_t mateLen1 = 0;
             if (RAdetect->RA != nullptr && RAdetect->RA->hasProcessedRead && RAdetect->RA->readLength[0] > 0) {
                 mateLen0 = static_cast<uint32_t>(RAdetect->RA->readLength[0]);
-                mateLen1 = RAdetect->RA->readNmates > 1 ? static_cast<uint32_t>(RAdetect->RA->readLength[1]) : 0;
+                mateLen1 = P.readNmates > 1 ? static_cast<uint32_t>(RAdetect->RA->readLength[1]) : 0;
             }
             const uint32_t readLengthConcat = mateLen0 + mateLen1;
 
@@ -2005,7 +2005,7 @@ static int starRunMain(int argInN, char *argIn[], const star::host::Hooks *hooks
                 uint32_t mateLen1 = 0;
                 if (RAdetect->RA != nullptr && RAdetect->RA->hasProcessedRead && RAdetect->RA->readLength[0] > 0) {
                     mateLen0 = static_cast<uint32_t>(RAdetect->RA->readLength[0]);
-                    mateLen1 = RAdetect->RA->readNmates > 1 ? static_cast<uint32_t>(RAdetect->RA->readLength[1]) : 0;
+                    mateLen1 = P.readNmates > 1 ? static_cast<uint32_t>(RAdetect->RA->readLength[1]) : 0;
                 }
                 const uint32_t readLengthConcat = mateLen0 + mateLen1;
 
@@ -3349,7 +3349,7 @@ static int starRunMain(int argInN, char *argIn[], const star::host::Hooks *hooks
                 if (RAchunk[ichunk] != nullptr && RAchunk[ichunk]->RA != nullptr &&
                     RAchunk[ichunk]->RA->hasProcessedRead && RAchunk[ichunk]->RA->readLength[0] > 0) {
                     mateLen0_qc = static_cast<uint32_t>(RAchunk[ichunk]->RA->readLength[0]);
-                    mateLen1_qc = RAchunk[ichunk]->RA->readNmates > 1
+                    mateLen1_qc = P.readNmates > 1
                         ? static_cast<uint32_t>(RAchunk[ichunk]->RA->readLength[1]) : 0;
                     break;
                 }
