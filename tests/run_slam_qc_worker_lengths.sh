@@ -22,7 +22,7 @@ for case,reads,expected in [('empty',('', ''),(100,0)),('pair',(seq[200:280],seq
   p=root/f'{case}-R{m+1}.fastq';p.write_text(f'@synthetic/{m+1}\n{read}\n+\n'+ 'I'*len(read)+'\n' if read else '');paths.append(str(p))
  for fill in ['85','170']:
   d=root/f'{case}-{fill}';d.mkdir(exist_ok=False)
-  cmd=[binary,'--runThreadN',threads,'--genomeDir',str(index),'--readFilesIn',*paths,'--outFileNamePrefix',str(d/'star_'),'--outSAMtype','None','--slamQuantMode','1','--slamQcReport',str(d/'qc')]
+  cmd=[binary,'--runThreadN',threads,'--genomeDir',str(index),'--readFilesIn',*paths,'--outFileNamePrefix',str(d/'star_'),'--outSAMtype','None','--quantMode','GeneCounts','--slamQuantMode','1','--slamQcReport',str(d/'qc')]
   (d/'command.json').write_text(json.dumps(cmd,indent=2)+'\n')
   with (d/'driver.log').open('w') as log:subprocess.run(cmd,env=dict(os.environ,MALLOC_PERTURB_=fill),check=True,stdout=log,stderr=subprocess.STDOUT)
   qc=json.loads((d/'qc.slam_qc.json').read_text());got=(qc['mate_len_mate1'],qc['mate_len_mate2'])
