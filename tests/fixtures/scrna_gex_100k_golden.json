@@ -119,12 +119,12 @@
           },
           "filtered": {
             "genes": 38606,
-            "barcodes": 10540,
-            "nnz": 65840,
-            "umis": 66540,
+            "barcodes": 10530,
+            "nnz": 65830,
+            "umis": 66530,
             "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
-            "barcodes_sha256": "7cb24c616f9300ef91cf72ca5ee06003b338c52e67c01ba4546f8f0e885df80f",
-            "counts_sha256": "1cb446dc944c381ae1c3fec502ff45837127f91dee0758152646b2b907ef4bbb"
+            "barcodes_sha256": "68a05c3adede9733d15dba1af02ee6a4d9f48c25ada1986cb32dbdecc4cc6b41",
+            "counts_sha256": "d455e0c047a415f02f2b0d451fd39918e22734e48ea28948818ad06c5a90c007"
           }
         }
       }
@@ -169,12 +169,12 @@
           },
           "filtered": {
             "genes": 38606,
-            "barcodes": 10540,
-            "nnz": 65840,
-            "umis": 66540,
+            "barcodes": 10530,
+            "nnz": 65830,
+            "umis": 66530,
             "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
-            "barcodes_sha256": "7cb24c616f9300ef91cf72ca5ee06003b338c52e67c01ba4546f8f0e885df80f",
-            "counts_sha256": "1cb446dc944c381ae1c3fec502ff45837127f91dee0758152646b2b907ef4bbb"
+            "barcodes_sha256": "68a05c3adede9733d15dba1af02ee6a4d9f48c25ada1986cb32dbdecc4cc6b41",
+            "counts_sha256": "d455e0c047a415f02f2b0d451fd39918e22734e48ea28948818ad06c5a90c007"
           }
         }
       }
@@ -193,5 +193,86 @@
       "source_revision": "fb9f1f4e0c380d8301041cb16ff3fd9856b62ce5",
       "binary_sha256": "c9d8acaab53e69e1734065dd80e64a7be8ab0516a462101b3f4e4a50c6e002fa"
     }
+  },
+  "bootstrap_patch_provenance": {
+    "version": "1.12.1",
+    "engine_source": "a943a28074f55c03aa86f3a28d2089d4151f8b10",
+    "reason": "Per-resample PCG32 streams replace worker-dependent bootstrap streams. Only the GeneFull prefix boundary changes: ten one-UMI, one-gene cells removed. Ranking and raw counts unchanged.",
+    "raw_counts_and_all_other_profile_quantities_unchanged": true,
+    "called_cells_old": 10540,
+    "called_cells_new": 10530,
+    "removed_cells": [
+      {
+        "barcode": "AAACCCAGTTTACTGG",
+        "UMIs": 1,
+        "detected_genes": 1,
+        "quality_rank_zero_based": 10530,
+        "change": "removed"
+      },
+      {
+        "barcode": "AAACCCATCTTGCAAG",
+        "UMIs": 1,
+        "detected_genes": 1,
+        "quality_rank_zero_based": 10531,
+        "change": "removed"
+      },
+      {
+        "barcode": "AAACGAAAGAGTCCGA",
+        "UMIs": 1,
+        "detected_genes": 1,
+        "quality_rank_zero_based": 10532,
+        "change": "removed"
+      },
+      {
+        "barcode": "AAACGAAAGGTGGGTT",
+        "UMIs": 1,
+        "detected_genes": 1,
+        "quality_rank_zero_based": 10533,
+        "change": "removed"
+      },
+      {
+        "barcode": "AAACGCTCAAGTGACG",
+        "UMIs": 1,
+        "detected_genes": 1,
+        "quality_rank_zero_based": 10534,
+        "change": "removed"
+      },
+      {
+        "barcode": "AAACGCTCAATCCTAG",
+        "UMIs": 1,
+        "detected_genes": 1,
+        "quality_rank_zero_based": 10535,
+        "change": "removed"
+      },
+      {
+        "barcode": "AAACGCTCAGGACATG",
+        "UMIs": 1,
+        "detected_genes": 1,
+        "quality_rank_zero_based": 10536,
+        "change": "removed"
+      },
+      {
+        "barcode": "AAACGCTCAGTATTCG",
+        "UMIs": 1,
+        "detected_genes": 1,
+        "quality_rank_zero_based": 10537,
+        "change": "removed"
+      },
+      {
+        "barcode": "AAACGCTGTTCAGGTT",
+        "UMIs": 1,
+        "detected_genes": 1,
+        "quality_rank_zero_based": 10538,
+        "change": "removed"
+      },
+      {
+        "barcode": "AAACGCTTCGCGTGAC",
+        "UMIs": 1,
+        "detected_genes": 1,
+        "quality_rank_zero_based": 10539,
+        "change": "removed"
+      }
+    ],
+    "validation": "Modern sorted-BAM arm must independently match the modern output before release."
   }
 }
