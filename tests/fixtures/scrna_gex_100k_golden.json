@@ -273,6 +273,6 @@
         "change": "removed"
       }
     ],
-    "validation": "Modern sorted-BAM arm must independently match the modern output before release."
+    "validation": "Independent sorted-BAM arm matches the modern unsorted profile for every raw/filtered matrix, ordered called-cell hash and mapping QC quantity; original failed pre-patch golden comparison retained in validation evidence."
   }
 }

@@ -29,3 +29,11 @@ The fix changes QC length reporting; it does not change mapping or counting.
 Ubuntu packages use `1.12.1-1~ubuntu22.04.1` and `1.12.1-1~ubuntu24.04.1`.
 Upstream STAR remains `2.7.11b`, genome-index compatibility remains `2.7.4a`
 and legacy compatibility remains `2.7.1a`. Existing indexes need no rebuild.
+
+The public PBMC 100K GEX regression has a corresponding golden-fixture update:
+GeneFull retains 10,530 rather than 10,540 cells. The ten removed boundary
+barcodes each have one UMI and one detected gene. All raw files and the quality
+ranking are unchanged, and both retained sets are exact ranking prefixes.
+The Gene profile and all other profile quantities are unchanged. Independent
+modern unsorted and sorted-BAM runs match for every profile quantity with the
+new streams. The fixture records the affected barcodes and original provenance.
