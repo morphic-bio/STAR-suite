@@ -4,6 +4,17 @@
 
 Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction install and clear provenance.
 
+## Patch Release v1.12.1 (2026-10-16)
+
+- Release tag: `v1.12.1`; notes: [release notes](RELEASE_NOTES_v1.12.1.md).
+- Debian source version: `1.12.1-1`; Ubuntu binaries:
+  `1.12.1-1~ubuntu22.04.1` and `1.12.1-1~ubuntu24.04.1`.
+- One generator per OrdMag resample makes both bootstrap stages independent
+  of worker assignment. Averaging, ranking, ties and prefix selection remain
+  ordered; the stream change can shift boundary calls once from v1.12.0.
+- Comprehensive SLAM QC uses initialized lengths from active workers and the
+  run mate count. Mapping/counting and genome-index compatibility are unchanged.
+
 ## Minor Release v1.12.0 (2026-10-14)
 
 - Release tag: `v1.12.0`; notes: [release notes](RELEASE_NOTES_v1.12.0.md).
