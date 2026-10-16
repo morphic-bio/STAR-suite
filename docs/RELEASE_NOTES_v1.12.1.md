@@ -37,3 +37,28 @@ ranking are unchanged, and both retained sets are exact ranking prefixes.
 The Gene profile and all other profile quantities are unchanged. Independent
 modern unsorted and sorted-BAM runs match for every profile quantity with the
 new streams. The fixture records the affected barcodes and original provenance.
+
+On the bounded CAT-ATAC DMSO1 input (two million GEX reads, seed 777), runs
+with 1, 4, 16 and 32 workers retain the same 12,173 barcodes in the same order;
+their filtered matrices and caller debug summaries are identical. Relative to
+the previous 16-worker calls, 18 boundary cells are removed, each with 29 UMIs;
+no cells are added. Raw counts and quality ranking are unchanged. The previous
+one-worker calls lose 13 cells, also all with 29 UMIs.
+
+Other shallow release fixtures illustrate the one-time boundary change: the
+UCSF GEX fixture adds two one-UMI cells, and the public A375 scheduler fixture
+now retains 1,135 cells in every full-depth scheduler arm. Legacy downstream
+doublet and ambient-guide scores can change when their input cell set changes.
+Restoring each previous cell mask on the new raw counts reproduces the old
+seeded downstream values exactly, including all guide q-values.
+
+Validation includes all ten EmptyDrops test executables; the bootstrap matrix
+at 1, 2, 4, 16 and 32 workers, automatic worker selection and OMP unset/2/32;
+the old implementation rejected by the new regression; 15 feature-module test
+executables; 602 server tests; all 25 release-manifest rows with the previously
+approved public fixtures; nine partial builds; 14 container smokes; seven
+tarball/installer runtime checks; and three Debian install/purge combinations.
+The four SLAM stage harnesses pass and 58 mapping/quantification tables are
+byte-identical to v1.12.0. Comprehensive QC is not a whole-file identity claim:
+the fixed uninitialized lengths change its reports, and variable-length reads
+retain the existing sampled-worker length convention.
