@@ -54,10 +54,12 @@ struct SimpleEmptyDropsParams {
     // Set to false via --use-simple-empty-drops to force enable
     bool disabled = true;            // If true, only runs as fallback when ED fails
     
-    uint32 bootstrapSeed = 0;        // Seed for bootstrap RNG (0 = use default seeds 1,2,3...)
+    // Each resample has an independent PCG32 stream keyed by seed and its index.
+    // Zero preserves the default stage seeds (1 for recovery, 100 for top-N).
+    uint32 bootstrapSeed = 0;
     uint32 maxThreads = 0;           // Max threads for bootstrap (0 = auto: hardware_concurrency or OMP_NUM_THREADS)
-    // Limit execution workers without changing the legacy maxThreads-based
-    // random streams or chunk boundaries. Zero preserves the existing budget.
+    // Limit execution workers; neither this limit nor maxThreads changes draws.
+    // Zero preserves the existing execution budget.
     uint32 maxConcurrentThreads = 0;
 
 };

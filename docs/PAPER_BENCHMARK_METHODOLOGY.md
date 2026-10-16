@@ -207,9 +207,12 @@ antisense to the transcript; Flex probe reads are counted `Unstranded`. The A375
 drops reads where opposite-strand genes overlap and counts antisense reads
 (gene Spearman 0.952 against Cell Ranger); it was re-run with `Reverse` (0.988).
 
-The EmptyDrops Monte Carlo draws are split across bootstrap streams, so
-`--soloCellFilterBootstrapThreads` is part of the reproducibility contract:
-matching it reproduces a call set exactly.
+Since v1.12.1, OrdMag bootstrap resamples have independent generators keyed
+by seed and resample index; `--soloCellFilterBootstrapThreads` controls execution
+only. Hardware concurrency and `OMP_NUM_THREADS` do not change their draws,
+and averages follow resample-index order. EmptyDrops tail simulations also
+retain their independent seeds. The bootstrap stream rule changes once from
+v1.12.0, so older call sets remain version-specific evidence.
 
 ## 2. Earlier investigations (history)
 

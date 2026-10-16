@@ -4,6 +4,17 @@ This file tracks where **test outputs and artifacts** should live and what is
 expected to be **untracked** in git. If you add a new smoke/regression test,
 update this file with its output location.
 
+## OrdMag stream and SLAM QC patch regressions (2026-10-16)
+
+- `tests/emptydrops/test_ordmag_parallel` prints its result and creates no data
+  files. It checks explicit 1/2/4/16/32 workers and automatic selection with
+  `OMP_NUM_THREADS` set and unset, on both estimated and supplied recovery.
+- `tests/run_slam_qc_worker_lengths.sh` writes constructed inputs, an index,
+  commands and QC outputs under a fresh `OUT_BASE` or
+  `/tmp/slam-qc-worker-lengths.*`. Keep its outputs untracked.
+- Release-gate and DMSO1 count-change records stay in the external validation
+  bundle; no original result directory is overwritten.
+
 ## Feature module namespace and context tests (2026-10-14)
 
 - `test_filtered_barcode_namespace` creates a temporary whitelist with the

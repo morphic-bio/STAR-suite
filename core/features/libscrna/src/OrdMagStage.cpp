@@ -144,10 +144,6 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
         return result;
     }
     
-    // Random state (fixed seed for reproducibility, like Python np.random.RandomState(0))
-    // Using PCG32 for speed (much faster than mt19937)
-    pcg32 rng(0);
-    
     // Get non-zero counts
     vector<uint32> nonzeroCounts;
     for (uint32 i = 0; i < nCB; i++) {
@@ -203,10 +199,10 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
         
         uint32 baseSeed = (params.bootstrapSeed > 0) ? params.bootstrapSeed : 1;
         
-        auto bootstrapWorker = [&nonzeroCounts, nNonzero, maxExpectedCells, &params, &bootRecovered, &bootLoss](uint32 startIdx, uint32 endIdx, uint32 seed) {
-            // PCG32 is ~3x faster than mt19937 for uniform int sampling
-            pcg32 localRng(seed, startIdx);  // seed + stream for uniqueness
+        auto bootstrapWorker = [&nonzeroCounts, nNonzero, maxExpectedCells, baseSeed, &params, &bootRecovered, &bootLoss](uint32 startIdx, uint32 endIdx) {
             for (uint32 b = startIdx; b < endIdx; b++) {
+                // A resample owns its stream, independent of worker/chunk assignment.
+                pcg32 localRng(baseSeed, b);
                 vector<uint32> bootstrap(nNonzero);
                 for (uint32 i = 0; i < nNonzero; i++) {
                     // Fast bounded random using PCG's optimized method
@@ -226,7 +222,7 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
             uint32 startIdx = t * chunkSize;
             uint32 endIdx = min(startIdx + chunkSize, nBoot);
             if (startIdx < endIdx) {
-                bootstrapWorker(startIdx, endIdx, baseSeed + t * 1000);
+                bootstrapWorker(startIdx, endIdx);
             }
         });
         
@@ -279,10 +275,10 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
         if (trace) trace->bootstrapThreads = nThreads;
         uint32 baseSeed2 = (params.bootstrapSeed > 0) ? (params.bootstrapSeed + 10000) : 100;
         
-        auto topNWorker = [&nonzeroCounts, nNonzero, baselineIdx, &topNBoot](uint32 startIdx, uint32 endIdx, uint32 seed) {
-            // PCG32 is ~3x faster than mt19937 for uniform int sampling
-            pcg32 localRng(seed, startIdx + 10000);  // seed + stream for uniqueness
+        auto topNWorker = [&nonzeroCounts, nNonzero, baselineIdx, baseSeed2, &topNBoot](uint32 startIdx, uint32 endIdx) {
             for (uint32 b = startIdx; b < endIdx; b++) {
+                // The top-N stage has its own seed/stream domain for each resample.
+                pcg32 localRng(baseSeed2, uint64_t(b) + 10000);
                 vector<uint32> bootstrap(nNonzero);
                 for (uint32 i = 0; i < nNonzero; i++) {
                     // Fast bounded random using PCG's optimized method
@@ -299,7 +295,7 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
             uint32 startIdx = t * chunkSize;
             uint32 endIdx = min(startIdx + chunkSize, nBoot);
             if (startIdx < endIdx) {
-                topNWorker(startIdx, endIdx, baseSeed2 + t * 1000);
+                topNWorker(startIdx, endIdx);
             }
         });
     } else {

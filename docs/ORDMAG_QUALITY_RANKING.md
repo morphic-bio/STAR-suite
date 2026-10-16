@@ -47,7 +47,12 @@ also accepts an explicit bootstrap worker count. STAR Solo's bootstrap path uses
 this shared C API. STAR loads the optional annotation with
 `--soloCellFilterMitochondrialGenes PATH`; `--soloCellFilterBootstrapThreads N`
 sets the bootstrap workers (0 inherits `runThreadN`). These options also apply to
-the native tag-aware Flex caller.
+the native tag-aware Flex caller. Since v1.12.1 this is an execution budget:
+each resample owns a PCG32 stream keyed by the configured seed and its index.
+Recovery uses `(seed or 1, b)`; top-N uses `(seed + 10000 or 100, 10000 + b)`.
+Indices begin at zero. Summation follows index order, so worker count, hardware
+concurrency and `OMP_NUM_THREADS` cannot change the draws or bootstrap result.
+The stream rule changes once from v1.12.0; ranking and prefix selection do not.
 
 The rule can be reused across RNA modules. Flex maps its targeted-gene feature
 IDs to the mitochondrial annotation; other RNA assays use their own reference

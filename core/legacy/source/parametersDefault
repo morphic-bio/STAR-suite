@@ -2174,8 +2174,10 @@ soloCellFilterMitochondrialGenes -
                             Original counts remain in cell-number estimation and EmptyDrops.
 
 soloCellFilterBootstrapThreads 0
-    int:                    bootstrap worker count (0 uses runThreadN). Set explicitly for matched caller comparisons;
-                            current bootstrap RNG streams depend on this value.
+    int:                    bootstrap worker count (0 uses runThreadN). This controls execution only.
+                            Each resample has its own PCG32 generator keyed by the seed and resample index;
+                            worker count, hardware concurrency and OMP_NUM_THREADS do not change its draws.
+                            Recovery and top-N use separate stage seeds/streams; averages use resample-index order.
 
 soloFlexExpectedCellsTotal   0
     int:                    total expected cells across ALL tags (e.g., 12000 for 4 tags x 3000 cells)

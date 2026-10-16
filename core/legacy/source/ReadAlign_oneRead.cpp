@@ -122,6 +122,7 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
     residualAnchorGeneIdx15_ = 0;
 
     // Increment read counters BEFORE trimming (so dropped reads are counted)
+    hasProcessedRead = true;
     statsRA.readN++;
     statsRA.readBases += readLength[0] + (P.readNmates == 2 ? readLength[1] : 0);
 
@@ -636,6 +637,7 @@ int ReadAlign::oneReadFromPacket(EnrichedPacket &pkt) {
     readLength[1] = pkt.readLen[1];
     readLengthOriginal[1] = pkt.readLen[1];
 
+    hasProcessedRead = true;
     statsRA.readN++;
     statsRA.readBases += readLength[0] + readLength[1];
 

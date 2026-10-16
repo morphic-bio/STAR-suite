@@ -97,9 +97,11 @@ Monte Carlo tasks borrow additional available workers. Returned permits can
 be acquired by a sampler that is already running. The total budget is never
 exceeded, and helpers are joined before their caller returns or propagates an
 error. Results are collected in whitelist order before fitting joint occupancy.
-`--soloCellFilterBootstrapThreads` retains its existing bootstrap random-stream
-partitioning even when a group receives fewer execution workers, so the new
-scheduler preserves the previous draws. EmptyDrops already seeds each
+Since v1.12.1, each OrdMag bootstrap resample owns a generator keyed by the
+configured seed and resample index. `--soloCellFilterBootstrapThreads` and
+borrowed execution permits affect scheduling only. Recovery and top-N use
+separate stage seeds/streams, and results are averaged in index order. The
+new stream rule changes once from v1.12.0. EmptyDrops already seeds each
 simulation independently of its worker assignment; batches of 64 simulations
 allow it to acquire returned permits while preserving exact integer tallies.
 Group preparation and caller timings, worker limits, acquired permits, and

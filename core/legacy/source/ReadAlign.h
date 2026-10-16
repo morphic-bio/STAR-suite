@@ -85,7 +85,12 @@ class ReadAlign {
         char *outBAMarray;//pointer to the (last+1) position of the SAM/BAM output array
 
         uint outFilterMismatchNmaxTotal;
-        uint Lread, readLength[MAX_N_MATES], readLengthOriginal[MAX_N_MATES], readLengthPair, readLengthPairOriginal;
+        uint Lread = 0;
+        uint readLength[MAX_N_MATES] = {}, readLengthOriginal[MAX_N_MATES] = {};
+        uint readLengthPair = 0, readLengthPairOriginal = 0;
+        // Chunk statistics can reset after an empty chunk. Keep lifetime input state
+        // separately so QC never inspects lengths on a worker that loaded no read.
+        bool hasProcessedRead = false;
         string readBarcodeSeq, readBarcodeQual; //Solo barcode sequence
         
         intScore maxScoreMate[MAX_N_MATES];
