@@ -2,13 +2,12 @@
 
 STAR Suite updates the original STAR aligner by integrating four modules — STAR-core (with integrated TranscriptVB quantification), STAR-perturb, STAR-Flex, and STAR-SLAM — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (STAR Suite 1.9.4: **1.6–4.2x for bulk RNA-seq** against an external stepwise pipeline; against Cell Ranger 9.0.1, **3.9x for scRNA-seq**, **4.8–5.8x for Perturb-seq**, and **17–23x for Flex** from the delivered FASTQ, up to **42x** from CBQ input) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
-Current production release: **[STAR Suite v1.9.5.a](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.9.5.a)**. The suite release tag and
-source-packaging version are `v1.9.5.a` / `1.9.5.a-1`; `STAR --version` reports
-`1.9.5.a`. This maintenance release fixes source-build dependency discovery and
-conventional Solo UMI counts, and removes the optional source-derived Flex
-gDNA diagnostic; see the [release notes](docs/RELEASE_NOTES_v1.9.5.a.md).
-The benchmark results below retain their measured 1.9.5 identity, and the
-original `v1.9.5` tag is unchanged.
+Current production release: **[STAR Suite v1.12.1](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.12.1)**. The suite release tag and
+source-packaging version are `v1.12.1` / `1.12.1-1`; `STAR --version` reports
+`1.12.1`. This patch makes OrdMag bootstrap draws independent of worker count
+and fixes comprehensive-QC read-length reporting; see the
+[release notes](docs/RELEASE_NOTES_v1.12.1.md).
+The benchmark results below retain their measured release identities.
 GitHub Releases also provides Ubuntu 22.04- and 24.04-built `.deb`
 packages from the same source revision.
 Use `STAR --upstream-version` for the underlying upstream STAR base
