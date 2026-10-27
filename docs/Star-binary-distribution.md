@@ -4,6 +4,15 @@
 
 Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction install and clear provenance.
 
+## Patch Release v1.12.2 (2026-10-27)
+
+- Release tag: `v1.12.2`; notes: [release notes](RELEASE_NOTES_v1.12.2.md).
+- Debian source version: `1.12.2-1`; Ubuntu binaries:
+  `1.12.2-1~ubuntu22.04.1` and `1.12.2-1~ubuntu24.04.1`.
+- Spatial R1 barcode decoding reuses its edit-distance pattern across targets
+  and its quality terms across each likelihood row. Decoded barcodes and
+  output matrices are unchanged; two full slides ran 28–39% faster.
+
 ## Patch Release v1.12.1 (2026-10-16)
 
 - Release tag: `v1.12.1`; notes: [release notes](RELEASE_NOTES_v1.12.1.md).

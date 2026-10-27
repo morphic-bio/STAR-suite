@@ -1,3 +1,11 @@
+star-suite (1.12.2-1) unstable; urgency=medium
+
+  * Prepare the observed edit-distance pattern once per spatial target scan
+    and compute base-quality likelihood terms once per row; decoded barcodes,
+    likelihoods and output matrices are unchanged.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Tue, 27 Oct 2026 12:00:00 +0000
+
 star-suite (1.12.1-1) unstable; urgency=medium
 
   * Give each OrdMag bootstrap resample its own seed/index stream, preserving
