@@ -504,7 +504,7 @@ test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN)
 	../test/solo_readinfo_baseline
 
 .PHONY: test
-test: test_packed_readinfo test_FlexProbeRegion test_FlexDecisionSidecar test_FlexProbeHalfIndex test_ProbeListIndex test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_SpatialGex test_SpatialGexSpill test_SpatialGexDownstreamSpool test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup
+test: test_packed_readinfo test_FlexProbeRegion test_FlexDecisionSidecar test_FlexProbeHalfIndex test_ProbeListIndex test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_SpatialR1DecoderHotpaths test_SpatialGex test_SpatialGexSpill test_SpatialGexDownstreamSpool test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup
 
 .PHONY: test_FlexProbeHalfIndex
 test_FlexProbeHalfIndex: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
@@ -553,6 +553,12 @@ test_SpatialR1FastqTap: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS
 test_SpatialR1FastqTap: SpatialR1FastqTap.o
 	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_r1_fastq_tap.cpp SpatialR1FastqTap.o $(LDFLAGS_shared) -o ../test/test_spatial_r1_fastq_tap
 	../test/test_spatial_r1_fastq_tap
+
+.PHONY: test_SpatialR1DecoderHotpaths
+test_SpatialR1DecoderHotpaths: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_SpatialR1DecoderHotpaths: ../test/test_spatial_decoder_hotpaths.cpp SpatialR1Decoder.cpp SpatialR1Decoder.h
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_decoder_hotpaths.cpp $(LDFLAGS_shared) -o ../test/test_spatial_decoder_hotpaths
+	../test/test_spatial_decoder_hotpaths
 
 .PHONY: test_SpatialGex
 test_SpatialGex: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)

@@ -46,37 +46,50 @@ namespace {
 
 // ---- distance helpers (match Python edit_distance exactly for accepted candidates) ----
 constexpr int kMaxLen = 64;
+struct Myers64Pattern {
+    uint64_t peq[256] = {};
+    int length;
+    uint64_t mask;
+    uint64_t last;
+
+    Myers64Pattern(const char* pattern, int m)
+        : length(m), mask(m == 64 ? ~0ULL : ((1ULL << m) - 1ULL)),
+          last(m == 0 ? 0 : (1ULL << (m - 1))) {
+        for (int i = 0; i < m; ++i) {
+            peq[static_cast<unsigned char>(pattern[i])] |= (1ULL << i);
+        }
+    }
+
+    int distance(const char* text, int n) const {
+        if (length == 0) return n;
+        if (n == 0) return length;
+        uint64_t pv = ~0ULL;
+        uint64_t mv = 0;
+        int score = length;
+        for (int j = 0; j < n; ++j) {
+            const uint64_t eq = peq[static_cast<unsigned char>(text[j])];
+            const uint64_t xv = eq | mv;
+            const uint64_t xh = (((eq & pv) + pv) ^ pv) | eq;
+            uint64_t ph = mv | ~(xh | pv);
+            uint64_t mh = pv & xh;
+            if (ph & last) {
+                ++score;
+            } else if (mh & last) {
+                --score;
+            }
+            ph = (ph << 1) | 1ULL;
+            mh <<= 1;
+            pv = (mh | ~(xv | ph)) & mask;
+            mv = (ph & xv) & mask;
+        }
+        return score;
+    }
+};
+
 int edit_distance_myers64(const char* pattern, int m, const char* text, int n) {
     if (m == 0) return n;
     if (n == 0) return m;
-    uint64_t peq[256] = {0};
-    for (int i = 0; i < m; ++i) {
-        peq[static_cast<unsigned char>(pattern[i])] |= (1ULL << i);
-    }
-
-    const uint64_t mask = (m == 64) ? ~0ULL : ((1ULL << m) - 1ULL);
-    const uint64_t last = 1ULL << (m - 1);
-    uint64_t pv = ~0ULL;
-    uint64_t mv = 0;
-    int score = m;
-
-    for (int j = 0; j < n; ++j) {
-        uint64_t eq = peq[static_cast<unsigned char>(text[j])];
-        uint64_t xv = eq | mv;
-        uint64_t xh = (((eq & pv) + pv) ^ pv) | eq;
-        uint64_t ph = mv | ~(xh | pv);
-        uint64_t mh = pv & xh;
-        if (ph & last) {
-            ++score;
-        } else if (mh & last) {
-            --score;
-        }
-        ph = (ph << 1) | 1ULL;
-        mh <<= 1;
-        pv = (mh | ~(xv | ph)) & mask;
-        mv = (ph & xv) & mask;
-    }
-    return score;
+    return Myers64Pattern(pattern, m).distance(text, n);
 }
 
 int edit_distance_bounded(const char* a, int la, const char* b, int lb, int maxk) {
@@ -5008,15 +5021,19 @@ HitSpan tiered_target_scan_span(
         std::vector<PackedHit> hits;
         if (start >= 0 && observed_len > 0
             && start + observed_len <= static_cast<int>(seq.size())) {
+            // Levenshtein distance is symmetric. Prepare the observed span once
+            // for all targets, retaining the original 64-byte truncation and
+            // length filter. N remains an ordinary literal byte in the masks.
+            const Myers64Pattern observed(seq.data() + start,
+                                          std::min(observed_len, kMaxLen));
             for (size_t index = 0; index < targets.size(); ++index) {
                 const std::string& target = targets[index];
                 if (std::abs(observed_len - static_cast<int>(target.size()))
                     > max_distance) {
                     continue;
                 }
-                const int distance = edit_distance_bounded(
-                    seq.data() + start, observed_len, target.data(),
-                    static_cast<int>(target.size()), max_distance);
+                const int distance = observed.distance(
+                    target.data(), std::min(static_cast<int>(target.size()), kMaxLen));
                 if (distance <= max_distance) {
                     hits.push_back(PackedHit(static_cast<uint16_t>(index),
                                              static_cast<uint8_t>(distance), 0));
@@ -6044,15 +6061,14 @@ double raw_candidate_error_probability(int phred) {
     return std::max(1.0e-10, std::min(0.75, probability));
 }
 
-double raw_candidate_pair_log_likelihood(char observed, char candidate, int phred) {
-    const char obs = static_cast<char>(std::toupper(static_cast<unsigned char>(observed)));
-    const char truth = static_cast<char>(std::toupper(static_cast<unsigned char>(candidate)));
-    if ((obs != 'A' && obs != 'C' && obs != 'G' && obs != 'T') ||
-        (truth != 'A' && truth != 'C' && truth != 'G' && truth != 'T')) {
-        return std::log(0.25);
+unsigned char raw_candidate_base_code(char base) {
+    switch (std::toupper(static_cast<unsigned char>(base))) {
+        case 'A': return 0;
+        case 'C': return 1;
+        case 'G': return 2;
+        case 'T': return 3;
+        default: return 4;
     }
-    const double error = raw_candidate_error_probability(phred);
-    return obs == truth ? std::log1p(-error) : std::log(error / 3.0);
 }
 
 double raw_candidate_alignment_log_likelihood(
@@ -6060,18 +6076,32 @@ double raw_candidate_alignment_log_likelihood(
     const std::string& candidate, int gap_q = 30, int missing_q = 30) {
     std::vector<double> previous(candidate.size() + 1, 0.0);
     std::vector<double> current(candidate.size() + 1, 0.0);
+    std::vector<unsigned char> candidate_bases(candidate.size());
+    for (size_t j = 0; j < candidate.size(); ++j) {
+        candidate_bases[j] = raw_candidate_base_code(candidate[j]);
+    }
     const double deletion = std::log(raw_candidate_error_probability(gap_q));
+    const double ambiguous = std::log(0.25);
     for (size_t j = 1; j <= candidate.size(); ++j) previous[j] = previous[j - 1] + deletion;
     for (size_t i = 1; i <= observed.size(); ++i) {
         const int q = i - 1 < qualities.size()
             ? std::max(0, static_cast<int>(static_cast<unsigned char>(qualities[i - 1])) - 33)
             : missing_q;
-        const double insertion = std::log(raw_candidate_error_probability(q) / 4.0);
+        // These terms depend only on this observed base and its quality, not
+        // the candidate column. Keep the original operations and DP order so
+        // likelihoods (including ties) remain bit-identical.
+        const double error = raw_candidate_error_probability(q);
+        const double insertion = std::log(error / 4.0);
+        const double match = std::log1p(-error);
+        const double mismatch = std::log(error / 3.0);
+        const unsigned char obs = raw_candidate_base_code(observed[i - 1]);
         current[0] = previous[0] + insertion;
         for (size_t j = 1; j <= candidate.size(); ++j) {
+            const unsigned char truth = candidate_bases[j - 1];
+            const double pair = obs == 4 || truth == 4
+                ? ambiguous : (obs == truth ? match : mismatch);
             current[j] = std::max({
-                previous[j - 1] + raw_candidate_pair_log_likelihood(
-                    observed[i - 1], candidate[j - 1], q),
+                previous[j - 1] + pair,
                 previous[j] + insertion,
                 current[j - 1] + deletion,
             });

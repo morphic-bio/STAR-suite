@@ -4,6 +4,18 @@ This file tracks where **test outputs and artifacts** should live and what is
 expected to be **untracked** in git. If you add a new smoke/regression test,
 update this file with its output location.
 
+## Spatial decoder hot-path equivalence (2026-10-26)
+
+- `make -C core/legacy/source test_SpatialR1DecoderHotpaths` builds
+  `core/legacy/test/test_spatial_decoder_hotpaths` and prints its deterministic
+  case counts. Keep the executable and captured logs untracked.
+- It compares likelihood bits with the original recurrence, edit distances
+  with an independent scalar oracle, and target-scan hit order/distances
+  including cache reuse. It creates no scientific output matrices.
+- Performance investigation builds, failed attempts, logs and full-slide
+  identity manifests remain under `/mnt/pikachu/star-spatial/runs/20261026_perf_*`
+  and `/mnt/lhhung/20261026_perf_*` on xenium24; do not commit those artifacts.
+
 ## OrdMag stream and SLAM QC patch regressions (2026-10-16)
 
 - `tests/emptydrops/test_ordmag_parallel` prints its result and creates no data
