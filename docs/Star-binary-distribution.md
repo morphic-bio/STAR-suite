@@ -11,7 +11,8 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `1.12.2-1~ubuntu22.04.1` and `1.12.2-1~ubuntu24.04.1`.
 - Spatial R1 barcode decoding reuses its edit-distance pattern across targets
   and its quality terms across each likelihood row. Decoded barcodes and
-  output matrices are unchanged; two full slides ran 28–39% faster.
+  output matrices are unchanged. In one matched development run per slide,
+  two full slides ran 28–39% faster; these are not benchmark results.
 
 ## Patch Release v1.12.1 (2026-10-16)
 

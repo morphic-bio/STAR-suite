@@ -21,10 +21,13 @@ loop:
 Candidate enumeration, thresholds, ordering, policies and output manifests are
 unchanged. No other module changes.
 
-On full Visium HD slides with matched builds on one host, decoding a
-colorectal slide took 38.7% less wall time and an ovarian slide 27.7% less
-(one matched pair each). Gains elsewhere depend on how much of a run is spent
-decoding barcodes.
+In development measurements on full Visium HD slides, wall time fell by 38.7%
+on a colorectal slide and by 27.7% on an ovarian slide. Each figure comes from
+one matched pair of runs, unmodified v1.12.1 against this change, on one host
+with 20 threads and all four resolution policies written. They are not
+benchmark results. Gains elsewhere depend on how much of a run is spent
+decoding barcodes. (This paragraph was clarified on 2026-10-28, after the
+release; the tagged copy states the same figures without the qualification.)
 
 Validation:
 
