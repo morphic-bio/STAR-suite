@@ -28,15 +28,6 @@ DEFAULT_GENOME = Path(
 DEFAULT_COMPANION = Path(
     "/mnt/pikachu/visium-hd-processing-ovarian-replication-20260722"
 )
-DEFAULT_CONTRACT = Path(
-    "/storage/star-spatial/runs/cleanroom_hd_mouse_brain/barcode_contract"
-)
-DEFAULT_BC1 = Path(
-    "/storage/star-spatial/runs/cleanroom_hd_mouse_brain/slide_oligos/bc1_full_oligos.txt"
-)
-DEFAULT_BC2 = Path(
-    "/storage/star-spatial/runs/cleanroom_hd_mouse_brain/slide_oligos/bc2_full_oligos.txt"
-)
 DEFAULT_OUTPUT = Path(
     "/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v1"
 )
@@ -91,9 +82,18 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
     parser.add_argument("--genome-dir", type=Path, default=DEFAULT_GENOME)
     parser.add_argument("--companion-root", type=Path, default=DEFAULT_COMPANION)
-    parser.add_argument("--barcode-contract-dir", type=Path, default=DEFAULT_CONTRACT)
-    parser.add_argument("--bc1-oligos", type=Path, default=DEFAULT_BC1)
-    parser.add_argument("--bc2-oligos", type=Path, default=DEFAULT_BC2)
+    parser.add_argument(
+        "--barcode-contract-dir", type=Path,
+        help="directory written by scripts/make_visium_hd_contract.py (required to run)",
+    )
+    parser.add_argument(
+        "--bc1-oligos", type=Path,
+        help="default: bc1_full_oligos.txt in --barcode-contract-dir",
+    )
+    parser.add_argument(
+        "--bc2-oligos", type=Path,
+        help="default: bc2_full_oligos.txt in --barcode-contract-dir",
+    )
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument(
         "--threads", type=int, default=16,
@@ -142,6 +142,11 @@ def arguments() -> argparse.Namespace:
         parser.error(str(error))
     if result.evidence_mode == "fused" and result.producer_mode != "concurrent":
         parser.error("--evidence-mode fused requires --producer-mode concurrent")
+    if result.barcode_contract_dir is not None:
+        if result.bc1_oligos is None:
+            result.bc1_oligos = result.barcode_contract_dir / "bc1_full_oligos.txt"
+        if result.bc2_oligos is None:
+            result.bc2_oligos = result.barcode_contract_dir / "bc2_full_oligos.txt"
     return result
 
 
@@ -334,6 +339,10 @@ def run_producer_stages(
 
 
 def require_sources(args: argparse.Namespace) -> tuple[list[Path], list[Path]]:
+    if args.barcode_contract_dir is None:
+        raise ValueError(
+            "--barcode-contract-dir is required; write it with scripts/make_visium_hd_contract.py"
+        )
     fixture_summary = args.fixture / "summary.json"
     checksums = args.fixture / "checksums.sha256"
     required_files = [
@@ -342,10 +351,6 @@ def require_sources(args: argparse.Namespace) -> tuple[list[Path], list[Path]]:
         args.bc1_oligos,
         args.bc2_oligos,
         args.barcode_contract_dir / "barcode_coords.tsv",
-        args.barcode_contract_dir / "raw28_barcode_coords.tsv",
-        args.barcode_contract_dir / "bc1_whitelist.txt",
-        args.barcode_contract_dir / "bc2_whitelist.txt",
-        args.barcode_contract_dir / "summary.json",
         args.companion_root / "native/hd_r1_anchored_decode.cpp",
         args.companion_root / "scripts/build_hd_h0_read_prior_from_oligo_stats.py",
     ]

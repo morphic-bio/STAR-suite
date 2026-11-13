@@ -16,9 +16,13 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 star_binary=${STAR_BINARY:-$repo_root/core/legacy/source/STAR}
 fixture=${VISIUM_HD_GEX_FIXTURE:-${VISIUM_HD_GEX_100K_FIXTURE:-/mnt/pikachu/star-spatial/10x/visium_hd_3prime_human_ovarian_ff_min_depth/downsample_100k_v1}}
 genome_dir=${VISIUM_HD_GEX_GENOME_DIR:-/mnt/pikachu/star-spatial/references/refdata-gex-GRCh38-2024-A_STAR-2.7.11a/star}
-bc1_oligos=${VISIUM_HD_BC1_OLIGOS:-/storage/star-spatial/runs/cleanroom_hd_mouse_brain/slide_oligos/bc1_full_oligos.txt}
-bc2_oligos=${VISIUM_HD_BC2_OLIGOS:-/storage/star-spatial/runs/cleanroom_hd_mouse_brain/slide_oligos/bc2_full_oligos.txt}
-barcode_contract=${VISIUM_HD_BARCODE_CONTRACT:-/storage/star-spatial/runs/cleanroom_hd_mouse_brain/barcode_contract}
+barcode_contract=${VISIUM_HD_BARCODE_CONTRACT:-}
+if [[ -z "$barcode_contract" ]]; then
+    echo "error: set VISIUM_HD_BARCODE_CONTRACT to a directory written by scripts/make_visium_hd_contract.py" >&2
+    exit 2
+fi
+bc1_oligos=${VISIUM_HD_BC1_OLIGOS:-$barcode_contract/bc1_full_oligos.txt}
+bc2_oligos=${VISIUM_HD_BC2_OLIGOS:-$barcode_contract/bc2_full_oligos.txt}
 threads=${STAR_THREADS:-16}
 overflow_policy=${SPATIAL_OVERFLOW_POLICY:-Fail}
 rescue_evidence=${SPATIAL_CR_RESCUE_EVIDENCE:-annotated}
@@ -38,8 +42,7 @@ esac
 
 for path in "$star_binary" "$fixture/checksums.sha256" "$genome_dir/Genome" \
     "$genome_dir/SA" "$genome_dir/SAindex" "$genome_dir/geneInfo.tab" \
-    "$bc1_oligos" "$bc2_oligos" "$barcode_contract/barcode_coords.tsv" \
-    "$barcode_contract/raw28_barcode_coords.tsv"; do
+    "$bc1_oligos" "$bc2_oligos" "$barcode_contract/barcode_coords.tsv"; do
     if [[ ! -e "$path" ]]; then
         echo "error: required source does not exist: $path" >&2
         exit 2

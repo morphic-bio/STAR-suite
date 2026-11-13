@@ -60,7 +60,10 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
   and 16 micrometer strict/soft/hard/gated-hard matrices. Bounded downstream
   spooling supports complete slides on smaller-memory hosts. The feature is
   opt-in; ordinary bulk, STARsolo, CR-compatible scRNA, and Flex runs keep
-  their existing paths and defaults.
+  their existing paths and defaults. Build the barcode inputs
+  (`--soloSpatialBarcodeContract`, `--soloSpatialBc1Oligos`,
+  `--soloSpatialBc2Oligos`) from the `visium_hd_v1.slide` file of your Space
+  Ranger installation with `scripts/make_visium_hd_contract.py`.
 - **Native Visium HD Flex** (`--soloSpatialFlexIntegrated yes`): From 1.9.5,
   resolves probes with the shared half-probe classifier and retains every
   spatial candidate coordinate through molecule resolution. The fused FASTQ
