@@ -1,0 +1,172 @@
+# Public recipe: STARgrid, Visium HD from FASTQ to count matrices (scripts/run_visium_hd.sh).
+# The script holds the fixed STAR options of the STARgrid paper's runs; this
+# recipe exposes only the inputs.
+id: star_visium_hd
+title: STARgrid Visium HD (FASTQ to matrices)
+summary: Builds the barcode inputs from the Space Ranger slide-design file and runs STAR in Visium HD 3' GEX or Flex mode, writing 2, 8 and 16 micrometre matrices under four resolution policies.
+kind: shell_workflow
+entry_script: scripts/run_visium_hd.sh
+supported_modes: [local, dry-run-capable]
+caveats:
+  - "Needs STAR Suite 1.12.2 or later: the released binary, STAR on PATH, or a build of this repository (make -C core/legacy/source STAR)."
+  - "The barcode layout comes from visium_hd_v1.slide in your Space Ranger installation (lib/python/cellranger/barcodes/); it is not redistributed. The barcode inputs are written once to contract (default: out_dir/barcode_inputs) and can be reused."
+  - "GEX mode aligns the reads to genome_dir. Flex mode loads no genome: it needs flex_reference, built once from the probe set CSV and the GTF of its reference (about 30 GB of memory, 30 GB of disk and a few minutes; needs g++)."
+  - "The read pairs are counted before STAR runs unless reads is given; STAR stops if a run holds more reads than declared."
+  - "Matrices: out_dir/SpatialGex.out or out_dir/SpatialFlex.out, then <policy>/square_{002,008,016}um/ (strict, soft_expected, hard, gated_hard)."
+default_output_layout: out_dir/SpatialGex.out or out_dir/SpatialFlex.out with <policy>/square_<size>um MEX folders; out_dir/barcode_inputs unless contract is given.
+
+scripts:
+  - role: entry
+    path: scripts/run_visium_hd.sh
+    description: Builds missing inputs, counts read pairs and runs STAR with the STARgrid recipe.
+    language: bash
+  - role: helper
+    path: scripts/make_visium_hd_contract.py
+    description: Writes the barcode inputs from the Space Ranger slide-design file.
+    language: python
+
+stages:
+  - name: barcode_inputs
+    title: Barcode inputs
+    script: scripts/make_visium_hd_contract.py
+    description: Written from the slide-design file when contract lacks them.
+  - name: flex_reference
+    title: Flex reference
+    script: scripts/run_visium_hd.sh
+    description: Probe index, half-probe cache and gene list, built in Flex mode when flex_reference lacks them.
+  - name: count
+    title: STARgrid
+    script: scripts/run_visium_hd.sh
+    description: STAR from FASTQ to matrices at 2, 8 and 16 micrometres.
+
+parameter_groups:
+  - name: inputs
+    title: Reads and slide
+    description: The run's FASTQ files, the slide-design file and the output folder.
+    parameters: [mode, fastq_dir, sample, slide, contract, out_dir]
+  - name: gex
+    title: GEX reference
+    description: Needed in gex mode.
+    parameters: [genome_dir]
+  - name: flex
+    title: Flex reference
+    description: Needed in flex mode; probe_set and gtf only to build flex_reference.
+    parameters: [flex_reference, probe_set, gtf]
+  - name: runtime
+    title: Runtime
+    parameters: [threads, reads, memory_fraction, star, dry_run]
+
+parameters:
+  - name: mode
+    cli_flag: --mode
+    type: enum
+    required: true
+    default: gex
+    choices: [gex, flex]
+    description: "gex: 3' gene expression, aligned to a genome. flex: probe-based Flex (FFPE), assigned to probes."
+    category: inputs
+  - name: fastq_dir
+    cli_flag: --fastq-dir
+    type: directory
+    required: true
+    path_must_exist: true
+    description: Folder holding *_R1_*.fastq.gz files and the matching *_R2_*.fastq.gz files.
+    category: inputs
+  - name: sample
+    cli_flag: --sample
+    type: string
+    required: false
+    description: Use only the FASTQ files whose names start with this prefix.
+    category: inputs
+  - name: slide
+    cli_flag: --slide
+    type: file
+    required: false
+    path_must_exist: true
+    description: visium_hd_v1.slide from a Space Ranger installation (lib/python/cellranger/barcodes/).
+    category: inputs
+  - name: contract
+    cli_flag: --contract
+    type: directory
+    required: false
+    description: Folder of barcode inputs written by scripts/make_visium_hd_contract.py; built there from slide if missing.
+    category: inputs
+  - name: out_dir
+    cli_flag: --out-dir
+    type: directory
+    required: true
+    is_output_root: true
+    description: Output folder; must not hold an earlier run of the same mode.
+    category: inputs
+  - name: genome_dir
+    cli_flag: --genome-dir
+    type: directory
+    required: false
+    path_must_exist: true
+    description: STAR genome index of the reference (gex mode).
+    category: gex
+  - name: flex_reference
+    cli_flag: --flex-reference
+    type: directory
+    required: false
+    description: Folder with flex_h01x2.khash and probe_gene_list.txt (flex mode); built there from probe_set and gtf if missing.
+    category: flex
+  - name: probe_set
+    cli_flag: --probe-set
+    type: file
+    required: false
+    path_must_exist: true
+    description: Probe set CSV of the slide, to build flex_reference.
+    category: flex
+  - name: gtf
+    cli_flag: --gtf
+    type: file
+    required: false
+    path_must_exist: true
+    description: GTF of the probe set's reference (gzip allowed), to build flex_reference.
+    category: flex
+  - name: threads
+    cli_flag: --threads
+    type: int
+    required: false
+    default: 16
+    description: Threads.
+    category: runtime
+  - name: reads
+    cli_flag: --reads
+    type: int
+    required: false
+    description: Read pairs in the FASTQ files; counted before the run when not given.
+    category: runtime
+  - name: memory_fraction
+    cli_flag: --memory-fraction
+    type: float
+    required: false
+    default: 0.5
+    skip_when_default: true
+    description: Share of available memory for the spatial step before it spills to disk.
+    category: runtime
+  - name: star
+    cli_flag: --star
+    type: file
+    required: false
+    path_must_exist: true
+    description: STAR binary; default STAR_BINARY, then STAR on PATH, then this repository's build.
+    category: runtime
+  - name: dry_run
+    cli_flag: --dry-run
+    type: bool
+    default: false
+    description: Print the commands without running them.
+    category: runtime
+
+constraints:
+  - kind: at_least_one
+    params: [slide, contract]
+    message: Give the slide-design file, or a folder that already holds the barcode inputs.
+  - kind: positive
+    params: [threads, reads]
+    message: Must be a positive integer.
+
+rendering:
+  flag_order: [mode, fastq_dir, sample, slide, contract, out_dir, genome_dir, flex_reference, probe_set, gtf, threads, reads, memory_fraction, star, dry_run]

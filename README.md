@@ -60,10 +60,8 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
   and 16 micrometer strict/soft/hard/gated-hard matrices. Bounded downstream
   spooling supports complete slides on smaller-memory hosts. The feature is
   opt-in; ordinary bulk, STARsolo, CR-compatible scRNA, and Flex runs keep
-  their existing paths and defaults. Build the barcode inputs
-  (`--soloSpatialBarcodeContract`, `--soloSpatialBc1Oligos`,
-  `--soloSpatialBc2Oligos`) from the `visium_hd_v1.slide` file of your Space
-  Ranger installation with `scripts/make_visium_hd_contract.py`.
+  their existing paths and defaults. To run it, see
+  [Visium HD (STARgrid)](#visium-hd-stargrid).
 - **Native Visium HD Flex** (`--soloSpatialFlexIntegrated yes`): From 1.9.5,
   resolves probes with the shared half-probe classifier and retains every
   spatial candidate coordinate through molecule resolution. The fused FASTQ
@@ -376,6 +374,67 @@ Using a fixed CR9 embedding removes the visual ambiguity from independently fit 
 | CR9 Reference | STAR-Flex Full Projected To CR9 | STAR-Flex No-Align Projected To CR9 |
 |---|---|---|
 | ![CR9 reference Leiden UMAP](docs/images/flex_parity/umap_sc2300771_cr9_reference.png) | ![STAR-Flex full projected to CR9 Leiden UMAP](docs/images/flex_parity/umap_sc2300771_fullalign_projected_to_cr9.png) | ![STAR-Flex no-align projected to CR9 Leiden UMAP](docs/images/flex_parity/umap_sc2300771_noalign_projected_to_cr9.png) |
+
+### Visium HD (STARgrid)
+
+STARgrid is the Visium HD pipeline of STAR Suite. It takes the reads of a
+slide to count matrices at 2, 8 and 16 micrometres under four resolution
+policies (strict, soft expected, hard and gated hard), for 3' gene expression
+(`--soloSpatialGexIntegrated yes`, reads aligned to a genome) or Flex
+(`--soloSpatialFlexIntegrated yes`, reads assigned to probes). Registration of
+the tissue image, nucleus checks and the manuscript's result tables are in
+[BioDepot/stargrid](https://github.com/BioDepot/stargrid).
+
+`scripts/run_visium_hd.sh` runs STARgrid with the options used for the
+manuscript, and the Launchpad recipe **STARgrid Visium HD** (`star_visium_hd`)
+fills in the same command. You need:
+
+- STAR Suite 1.12.2 or later (a release package or a build of this
+  repository) and a clone of this repository for the scripts;
+- `visium_hd_v1.slide` from a Space Ranger installation
+  (`lib/python/cellranger/barcodes/`; the same file in Space Ranger 3.0.0,
+  4.0.1 and 4.1.0). The barcode layout of the slide is 10x Genomics reference
+  data and is not redistributed here;
+- for 3' gene expression, a STAR genome index of the reference;
+- for Flex, the slide's probe set CSV and the GTF of its reference. The probe
+  cache is built from them once, which needs g++, about 30 GB of memory and
+  30 GB of disk, and takes a few minutes.
+
+```bash
+SLIDE=/path/to/spaceranger-4.1.0/lib/python/cellranger/barcodes/visium_hd_v1.slide
+
+# 3' gene expression
+scripts/run_visium_hd.sh --mode gex --fastq-dir fastqs/ --slide "$SLIDE" \
+    --genome-dir /path/to/star_index --out-dir run_gex --threads 16
+
+# Flex
+scripts/run_visium_hd.sh --mode flex --fastq-dir fastqs/ --slide "$SLIDE" \
+    --flex-reference flex_reference --probe-set probe_set.csv --gtf genes.gtf.gz \
+    --out-dir run_flex --threads 16
+```
+
+The script writes the barcode inputs to `run_gex/barcode_inputs` (pass
+`--contract` to reuse them), counts the read pairs, runs STAR and keeps a log
+in `run_visium_hd.log`. The matrices are in
+`run_gex/SpatialGex.out/<policy>/square_002um`, `square_008um` and
+`square_016um` (`SpatialFlex.out` in Flex mode), in Matrix Market format.
+`--dry-run` prints the commands without running them; `--help` lists the
+options.
+
+STAR checks at the start that the output folder's file system has room for
+its temporary files: about 170 GB for the 474 million read pairs of the
+ovarian 3' slide and 255 GB for a Flex slide of 721 million read pairs.
+Holding everything in memory would take about 205 and 310 GB; with less, the
+spatial step spills to disk (`--memory-fraction`, default 0.5 of the available
+memory), and it needs at least 9 GB, plus the genome index in 3' mode.
+
+On 100,000-read subsets of the ovarian 3' slide and the colorectal Flex slide
+of the manuscript, the script's matrices are identical to those of the
+commands recorded for the manuscript, and the barcode inputs and probe cache
+it builds are byte-identical to the ones used there. The full datasets are
+public; see
+[`docs/DATASETS.md`](https://github.com/BioDepot/stargrid/blob/main/docs/DATASETS.md)
+in BioDepot/stargrid.
 
 ### SLAM
 

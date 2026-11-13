@@ -14,7 +14,15 @@ Outputs, all in --out-dir:
   bc2_full_oligos.txt  BC2 sequences in row order (--soloSpatialBc2Oligos)
   barcode_coords.tsv   every capture location in row-major order
                        (--soloSpatialBarcodeContract is the directory)
+  bc1_whitelist.txt    the --soloCBwhitelist pair of the Visium HD Flex command:
+  bc2_whitelist.txt    the last 14 bases of each BC1 sequence and the first 14
+                       of each BC2 sequence, the 14-base barcode segments of
+                       the Visium HD chemistry, each listed once
   summary.json         sizes and checksums
+
+The barcode column of barcode_coords.tsv pairs the same 14-base segments. With
+visium_hd_v1.slide, every file except summary.json is byte-identical to the
+inputs used for the STARgrid paper.
 """
 
 from __future__ import annotations
@@ -28,12 +36,16 @@ from pathlib import Path
 
 
 GRID_SIDE = 3350
+SEGMENT_LENGTH = 14
 DNA = re.compile(rb"^[ACGTacgt]+$")
-# Checksums of the oligo lists from visium_hd_v1.slide (identical in Space
-# Ranger 3.0.0, 4.0.1 and 4.1.0), used for the results in the STARgrid paper.
+# Checksums of the files written from visium_hd_v1.slide (identical in Space
+# Ranger 3.0.0, 4.0.1 and 4.1.0), the inputs used for the STARgrid paper.
 KNOWN_V1 = {
     "bc1_full_oligos.txt": "24dfc754a706239d990ef8037c78f39bfe9c745b4ad424aa64dfc2317c4857f8",
     "bc2_full_oligos.txt": "2971bbbba0abdd7457b51a5646845df6ec2e3d620248dab17182fa69c660a1bb",
+    "barcode_coords.tsv": "246f33e5a744fffc32644acf075ea480c146c74bba6c872fc62af16f007e0ef1",
+    "bc1_whitelist.txt": "1f7b007f4739e9828fc601dedf1a065a8efede7f2be3e4c386b2dd180ae97dfe",
+    "bc2_whitelist.txt": "960db46a8eb029e3c200e93f8caa313a6504d06cd6f8db83ffc4f0995eccfe4f",
 }
 
 
@@ -128,6 +140,10 @@ def output_path(out_dir: Path, name: str, overwrite: bool) -> Path:
     return path
 
 
+def ordered_unique(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -142,15 +158,25 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"ERROR: slide-design file does not exist: {args.slide}")
     bc1, bc2 = read_oligos(args.slide)
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    names = ("bc1_full_oligos.txt", "bc2_full_oligos.txt", "barcode_coords.tsv", "summary.json")
+    names = (*KNOWN_V1, "summary.json")
     paths = {name: output_path(args.out_dir, name, args.overwrite) for name in names}
 
-    for name, values in (("bc1_full_oligos.txt", bc1), ("bc2_full_oligos.txt", bc2)):
+    bc1_segments = [value[-SEGMENT_LENGTH:] for value in bc1]
+    bc2_segments = [value[:SEGMENT_LENGTH] for value in bc2]
+    lists = {
+        "bc1_full_oligos.txt": bc1,
+        "bc2_full_oligos.txt": bc2,
+        "bc1_whitelist.txt": ordered_unique(bc1_segments),
+        "bc2_whitelist.txt": ordered_unique(bc2_segments),
+    }
+    for name, values in lists.items():
         paths[name].write_text("".join(f"{value}\n" for value in values), encoding="ascii")
     with paths["barcode_coords.tsv"].open("w", encoding="ascii", buffering=1 << 20) as coords:
         coords.write("barcode\trow2\tcol2\n")
-        for row, row_oligo in enumerate(bc2):
-            coords.write("".join(f"{col_oligo}_{row_oligo}\t{row}\t{col}\n" for col, col_oligo in enumerate(bc1)))
+        for row, row_segment in enumerate(bc2_segments):
+            coords.write("".join(
+                f"{col_segment}_{row_segment}\t{row}\t{col}\n" for col, col_segment in enumerate(bc1_segments)
+            ))
 
     checksums = {name: sha256(paths[name]) for name in KNOWN_V1}
     summary = {
@@ -160,14 +186,14 @@ def main(argv: list[str] | None = None) -> int:
         "grid_cols": len(bc1),
         "bc1_lengths": sorted({len(value) for value in bc1}),
         "bc2_lengths": sorted({len(value) for value in bc2}),
-        "oligo_sha256": checksums,
+        "sha256": checksums,
         "matches_visium_hd_v1": checksums == KNOWN_V1,
     }
     paths["summary.json"].write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     for path in paths.values():
         print(f"wrote {path}")
     if not summary["matches_visium_hd_v1"]:
-        print("WARNING: the oligo lists differ from those of visium_hd_v1.slide", file=sys.stderr)
+        print("WARNING: the barcode inputs differ from those of visium_hd_v1.slide", file=sys.stderr)
     return 0
 
 
