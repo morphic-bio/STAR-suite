@@ -431,10 +431,13 @@ memory), and it needs at least 9 GB, plus the genome index in 3' mode.
 On 100,000-read subsets of the ovarian 3' slide and the colorectal Flex slide
 of the manuscript, the script's matrices are identical to those of the
 commands recorded for the manuscript, and the barcode inputs and probe cache
-it builds are byte-identical to the ones used there. The full datasets are
-public; see
+it builds are byte-identical to the ones used there. To reproduce a slide of
+the manuscript from its public data, from the download to the registered
+image, and check the matrices against ours, see
+[Reproduce a slide](https://github.com/BioDepot/stargrid#reproduce-a-slide)
+in BioDepot/stargrid; its
 [`docs/DATASETS.md`](https://github.com/BioDepot/stargrid/blob/main/docs/DATASETS.md)
-in BioDepot/stargrid.
+lists every dataset.
 
 ### SLAM
 
