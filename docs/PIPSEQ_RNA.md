@@ -267,7 +267,15 @@ Where the two differ, from the tagged BAM of the `GeneFull_Ex50pAS` run:
 - **Reads of multi-copy genes.** Ribosomal-protein genes are 18% higher in
   ours. Genes that contain a same-strand processed pseudogene which is not in
   the deposit's annotation are higher in the deposit (for example PLEKHA7 with
-  `RPL36AP37`, SNX6 with `RPS19P3`, OOEP with `RPL39P3` and `RPS6P8`).
+  `RPL36AP37`, SNX6 with `RPS19P3`, OOEP with `RPL39P3` and `RPS6P8`). The 100
+  genes that hold most deposit-only counts total 711,440 there and 114,018 in
+  ours; our alignments in them are mostly reads with several alignments
+  (612,198 distinct cell and BI pairs), which this mode does not count, and
+  few are left out by a gene rule (about 38,000). Trimming decides where such
+  reads go: with the poly-A left on, STAR places them uniquely on the
+  pseudogene copy, which carries a poly-A stretch in the genome (unique sense
+  reads in the first four million, untrimmed against trimmed: PLEKHA7 2,313
+  against 240, SNX6 1,083 against 199).
 - **SLC26A3** has 102,220 deposited counts, in 5,672 of the 5,675 cells, and 2
   in ours. STAR places no read on the gene's strand there in the first four
   million reads; the reads it does place in the gene are poly-T reads that
