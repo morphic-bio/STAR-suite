@@ -82,7 +82,12 @@ update this file with its output location.
   (identity checks of the changed binary, full-depth runs with the mode's own
   trimming, the tagged BAM, the read trace, and the master-against-branch
   regression runs `regress_*`). Results are summarised in
-  `docs/PIPSEQ_RNA.md`. Dataset-specific scripts, commands and receipts are in
+  `docs/PIPSEQ_RNA.md`. Removed on 2026-11-15 to free disk space, with their
+  commands, logs and receipts kept in place: the tagged BAM
+  (`ctrl_full_guide_ex50pas_bam_*/Aligned.out.bam`, 23.4 GB, about 22 minutes
+  to regenerate) and the cutadapt-trimmed reads of the first full-depth run
+  (`ctrl_full_trim_tso_*`, `ctrl_full_trim_polya_*`, 38.8 GB).
+  Dataset-specific scripts, commands and receipts are in
   the private provenance repository under the host's provenance policy.
 - Keep all of this untracked.
 
