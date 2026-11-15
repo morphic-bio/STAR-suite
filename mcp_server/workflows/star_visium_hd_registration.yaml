@@ -1,0 +1,161 @@
+# Public recipe: STARgrid, registration of the microscope image of a Visium HD
+# slide to its capture grid (scripts/run_visium_hd_registration.sh, a wrapper
+# for scripts/run_registration.sh of BioDepot/stargrid).
+id: star_visium_hd_registration
+title: STARgrid Visium HD registration (image to capture grid)
+summary: Registers the H&E image of a Visium HD slide to its capture grid, finds the nuclei with Cellpose-SAM and corrects their position from STARgrid's counts, writing the position of every 2, 8 and 16 micrometre bin on the image.
+kind: shell_workflow
+entry_script: scripts/run_visium_hd_registration.sh
+supported_modes: [local, dry-run-capable]
+caveats:
+  - "Needs a checkout of BioDepot/stargrid (stargrid) and its C++ tools, built there or given with bin_dir. Cellpose-SAM 4.1.1 runs from python or in the Docker image container, on a GPU unless cpu is set; or give segmentation to reuse a finished one."
+  - "Needs the counts of the first stage: the SpatialGex.out or SpatialFlex.out folder of the star_visium_hd recipe, with hard/square_002um, square_008um and square_016um."
+  - "The layout file of the slide (<serial>.vlf) is from 10x Genomics and is not redistributed."
+  - "Every step is skipped when its output is complete, so a stopped run can be continued; a new run needs a new out_dir."
+  - "A whole slide takes about ten minutes or more, most of it Cellpose-SAM on the GPU. The output folder holds several hundred megabytes."
+default_output_layout: out_dir/registered/positions_{002,008,016}um.parquet, with the checks and the correction in the same folder; out_dir/run_registration.log.
+
+scripts:
+  - role: entry
+    path: scripts/run_visium_hd_registration.sh
+    description: Passes its options to scripts/run_registration.sh of the stargrid checkout.
+    language: bash
+
+stages:
+  - name: registration
+    title: Registration
+    script: scripts/run_visium_hd_registration.sh
+    description: H&E image to CytAssist image to capture grid, from the images only.
+  - name: nuclei
+    title: Nuclei
+    script: scripts/run_visium_hd_registration.sh
+    description: Cellpose-SAM on the H&E image, unless segmentation is given.
+  - name: correction
+    title: Correction from the counts
+    script: scripts/run_visium_hd_registration.sh
+    description: Projects the nuclei onto the grid and corrects the shift from the profile of counts across the nucleus edge.
+
+parameter_groups:
+  - name: inputs
+    title: Images, layout and counts
+    description: The slide's images and layout file, the capture area, STARgrid's counts and the output folder.
+    parameters: [stargrid, he, cytassist, layout, area, counts, out_dir]
+  - name: nuclei
+    title: Nuclei (Cellpose-SAM)
+    parameters: [segmentation, pixel_size_um, cellpose_model, python, container, cpu]
+  - name: runtime
+    title: Runtime
+    parameters: [threads, bin_dir, dry_run]
+
+parameters:
+  - name: stargrid
+    cli_flag: --stargrid
+    type: directory
+    required: true
+    path_must_exist: true
+    description: Checkout of https://github.com/BioDepot/stargrid, which holds scripts/run_registration.sh.
+    category: inputs
+  - name: he
+    cli_flag: --he
+    type: file
+    required: true
+    path_must_exist: true
+    description: Microscope (H&E) image of the slide, TIFF or BigTIFF.
+    category: inputs
+  - name: cytassist
+    cli_flag: --cytassist
+    type: file
+    required: true
+    path_must_exist: true
+    description: CytAssist image of the same capture area.
+    category: inputs
+  - name: layout
+    cli_flag: --layout
+    type: file
+    required: true
+    path_must_exist: true
+    description: Layout file of the slide (<serial>.vlf), from 10x Genomics.
+    category: inputs
+  - name: area
+    cli_flag: --area
+    type: string
+    required: true
+    description: Capture area on the slide, for example A1 or D1.
+    category: inputs
+  - name: counts
+    cli_flag: --counts
+    type: directory
+    required: true
+    path_must_exist: true
+    description: STARgrid's SpatialGex.out or SpatialFlex.out; needs hard/square_002um, square_008um and square_016um.
+    category: inputs
+  - name: out_dir
+    cli_flag: --out-dir
+    type: directory
+    required: true
+    is_output_root: true
+    description: Output folder; must not hold a finished registration.
+    category: inputs
+  - name: segmentation
+    cli_flag: --segmentation
+    type: directory
+    required: false
+    path_must_exist: true
+    description: Use this finished segmentation instead of running Cellpose.
+    category: nuclei
+  - name: pixel_size_um
+    cli_flag: --pixel-size-um
+    type: float
+    required: false
+    min_value: 0.001
+    description: Micrometres per pixel of the H&E image; default from the image's OME-TIFF metadata. It sets only the cell outlines, which the registration does not use.
+    category: nuclei
+  - name: cellpose_model
+    cli_flag: --cellpose-model
+    type: file
+    required: false
+    path_must_exist: true
+    description: Cellpose-SAM model file (default ~/.cellpose/models/cpsam); it must be the manuscript's version (SHA-256 e1440429...).
+    category: nuclei
+  - name: python
+    cli_flag: --python
+    type: string
+    required: false
+    description: Python with Cellpose 4.1.1, tifffile and zarr (default python3).
+    category: nuclei
+  - name: container
+    cli_flag: --container
+    type: string
+    required: false
+    description: Run Cellpose in this Docker image instead, for example one built from containers/cellpose-paper/Dockerfile.
+    category: nuclei
+  - name: cpu
+    cli_flag: --cpu
+    type: bool
+    default: false
+    description: Run Cellpose on the CPU (much slower).
+    category: nuclei
+  - name: threads
+    cli_flag: --threads
+    type: int
+    required: false
+    default: 16
+    min_value: 1
+    description: Threads.
+    category: runtime
+  - name: bin_dir
+    cli_flag: --bin-dir
+    type: directory
+    required: false
+    path_must_exist: true
+    description: Folder with the C++ tools (default build/ in the stargrid checkout, then PATH).
+    category: runtime
+  - name: dry_run
+    cli_flag: --dry-run
+    type: bool
+    default: false
+    description: Print the commands without running them.
+    category: runtime
+
+rendering:
+  flag_order: [stargrid, he, cytassist, layout, area, counts, out_dir, segmentation, pixel_size_um, cellpose_model, python, container, cpu, threads, bin_dir, dry_run]

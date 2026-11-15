@@ -166,6 +166,14 @@ workflows:
     schema_file: mcp_server/workflows/star_visium_hd.yaml
     visibility: public
 
+  - id: star_visium_hd_registration
+    title: STARgrid Visium HD registration (image to capture grid)
+    summary: Registers the H&E image of a Visium HD slide to its capture grid, finds the nuclei with Cellpose-SAM and corrects their position from STARgrid's counts, writing the position of every 2, 8 and 16 micrometre bin on the image.
+    entry_script: scripts/run_visium_hd_registration.sh
+    kind: shell_workflow
+    schema_file: mcp_server/workflows/star_visium_hd_registration.yaml
+    visibility: public
+
   - id: star_perturb_cr_compat
     title: STAR-perturb (CR-compat alignReads)
     summary: One STAR alignReads command with GEX FASTQs, --pfMultiConfig, the Cell Ranger-compatible option set, a required library strand choice and CR-compat threading defaults.

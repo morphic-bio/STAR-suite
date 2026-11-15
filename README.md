@@ -421,6 +421,17 @@ in `run_visium_hd.log`. The matrices are in
 `--dry-run` prints the commands without running them; `--help` lists the
 options.
 
+Registration of the tissue image, the second stage of STARgrid, has the
+Launchpad recipe **STARgrid Visium HD registration**
+(`star_visium_hd_registration`). It needs a checkout of
+[BioDepot/stargrid](https://github.com/BioDepot/stargrid) (`--stargrid`, or
+`STARGRID_REPO`) with its C++ tools built, Cellpose-SAM, the slide's images and
+layout file, and the counts of the first stage. It gives the position of every
+2, 8 and 16 micrometre bin on the image
+(`registered/positions_{002,008,016}um.parquet`). The recipe fills in
+`scripts/run_visium_hd_registration.sh`, which passes its options to
+`scripts/run_registration.sh` of that checkout.
+
 STAR checks at the start that the output folder's file system has room for
 its temporary files: about 170 GB for the 474 million read pairs of the
 ovarian 3' slide and 255 GB for a Flex slide of 721 million read pairs.
