@@ -1645,6 +1645,30 @@ waspOutputMode              None
                             SAMtag      ... add WASP tags to the alignments that pass WASP filtering
 
 ### STARsolo (single cell RNA-seq) parameters
+soloSplitseqMode             None
+    string: None or Fixed. Split-pool RNA with explicit fixed barcode/UMI coordinates; cDNA FASTQ first, barcode FASTQ last; outSAMtype None. Defaults to GeneFull and EmptyDrops_CR.
+
+soloSplitseqWhitelist        -
+    strings: 2-4 per-round allowlists in cell-ID order. Rows contain observed ACGT sequence and optional same-length canonical replacement; correction is exact then unique Hamming-1 per round.
+
+soloSplitseqCBposition       -
+    strings: zero-based offset_length for each barcode round, in allowlist/cell-ID order; total barcode length <=31. No Cartesian expansion.
+
+soloSplitseqUMIposition      -
+    string: zero-based offset_length for the UMI (length 1-16); standard STAR UMI counting. Coordinates must not overlap barcode rounds.
+
+soloPipseqMode               None
+    string: None or Illumina. Newer PIP RNA BI/IMI counting; requires R2 then R1 FASTQs and outSAMtype None.
+
+soloPipseqWhitelist          -
+    strings: four single-column tier allowlists in read order (8/6/6/8 bases); no Cartesian expansion. Each tier: exact match first, then one substitution.
+
+soloPipseqMultiMatch         Reject
+    string: Reject or FirstListed. A tier with no exact entry and several entries one substitution away: reject the read (independent of list order), or take the first listed entry.
+
+soloPipseqIPM                0
+    float: 0 estimates fragments per molecule from groups with 5-32 occupied bins; a value >=1 supplies IPM.
+
 soloType                    None
     string(s): type of single-cell RNA-seq
                             CB_UMI_Simple   ... (a.k.a. Droplet) one UMI and one Cell Barcode of fixed length in read2, e.g. Drop-seq and 10X Chromium.

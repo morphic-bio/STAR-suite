@@ -4,6 +4,7 @@
 #include "IncludeDefine.h"
 #include "Parameters.h"
 #include "SoloReadBarcodeStats.h"
+#include "PipSeq.h"
 
 class SoloReadBarcode {
 private:
@@ -18,6 +19,15 @@ public:
     vector<string> bStrings; //barcode strings from SAM tags
     string cbSeqCorrected;
     uint64 umiB;
+    pipseq::Decoded pipDecoded;
+    // [0] total; then one category per read, [1]..[8] summing to the total:
+    // accepted with exact CB, accepted with corrected CB, short, non-ACGT CB,
+    // no match, ambiguous, non-ACGT UMI, homopolymer UMI.
+    // [9]..[12]: accepted reads corrected in round 1-4 (a read can count in several).
+    std::array<uint64_t, 13> splitStats{};
+    // total, exact, corrected, invalid CB, nonmatch, phase tie, invalid BI
+    // (also counted in exact or corrected), ambiguous tier
+    std::array<uint64_t, 8> pipStats{};
     //int64  cbI;
     int32 cbMatch;//-1: no match, 0: exact, 1: 1 match with 1MM, >1: # of matches with 1MM
     int32 umiCheck;//umi check status

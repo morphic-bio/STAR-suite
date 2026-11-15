@@ -619,6 +619,14 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>    (-1, -1, "soloCBmatchWLtype", &pSolo.CBmatchWL.type));
     parArray.push_back(new ParameterInfoVector <string>   (-1, -1, "soloCBposition",&pSolo.cbPositionStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloUMIposition",&pSolo.umiPositionStr));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloPipseqMode", &pSolo.pipseqMode));
+    parArray.push_back(new ParameterInfoVector<string>(-1, -1, "soloPipseqWhitelist", &pSolo.pipseqWhitelist));
+    parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "soloPipseqIPM", &pSolo.pipseqIPM));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloPipseqMultiMatch", &pSolo.pipseqMultiMatch));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloSplitseqMode", &pSolo.splitseqMode));
+    parArray.push_back(new ParameterInfoVector<string>(-1, -1, "soloSplitseqWhitelist", &pSolo.splitseqWhitelist));
+    parArray.push_back(new ParameterInfoVector<string>(-1, -1, "soloSplitseqCBposition", &pSolo.splitseqCBposition));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloSplitseqUMIposition", &pSolo.splitseqUMIposition));
     parArray.push_back(new ParameterInfoVector <string>   (-1, -1, "soloCellFilter",&pSolo.cellFilter.type));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloEmptyDropsLegacy",&pSolo.emptyDropsLegacyStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloEmptyDropsLegacyKnee",&pSolo.emptyDropsLegacyKneeStr));

@@ -79,9 +79,14 @@ void Solo::processAndOutput()
 {
     if (pSolo.type==0 )
         return;
+
+    if (pSolo.pipseqDecoder) {
+        for (uint32 ii = 0; ii < pSolo.nFeatures; ++ii) soloFeat[ii]->processRecords();
+        return;
+    }
     
     {//collect barcode statistics    
-        if (pSolo.cbWLyes) {//now we can define WL and counts
+        if (pSolo.cbWLyes || pSolo.splitseqDecoder) {//split-seq has per-round references
             for (int ii=0; ii<P.runThreadN; ii++) {
                 readBarSum->addCounts(*RAchunk[ii]->RA->soloRead->readBar);
                 readBarSum->addStats(*RAchunk[ii]->RA->soloRead->readBar);
@@ -93,6 +98,17 @@ void Solo::processAndOutput()
         ofstream *statsStream = &ofstrOpen(P.outFileNamePrefix+pSolo.outFileNames[0]+"Barcodes.stats",ERROR_OUT, P);
         readBarSum->statsOut(*statsStream);
         statsStream->close();
+
+        if (pSolo.splitseqDecoder) {
+            const char* names[] = {"reads_total", "barcode_exact", "barcode_corrected", "read_too_short",
+                "barcode_non_acgt", "barcode_no_match", "barcode_ambiguous", "umi_non_acgt",
+                "umi_homopolymer", "round1_corrected", "round2_corrected", "round3_corrected", "round4_corrected"};
+            ofstream& metrics = ofstrOpen(P.outFileNamePrefix+pSolo.outFileNames[0]+"Splitseq.metrics.tsv", ERROR_OUT, P);
+            metrics << "metric\tvalue\n";
+            for (size_t i = 0; i < readBarSum->splitStats.size(); ++i)
+                metrics << names[i] << '\t' << readBarSum->splitStats[i] << '\n';
+            metrics.close();
+        }
 
         //pseudocounts
         if (pSolo.CBmatchWL.mm1_multi_pc) {

@@ -4,6 +4,49 @@ This file tracks where **test outputs and artifacts** should live and what is
 expected to be **untracked** in git. If you add a new smoke/regression test,
 update this file with its output location.
 
+## Public PIPseq v3 input download (2026-11-13)
+
+- Dataset: PRJNA1170298 / SRR30911721, wild-type mouse brain single-cell
+  RNA-seq using PIPseq T20 v3.0.
+- Location: `/storage/pipseq_v3/PRJNA1170298/SRR30911721/`.
+- `fastq/` holds the paired ENA FASTQs (25.45 GB compressed); incomplete
+  transfers use `.part` names. `barcodes/` holds the four Teichlab v3 tier
+  allowlists (96 sequences each, lengths 8/6/6/8).
+- `manifest.json` and `metadata/` retain source URLs, ENA metadata/MD5 values
+  and barcode SHA256 values. `download_fastqs.py`, `logs/`, and
+  `download_status.json` retain transfer execution and status.
+- `DOWNLOAD_COMPLETE.json` is written only after both FASTQs pass size and
+  ENA MD5 verification. Barcode matching against the reads is not yet validated.
+- Keep downloaded data and transfer artifacts outside git. This acquisition
+  does not run STAR or any analysis pipeline.
+
+## Public PIPseq v5 layout prefixes (2026-11-14)
+
+- Dataset: GSE291758 / GSM8841894, PIPseq V PBMC RNA-seq.
+- Location: `/storage/pipseq_v5/GSE291758/layout_prefixes/20261114T151005Z/`.
+- Contains the first 1 MiB of compressed SRR32666640 R1/R2 and SRR32666639 R1,
+  plus the first 10,000 complete FASTQ records extracted from each prefix.
+- Files ending `.fastq.gz.prefix` are intentionally incomplete gzip streams;
+  use the extracted `.first10000.fastq` files for the bounded fixture.
+- Complete archive files were not downloaded or MD5-verified. Data and
+  generated files remain untracked; this is not an alignment benchmark.
+
+## Newer PIP barcode tier lists (2026-11-14, revised 2026-11-15)
+
+- The four tier lists used for the native PIP checks are derived from public
+  reads alone: the 96 most frequent sequences at each tier position in the
+  first 500,000 barcode reads of GSE291758 / SRR32666640, among reads in which
+  the three constant linkers match exactly at one phase. No reference list
+  enters the derivation.
+- Location: `/storage/cc_pip_native_real_validation/20261115T110445Z_pip_tiers_and_dragen_comparison/tiers_from_reads_500k_*/`
+  (`readderived_tier{1..4}.tsv`, per-tier read counts and `summary.json`).
+- Cross-check only: `/storage/pipseq_v5/GSE333448/dragen446_barcode_reference/20261114T152447Z/`
+  holds five public GEO `barcodes.tsv.gz` files (GSM9890436–GSM9890440, whose
+  sample metadata identifies DRAGEN 4.4.6 processing). The tier sequences in
+  those cell labels are the same 96 per tier. Barcode-label files only; no
+  FASTQs, BAMs or count matrices were downloaded for this. Keep deposited
+  files untracked.
+
 ## Spatial decoder hot-path equivalence (2026-10-26)
 
 - `make -C core/legacy/source test_SpatialR1DecoderHotpaths` builds
@@ -1992,3 +2035,34 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
 `core/features/process_features/tests/test_fastq_discovery`. The test creates
 and removes temporary `pf-discovery-*` and `pf-triplets-*` directories. Build
 products and external validation logs are untracked.
+
+## PIPseq RNA implementation fixtures
+
+- `tests/pipseq_output_*/`: generated synthetic FASTQs, tier lists, small STAR
+  index, unit-test binaries, command receipts and RNA count outputs from
+  `tests/test_pipseq_smoke.py`. These validate implementation behavior, not
+  biological accuracy or DRAGEN agreement.
+- Test source: `core/legacy/test/test_pipseq.cpp` and
+  `tests/test_pipseq_smoke.py`. Build products and fixture outputs stay untracked.
+
+## SPLiT-seq RNA implementation fixtures
+
+- `tests/splitseq_output_*/`: synthetic FASTQs, per-round allowlists, small STAR
+  indexes, decoder test binaries, command receipts and raw/filtered MEX outputs.
+- `make -C core/legacy/source test_SplitSeq` builds `core/legacy/test/test_splitseq`
+  and writes its small allowlist fixtures to `core/legacy/test/test_splitseq_work/`.
+- Test source: `core/legacy/test/test_splitseq.cpp` and
+  `tests/test_splitseq_smoke.py`. These test implementation behavior; they do
+  not establish Parse agreement or biological cell-calling accuracy.
+
+## Native PIPseq and SPLiT-seq real-read development checks
+
+- `/storage/cc_pip_native_real_validation/<timestamp>/`: bounded public FASTQ
+  prefixes, paired subsamples, reference lists, decoder audit binaries,
+  flattened-input controls, MEX outputs and count comparisons.
+- Runs with a `_pip_trim` suffix retain cDNA preprocessing inputs and outputs
+  and a larger-prefix PIP counting check. Dataset-specific scripts, exact
+  commands, source snapshots and receipts are retained in the private research
+  provenance repository under the host's provenance policy.
+- These checks qualify development behavior; they are not matched DRAGEN or
+  Parse count comparisons and do not validate biological cell calls.
