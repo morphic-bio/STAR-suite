@@ -89,6 +89,36 @@ update this file with its output location.
   (`ctrl_full_trim_tso_*`, `ctrl_full_trim_polya_*`, 38.8 GB).
   Dataset-specific scripts, commands and receipts are in
   the private provenance repository under the host's provenance policy.
+- What is documented about the annotation (pages retrieved 2026-11-15): the
+  DRAGEN Single Cell RNA app guide
+  (`https://help.multiomics.illumina.com/dragen-single-cell-rna/run-set-up-in-bssh/manual-launch`)
+  gives GENCODE v44 as the default GTF of the built-in hg38 references and
+  says that with this kit the pseudogene, shortRNA and rRNA biotypes are
+  ignored; the DRAGEN product files page
+  (`https://support.illumina.com/sequencing/sequencing_software/dragen-bio-it-platform/product_files.html`)
+  describes the annotation files as the comprehensive GENCODE annotation on
+  the reference chromosomes only. No annotation file was taken from Illumina.
+- `/storage/references_public/gencode_v44/gencode.v44.annotation.gtf.gz` from
+  the same GENCODE release directory, MD5 `ee330cfe6d0654ba9b9cf434d5c1bfb1`
+  (matches `MD5SUMS`), 62,700 genes. Dropping the three classes as
+  `scripts/make_pipseq_reference_gtf.py --drop pseudogene,shortRNA,rRNA` does
+  leaves 40,429 genes, identical with version suffixes to the deposited
+  feature list.
+- PIP reference: `/storage/references_public/pipseq_gencode_v44/`. `genes.gtf`
+  is the tool's default output for that file (also without read-through
+  genes; 39,523 genes; SHA256
+  `257ab732d8395ab28b052c6fef5c5b954785b13a6692f883bd6926b321753c53`),
+  `report.json` its report, `index/` the STAR index (28 GB) built with the
+  branch binary at `008b981`, `--sjdbOverhang 100`, on the GRCh38
+  primary-assembly sequence already used for the other indexes
+  (`/storage/autoindex_110_44/bulk_index/cellranger_ref/genome.fa`).
+  `README.md` there repeats the commands.
+- Gene-list runs of 2026-11-15:
+  `/storage/cc_pip_native_real_validation/20261115T204650Z_annotation_documentation/`
+  (`ctrl_full_doclist_*` on the documented list, `ctrl_full_pipref_*` on the
+  reference, `gene_list_change_effect_three_lists_*` the side-by-side table).
+  The index of the documented list is in `index_documented_gene_list_*/index`
+  there (28 GB) and is not needed again.
 - Keep all of this untracked.
 
 ## Spatial decoder hot-path equivalence (2026-10-26)

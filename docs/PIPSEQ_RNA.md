@@ -12,6 +12,8 @@ The mode is written from public descriptions only:
   and of [barcode processing, read classification and the STAR aligner option](https://help.dragen.illumina.com/dragen-v4.6/product-guides/dragen-v4.6/dragen-single-cell-pipeline/dragen-scrna-illumina);
 - Illumina's note on [aligning PIPseq data with STAR](https://developer.illumina.com/news-updates/your-pipseq-workflow-is-consolidating-into-dragen)
   (15 July 2026);
+- the documentation of the [default annotation and ignored biotypes](https://help.multiomics.illumina.com/dragen-single-cell-rna/run-set-up-in-bssh/manual-launch)
+  and of the [annotation files](https://support.illumina.com/sequencing/sequencing_software/dragen-bio-it-platform/product_files.html);
 - the [public kit guide](https://crtp.ccr.cancer.gov/wp-content/uploads/fsgc-protocols/PIPseq-V-T10-3-Single-Cell-RNA-Kit-User-Guide-1.pdf).
 
 No vendor software and no packaged reference file is needed or was used. The
@@ -22,11 +24,19 @@ deposited matrix is in [Validation](#validation).
 ## Run
 
 ```bash
+# once per genome: the reference (see Reference below)
+python3 scripts/make_pipseq_reference_gtf.py \
+  --gtf gencode.v44.annotation.gtf.gz --out-gtf pipseq_ref/genes.gtf --report pipseq_ref/report.json
+core/legacy/source/STAR --runMode genomeGenerate --runThreadN 16 \
+  --genomeDir pipseq_ref/index --genomeFastaFiles genome.fa \
+  --sjdbGTFfile pipseq_ref/genes.gtf --sjdbOverhang 100
+
+# once per kit: the tier lists (see Tier lists below)
 python3 scripts/make_pipseq_tier_lists.py --barcode-fastq R1.fastq.gz --out-dir tiers
 
 core/legacy/source/STAR \
   --runThreadN 16 \
-  --genomeDir /path/to/STAR_index \
+  --genomeDir pipseq_ref/index \
   --readFilesIn R2.fastq.gz R1.fastq.gz \
   --readFilesCommand zcat \
   --outFileNamePrefix /path/to/fresh_output/ \
@@ -44,6 +54,42 @@ cell barcodes carry no library label.
 
 The raw FASTQ pair is the input. The mode trims the cDNA read itself; there is
 no separate trimming step.
+
+### Reference
+
+Any STAR index works. The reference meant for this mode follows the gene list
+that Illumina documents for the chemistry, less the read-through genes. Build
+it from a GTF written by `scripts/make_pipseq_reference_gtf.py`:
+
+- **Annotation.** The documentation names GENCODE v44 as the default for
+  GRCh38: the comprehensive annotation on the reference chromosomes
+  (`gencode.v44.annotation.gtf.gz`, 62,700 genes), not the primary-assembly
+  file, which adds 54 genes on unplaced scaffolds.
+- **Genes the documentation leaves out.** It says the biotypes pseudogene,
+  shortRNA and rRNA are ignored with this kit. The tool drops every gene type
+  whose name contains `pseudogene` (15,233 genes in v44), the short RNA types
+  `misc_RNA`, `snRNA`, `miRNA`, `snoRNA`, `scaRNA`, `sRNA` and `scRNA` (6,989)
+  and `rRNA` and `Mt_rRNA` (49). 40,429 genes remain, among them lncRNA, TEC
+  and the mitochondrial tRNA genes. `--drop pseudogene,shortRNA,rRNA` writes
+  this list.
+- **Where that assignment comes from.** The documentation names the three
+  classes and not the gene types in them. The assignment was read from the
+  feature list of a public deposit (GSE295097), which it reproduces exactly;
+  `--check-features` repeats that comparison for any features file.
+- **Read-through genes, left out by default.** A read-through gene joins
+  neighbouring genes and shares their exons, and STAR leaves out a read that
+  fits two genes. The tool drops the transcripts GENCODE tags
+  `readthrough_transcript` and the genes left without a transcript: 906 genes,
+  and 176 transcripts of 65 further genes. 39,523 genes remain. The numbers
+  behind this choice are in [Validation](#validation).
+- **Genome.** The sequence is not filtered. Unplaced scaffolds stay in the
+  index as places a read can align; they carry no gene.
+
+A reference built for another assay differs in the gene list. STAR Suite's
+2024-A-style list (38,606 genes from the primary-assembly file of the same
+GENCODE release) has no mitochondrial tRNA genes and no TEC genes, and it
+holds 236 immunoglobulin and T-cell-receptor pseudogenes and 24 protein-coding
+genes on unplaced scaffolds.
 
 ### Tier lists
 
@@ -215,6 +261,9 @@ chemistry, guide reads.
   ordinary UMI counting with the mode off.
 - `tests/test_pipseq_edges.py`: EmptyDrops, empty matrices, merging across
   threads and calibration failures, on the smoke fixture's index.
+- `tests/test_make_pipseq_reference_gtf.py`: the reference tool on a small
+  generated GTF: each dropped class, read-through genes and transcripts, the
+  documented list, both attribute names and the features-file check.
 
 ```bash
 python3 tests/test_pipseq_smoke.py --star core/legacy/source/STAR --out tests/pipseq_output_example
@@ -223,36 +272,72 @@ python3 tests/test_pipseq_smoke.py --star core/legacy/source/STAR --out tests/pi
 ### A public library with a deposited matrix
 
 GSE295097 / GSM8942285 (run SRR33231853, 180,144,123 read pairs) has a
-deposited filtered matrix of 5,675 cells. Its file names follow the published
-DRAGEN documentation; the GEO record names PIPseeker 3.3.3 and the paper names
-DRAGEN on BaseSpace; no version is stated. Its 40,429 features are exactly the
-GENCODE v44 genes that are not pseudogenes or small RNAs. Sources and
+deposited filtered matrix of 5,675 cells. The GEO record names PIPseeker 3.3.3
+and the paper names the DRAGEN Single Cell RNA app on BaseSpace; neither
+states a version, an annotation or a gene filter, and neither links code. The
+file names follow the published DRAGEN documentation, and the 40,429 features
+are exactly the documented default list: GENCODE v44 on the reference
+chromosomes without the pseudogene, shortRNA and rRNA classes. Sources and
 checksums are in `tests/ARTIFACTS.md`. Only the filtered matrix is deposited:
 there are no alignments and no unfiltered matrix, so nothing can be compared
 read by read.
 
 The runs used the raw read pair, the mode's defaults, tier lists derived from
-reads, 16 threads, and a GRCh38 index with the GENCODE v44-based 2024-A gene
-set (38,606 genes, 38,346 shared with the deposit).
+reads, 16 threads and the reference of [Reference](#reference) on a GRCh38
+primary-assembly genome. Its 39,523 genes are all in the deposit's list; the
+906 read-through genes it leaves out hold 0.2% of the deposited counts.
 
 | | `GeneFull` | `GeneFull_Ex50pAS` |
 | --- | ---: | ---: |
 | Reads with an accepted barcode | 167,966,621 (93.2%) | same |
-| Reads counted | 120,224,073 | 119,707,413 |
-| Estimated transcripts, all barcodes | 37,364,813 | 37,194,872 |
-| IPM | 1.513 | 1.511 |
+| Reads counted | 123,273,928 | 122,362,778 |
+| Estimated transcripts, all barcodes | 38,704,199 | 38,410,374 |
+| IPM | 1.484 | 1.482 |
 | Deposited cell labels that have our counts | 5,675 of 5,675 | 5,675 of 5,675 |
-| Per-cell total, ours / deposited | 1.044 | 1.040 |
-| Per-cell totals, Pearson on log10 | 0.9994 | 0.9993 |
-| Per-gene totals, Pearson on log1p | 0.930 | 0.957 |
-| Genes with counts only in the deposit | 3,047 | 2,107 |
-| (cell, gene) entries in both; equal | 10,986,681; 85.3% | 11,071,055; 85.1% |
-| Wall time; peak memory | 539 s; 33.3 GB | 1,343 s; 34.5 GB (with unsorted BAM, 23 GB) |
+| Per-cell total, ours / deposited | 1.068 | 1.063 |
+| Per-cell totals, Pearson on log10 | 0.9997 | 0.9997 |
+| Per-gene totals, Pearson on log1p | 0.927 | 0.956 |
+| Genes with counts only in the deposit | 3,274 | 2,165 |
+| (cell, gene) entries in both; equal | 11,034,381; 85.0% | 11,128,511; 84.8% |
+| Wall time; peak memory | 480 s; 33.4 GB | 483 s; 33.7 GB |
 
-The index takes 29.7 GB of that memory. Every deposited label is among our
-barcodes, with at least 6,074 reads.
+The index accounts for about 30 GB of that memory. Every deposited label is
+among our barcodes, with at least 6,074 reads.
 
-Where the two differ, from the tagged BAM of the `GeneFull_Ex50pAS` run:
+#### The gene list
+
+The same library was counted on three gene lists, each from GENCODE v44 on the
+same genome. Counts are totals over the deposited cells with
+`GeneFull_Ex50pAS`:
+
+| Gene group | Genes | Deposited | 2024-A-style list | Documented list | Reference |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| In every list, not touching an added gene | 36,492 | 23,559,202 | 24,858,738 | 24,971,711 | 24,958,906 |
+| In every list, sharing a span and strand with an added protein-coding or lncRNA gene | 1,854 | 1,852,322 | 2,156,490 | 1,575,375 | 2,136,393 |
+| Added protein-coding and lncRNA genes, 906 of them read-through | 977 | 61,438 | not listed | 69,796 | 2,693 |
+| Mitochondrial tRNA | 22 | 484,807 | not listed | 494,499 | 494,301 |
+| TEC | 1,056 | 10,561 | not listed | 10,045 | 10,045 |
+| Ribozyme, artifact, vault RNA | 28 | 287 | not listed | 179 | 179 |
+| Per-cell total, ours / deposited | | | 1.040 | 1.044 | 1.063 |
+
+- **The 2024-A-style list** (38,606 genes) lacks genes that hold 2.1% of the
+  deposited counts, most of it in the mitochondrial tRNA genes. Its ratio of
+  1.040 is low for that reason.
+- **The documented list** (40,429 genes) brings those genes in, and they agree
+  with the deposit. Its read-through genes take reads away from their
+  neighbours, because a read in a shared exon fits two genes: MIF falls from
+  43,807 to 3,455 (deposited 35,684), TUBB3 from 60,852 to 18,914 (53,206) and
+  EEF1G from 36,388 to 2,474 (33,677). With `GeneFull` the whole group falls
+  to 492,925. The deposit shows no such loss; how it assigns these reads is
+  not documented.
+- **The reference** (39,523 genes) keeps the added genes and restores the
+  neighbours. On it, our counts are 6.3% above the deposit per cell.
+
+#### Where the two differ
+
+The figures below come from an earlier `GeneFull_Ex50pAS` run on the
+2024-A-style list and its tagged BAM, except where the reference is named;
+every gene named is in all three lists.
 
 - **About 10% more observations per entry in ours.** For an entry with B
   occupied bins in ours, the deposit holds about 0.90 B, at every B up to ten;
@@ -264,8 +349,8 @@ Where the two differ, from the tagged BAM of the `GeneFull_Ex50pAS` run:
   agree). These entries follow expression: across genes their number has a
   rank correlation of 0.94 with all our bins, over 27,000 genes. The deposit
   in turn has 856,052 entries we lack; 40% of their counts are in 100 genes.
-- **Reads of multi-copy genes.** Ribosomal-protein genes are 18% higher in
-  ours. Genes that contain a same-strand processed pseudogene which is not in
+- **Reads of multi-copy genes.** Ribosomal-protein genes are 19% higher in
+  ours on the reference. Genes that contain a same-strand processed pseudogene which is not in
   the deposit's annotation are higher in the deposit (for example PLEKHA7 with
   `RPL36AP37`, SNX6 with `RPS19P3`, OOEP with `RPL39P3` and `RPS6P8`). The 100
   genes that hold most deposit-only counts total 711,440 there and 114,018 in
@@ -284,13 +369,21 @@ Where the two differ, from the tagged BAM of the `GeneFull_Ex50pAS` run:
   annotated end of a gene unless half of the read is exonic; `GeneFull` counts
   any overlap. The documentation's rule (a read overlapping a gene by at least
   20% of its length) lies between the two and is not available in STAR.
-  MT-CO2 shows it: 118,960 deposited, 62,452 with `GeneFull_Ex50pAS`.
+  MT-CO2 shows it: 118,960 deposited, 62,768 with `GeneFull_Ex50pAS` on the
+  reference.
 - **Cell set.** 675 barcodes outside the deposit total at least as much as the
   lowest deposited cell. None is one substitution from a deposited label;
   their genes detected and mitochondrial share are close to deposited cells of
   the same size. The documented threshold rule, applied to our totals with the
   documented expected-cell values of 2,000, 10,000 and 100,000, gives 4,298,
   18,101 and 25,946 cells.
+
+**Aligners.** Illumina's note of 15 July 2026 compares its own aligner with
+STAR on this chemistry. It reports the largest gene-level differences at
+pseudogenes, lncRNAs, HLA and other repetitive loci, attributes them to how
+each aligner scores a read with several placements, and says settings cannot
+remove them. The multi-copy differences above are of that kind, and this
+comparison does not take them further.
 
 Checked and found to change little: trimming with cutadapt instead of the
 mode's own, and no intron limit (per-gene correlation 0.929 against 0.930);
