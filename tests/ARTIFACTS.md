@@ -33,11 +33,11 @@ update this file with its output location.
 
 ## Newer PIP barcode tier lists (2026-11-14, revised 2026-11-15)
 
-- The four tier lists used for the native PIP checks are derived from public
-  reads alone: the 96 most frequent sequences at each tier position in the
-  first 500,000 barcode reads of GSE291758 / SRR32666640, among reads in which
-  the three constant linkers match exactly at one phase. No reference list
-  enters the derivation.
+- The four tier lists used for the PIP checks are derived from public reads
+  alone with `scripts/make_pipseq_tier_lists.py`: the 96 most frequent
+  sequences at each tier position in the first 500,000 barcode reads of
+  GSE291758 / SRR32666640, among reads in which the three constant linkers
+  match exactly at one phase. No reference list enters the derivation.
 - Location: `/storage/cc_pip_native_real_validation/20261115T110445Z_pip_tiers_and_dragen_comparison/tiers_from_reads_500k_*/`
   (`readderived_tier{1..4}.tsv`, per-tier read counts and `summary.json`).
 - Cross-check only: `/storage/pipseq_v5/GSE333448/dragen446_barcode_reference/20261114T152447Z/`
@@ -46,6 +46,45 @@ update this file with its output location.
   those cell labels are the same 96 per tier. Barcode-label files only; no
   FASTQs, BAMs or count matrices were downloaded for this. Keep deposited
   files untracked.
+
+## Public PIPseq library with a deposited matrix: GSE295097 (2026-11-15)
+
+- Dataset: GSE295097 / GSM8942285 (organoid_Ctrl), BioProject PRJNA1253453,
+  run SRR33231853: 180,144,123 read pairs, 45 + 151 bases.
+- Location: `/storage/pipseq_v5/GSE295097/`.
+  - `fastq/SRR33231853_{1,2}.fastq.gz` from
+    `https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR332/053/SRR33231853/`, retrieved
+    2026-11-15; 4,364,631,954 and 13,291,753,035 bytes; MD5
+    `e1bdfdc610ce24e27a983c693c2da284` and `18204177b5027e4a74faf5a91c4cd782`,
+    as listed by ENA, verified. `DOWNLOAD_COMPLETE.json` is written after both
+    pass.
+  - `published/`: `<sample>.scRNA.filtered.{barcodes,features,matrix}` files of
+    the three GEO samples (GSM8942285–GSM8942287) from
+    `https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM8942nnn/<GSM>/suppl/`,
+    retrieved 2026-11-15. Control sample MD5: barcodes
+    `3267f0427e1fd62701b577143a34c748`, features
+    `2a092f56bfe0daf71922079bf90527c5`, matrix
+    `4b10197d01a81f62fed3bd56cb942dba`.
+- What is recorded about how the deposited matrices were made: the GEO sample
+  records name PIPseeker 3.3.3; the methods of the publication (PMC13529364)
+  name DRAGEN on BaseSpace; the file names follow the published DRAGEN
+  documentation; the cell labels are 28 bases, four tier sequences; the 40,429
+  features are exactly the GENCODE v44 genes that are not pseudogenes or small
+  RNAs. No software version is stated. Only filtered matrices are deposited;
+  SRA holds FASTQ files and no alignments.
+- `/storage/references_public/gencode_v44/gencode.v44.primary_assembly.annotation.gtf.gz`
+  from `https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_44/`,
+  MD5 `b182a9f3b134b9cc2da566a2b1692557` (matches `MD5SUMS`). Used to classify
+  genes, not for alignment.
+- Run outputs: `/storage/cc_pip_native_real_validation/20261115T110445Z_pip_tiers_and_dragen_comparison/`
+  (first full-depth run, comparison) and
+  `/storage/cc_pip_native_real_validation/20261115T142139Z_branch_changes_and_read_trace/`
+  (identity checks of the changed binary, full-depth runs with the mode's own
+  trimming, the tagged BAM, the read trace, and the master-against-branch
+  regression runs `regress_*`). Results are summarised in
+  `docs/PIPSEQ_RNA.md`. Dataset-specific scripts, commands and receipts are in
+  the private provenance repository under the host's provenance policy.
+- Keep all of this untracked.
 
 ## Spatial decoder hot-path equivalence (2026-10-26)
 
@@ -2039,9 +2078,9 @@ products and external validation logs are untracked.
 ## PIPseq RNA implementation fixtures
 
 - `tests/pipseq_output_*/`: generated synthetic FASTQs, tier lists, small STAR
-  index, unit-test binaries, command receipts and RNA count outputs from
-  `tests/test_pipseq_smoke.py`. These validate implementation behavior, not
-  biological accuracy or DRAGEN agreement.
+  index, unit-test binaries, command receipts, BAM files and RNA count outputs
+  from `tests/test_pipseq_smoke.py` and `tests/test_pipseq_edges.py`. These
+  check implementation behaviour, not biological accuracy.
 - Test source: `core/legacy/test/test_pipseq.cpp` and
   `tests/test_pipseq_smoke.py`. Build products and fixture outputs stay untracked.
 
@@ -2064,5 +2103,5 @@ products and external validation logs are untracked.
   and a larger-prefix PIP counting check. Dataset-specific scripts, exact
   commands, source snapshots and receipts are retained in the private research
   provenance repository under the host's provenance policy.
-- These checks qualify development behavior; they are not matched DRAGEN or
-  Parse count comparisons and do not validate biological cell calls.
+- These prefix checks qualify development behaviour. The matched comparison
+  for PIP is the GSE295097 entry above; there is none yet for split-seq.

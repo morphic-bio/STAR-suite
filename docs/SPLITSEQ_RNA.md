@@ -39,9 +39,10 @@ coordinates; no linker alignment or variable-phase search is performed.
 - Each round uses an exact match first, then a unique Hamming-distance-one
   match. Several rounds can each be corrected in one read. A segment one
   substitution from several observed entries is rejected as ambiguous, unless
-  all of them map to the same canonical sequence. Non-ACGT barcode bases are
-  rejected; no abundance-based tie resolution or requirement for a whole-tuple
-  exact supporting read.
+  all of them map to the same canonical sequence. One non-ACGT base in a round
+  counts as that round's one substitution; two or more reject the read
+  (`barcode_non_acgt`). There is no abundance-based tie resolution and no
+  requirement for a whole-tuple exact supporting read.
 - Replacement is applied **once after correction**, never chained. Multiple
   observed entries may map to one canonical sequence, allowing primer-barcode
   aliases or explicit well replacement. The caller must supply the correct
@@ -74,7 +75,8 @@ exactly one of `barcode_exact`, `barcode_corrected`, `read_too_short`,
 `roundN_corrected` rows count those reads again per corrected round. The
 standard feature statistics describe the subsequent counting stage.
 
-This first implementation supports RNA with one `Gene` or `GeneFull` feature.
+This implementation supports RNA with one feature: `Gene`, `GeneFull`,
+`GeneFull_Ex50pAS` or `GeneFull_ExonOverIntron`.
 Guide capture, BAM/tag output, automatic kit detection, sample demultiplexing,
 Flex, two-pass and restart modes are not integrated. This is a STAR baseline,
 not a reproduction of Parse's pipeline or cell-selection rule. Real-data
@@ -85,7 +87,15 @@ qualification and cell-calling optimization remain separate steps.
 Decoder checks: `core/legacy/test/test_splitseq.cpp`
 (`make -C core/legacy/source test_SplitSeq`).
 FASTQ-to-MEX checks: `tests/test_splitseq_smoke.py` (small generated genome;
-no external data). These cover correction in multiple rounds, ambiguous and
-invalid barcodes, replacement aliases, 24-base cell IDs, ordinary UMI collapse,
-default EmptyDrops, empty results and thread consistency. They do not establish
+no external data). These cover correction in multiple rounds, a single
+non-ACGT base, ambiguous and invalid barcodes, replacement aliases, 24-base
+cell IDs, ordinary UMI collapse, default EmptyDrops, empty results, thread
+consistency and exon-priority gene assignment. They do not establish
 agreement with Parse counts or biological cell calls.
+
+On the first 100,000 read pairs of the public IGVF library IGVFDS5482QPWM, all
+94,999 accepted reads that carry the submitter's barcode and UMI annotation
+agree with it, and the raw matrix equals that of an independent decoder
+followed by ordinary STAR counting on the same reads. Both were measured
+before the single non-ACGT base rule, which accepts 12 more of those reads and
+adds five matrix entries.

@@ -1,70 +1,101 @@
 # PIPseq RNA BI/IMI counting
 
-`--soloPipseqMode Illumina` enables an initial native RNA implementation for
-the newer PIP/Illumina single-cell chemistry with a three-base binning index.
-It does not process the older v3 12-base UMI chemistry or guide-capture libraries.
+`--soloPipseqMode Illumina` counts RNA for the newer PIP/Illumina single-cell
+chemistry, whose barcode read carries a four-tier cell barcode and a three-base
+binning index (BI) and has no UMI. It does not process the older v3 chemistry
+with a 12-base UMI, or guide-capture libraries.
 
-The implementation follows the published
-[DRAGEN 4.4 transcript-counting description](https://help.dragen.illumina.com/dragen-v4.4/product-guide/dragen-v4.4/dragen-single-cell-pipeline/dragen-scrna-pipseq)
-and [4.6 barcode-processing description](https://help.dragen.illumina.com/dragen-v4.6/product-guides/dragen-v4.6/dragen-single-cell-pipeline/dragen-scrna-illumina).
-It does not require DRAGEN software or packaged reference files. Read-level
-barcode agreement and count concordance against a matched DRAGEN dataset remain
-to be measured; this mode does not claim exact reproduction.
+The mode is written from public descriptions only:
+
+- the published DRAGEN documentation of
+  [transcript counting](https://help.dragen.illumina.com/dragen-v4.4/product-guide/dragen-v4.4/dragen-single-cell-pipeline/dragen-scrna-pipseq)
+  and of [barcode processing, read classification and the STAR aligner option](https://help.dragen.illumina.com/dragen-v4.6/product-guides/dragen-v4.6/dragen-single-cell-pipeline/dragen-scrna-illumina);
+- Illumina's note on [aligning PIPseq data with STAR](https://developer.illumina.com/news-updates/your-pipseq-workflow-is-consolidating-into-dragen)
+  (15 July 2026);
+- the [public kit guide](https://crtp.ccr.cancer.gov/wp-content/uploads/fsgc-protocols/PIPseq-V-T10-3-Single-Cell-RNA-Kit-User-Guide-1.pdf).
+
+No vendor software and no packaged reference file is needed or was used. The
+mode states its own rule wherever those descriptions leave one open, and does
+not claim to reproduce another pipeline's output. A comparison with a
+deposited matrix is in [Validation](#validation).
 
 ## Run
 
-Supply four uncompressed, single-column allowlists in physical tier order,
-with sequence lengths 8, 6, 6 and 8. Duplicate, empty, malformed and non-ACGT
-lists are rejected. No lists are bundled. The 96 sequences of each tier can be
-taken from the reads themselves: after the phase is fixed by the constant
-linkers, they are the 96 most frequent sequences at each tier position. With
-the default `--soloPipseqMultiMatch Reject` the output does not depend on the
-order of the entries in a list.
-
 ```bash
+python3 scripts/make_pipseq_tier_lists.py --barcode-fastq R1.fastq.gz --out-dir tiers
+
 core/legacy/source/STAR \
-  --runThreadN 8 \
+  --runThreadN 16 \
   --genomeDir /path/to/STAR_index \
-  --readFilesIn /path/to/R2.fastq.gz /path/to/R1.fastq.gz \
+  --readFilesIn R2.fastq.gz R1.fastq.gz \
   --readFilesCommand zcat \
   --outFileNamePrefix /path/to/fresh_output/ \
-  --outSAMtype None \
   --soloPipseqMode Illumina \
-  --soloPipseqWhitelist tier1.txt tier2.txt tier3.txt tier4.txt \
-  --soloPipseqIPM 0 \
-  --soloPipseqMultiMatch Reject \
-  --soloFeatures GeneFull \
+  --soloPipseqWhitelist tiers/readderived_tier1.tsv tiers/readderived_tier2.tsv \
+                        tiers/readderived_tier3.tsv tiers/readderived_tier4.tsv \
+  --soloFeatures GeneFull_Ex50pAS \
   --soloStrand Forward \
-  --soloCellFilter None
+  --outSAMtype None
 ```
 
-The transcript read is first and the barcode read last, following STAR's
-ordinary separate-barcode input convention. Multiple lanes of one biological
-library may be supplied using the normal comma-separated FASTQ lists. Process
-independent libraries in separate invocations: this implementation does not add
-a library namespace to otherwise identical cell barcodes.
+The cDNA read (R2) is first and the barcode read (R1) last. Lanes of one
+library go in as comma-separated lists. Process each library in its own run:
+cell barcodes carry no library label.
 
-Exactly one of `GeneFull` (default) or `Gene` is supported. Only reads with
-one genomic alignment and one assigned gene count. Normal alignment and
-trimming options remain explicit; no vendor aligner equivalence is implied.
-Raw output is the default. Standard `--soloCellFilter` options, including
-`EmptyDrops_CR`, can filter the estimated-transcript matrix using STAR's
-existing caller. Calling policy is distinct from barcode correction.
+The raw FASTQ pair is the input. The mode trims the cDNA read itself; there is
+no separate trimming step.
 
-Prepare the cDNA mate with assay-appropriate trimming before alignment. The
-mode does not automatically remove the leading technical base, 5-prime TSO or
-3-prime poly-A. Use paired-aware preprocessing so discarded cDNA reads also
-remove their barcode mates. The published PIPseq V kit TSO is
-`AAGCAGTGGTATCAACGCAGAGTGAATGGG`; see Appendix II of the
-[public kit guide](https://crtp.ccr.cancer.gov/wp-content/uploads/fsgc-protocols/PIPseq-V-T10-3-Single-Cell-RNA-Kit-User-Guide-1.pdf).
-Record trimming thresholds explicitly; no vendor trimmer equivalence is implied.
+### Tier lists
 
-The mode owns the barcode and UMI parameters. It bypasses ordinary UMI
-correction, homopolymer filtering, cross-gene UMI filtering and UMI counting.
-Conflicting explicit options are rejected. The internal `NoDedup` setting
-selects a single matrix column; PIP's estimator supplies its values.
-The initial implementation requires `--outSAMtype None` and excludes Flex,
-two-pass/restart and pfMulti guide integration. No CB/UB sidecar is emitted.
+`--soloPipseqWhitelist` takes four one-column lists in read order, with
+sequences of 8, 6, 6 and 8 bases. None is bundled.
+`scripts/make_pipseq_tier_lists.py` reads them off the barcode reads: among
+reads in which the three constant linkers match at exactly one phase, the 96
+most frequent sequences at each tier position. Its `summary.json` shows how far
+the last listed sequence stands above the next. A library may use fewer than 96
+sequences in a tier. With the default `--soloPipseqMultiMatch Reject` the
+output does not depend on the order of a list.
+
+### What the mode sets
+
+| Setting | Value | Source |
+| --- | --- | --- |
+| cDNA trimming (`--soloPipseqTrim Kit`) | one leading base; adapters `AGAGTGAATGGG` (template switch) and `TCAACGCAGAGT` (SMART PCR) at the 5' end; poly-A and poly-G at the 3' end; reads left under 20 bases are not aligned | DRAGEN 4.6 documentation, STAR aligner section; Illumina note |
+| `--alignIntronMax` | 25000 | same |
+| Alignments counted | reads with one alignment | this mode's rule; the documentation counts the primary alignment above a mapping-quality limit |
+| `--soloFeatures` | `GeneFull` unless given | one of `Gene`, `GeneFull`, `GeneFull_Ex50pAS`, `GeneFull_ExonOverIntron` |
+| `--soloCellFilter` | `None` unless given | |
+
+A value given on the command line replaces a default. The barcode, UMI and
+deduplication parameters belong to the mode; a conflicting value is an error.
+
+**Trimming.** `--soloPipseqTrim Kit` sets `--clipAdapterType PIPseq`,
+`--clip5pNbases 1`, `--clip5pAdapterSeq AGAGTGAATGGG,TCAACGCAGAGT` and
+`--clip3pAdapterSeq polyA,polyG`. An adapter is found by overlap: at least 12
+aligned bases, mismatches up to `--clip5pAdapterMMp` (0.1) of them, no indels;
+the read is cut after the adapter. A 3' homopolymer is a window of 12 bases
+with at most one other base; the read is cut at the window's start. Give other
+sequences with the clip parameters. Use `--soloPipseqTrim None` for reads that
+were trimmed beforehand.
+
+**Gene assignment.** The documentation describes reads that are at least half
+exonic as assigned first, then reads inside a gene, with antisense and
+multi-gene reads left out. `GeneFull_Ex50pAS` is the closest STAR rule.
+`GeneFull` drops every read that lies in two overlapping genes, which removes
+whole genes that sit inside another gene.
+
+### BAM output
+
+`--outSAMtype BAM Unsorted` or `SortedByCoordinate` may be used. With
+`--outSAMattributes ... CR CB UR GX GN sF`, each alignment carries:
+
+- `CR`: the barcode as read (the four tier sequences at the chosen phase);
+- `CB`: the corrected barcode, the same string as in `barcodes.tsv`;
+- `UR`: the three BI bases;
+- `GX`, `GN`, `sF`: the gene and the overlap type of the alignment.
+
+`CR`, `CB` and `UR` are `-` where undefined (no phase, tied phases, rejected
+barcode). `UB` is not defined: there is no molecule identifier.
 
 ## Barcode and fragment contract
 
@@ -93,10 +124,9 @@ another entry, and the order of the reference list is not published. A tier
 list can hold entries one base apart, and then the rule matters: taking the
 first entry within one substitution regardless of an exact match gives both
 members of such a pair the same label. This mode therefore states its own
-rule, above. Agreement of barcode assignments with any other pipeline has not
-been measured.
+rule, above.
 
-Phase ties are rejected because the published tie rule has not been established.
+Phase ties are rejected: the published description gives no tie rule.
 Non-ACGT bases in a candidate barcode tier invalidate that phase. A valid
 barcode with a missing/non-ACGT BI retains its barcode metrics but contributes
 no RNA count. All 64 A/C/G/T BIs, including homopolymers, are valid and uncorrected.
@@ -106,15 +136,16 @@ without separators or an added suffix. Lookup tables cover the individual
 tiers; only observed cell/gene combinations are stored. The 96^4 Cartesian
 product is never allocated.
 
-Within each cell/gene, exact `(BI, IMI)` observations collapse. This version
-defines IMI as the global genomic coordinate of the strand-aware aligned
-5-prime base, with strand included in the key. Soft clipping is not extrapolated.
-Reverse reads use the last aligned base; internal splice structure is not
-part of the key. These coordinate conventions require validation against
-reference outputs. Distinct fragments are held in per-thread sparse sets and
-merged before calibration, so duplicate reads in different threads collapse.
-Memory scales with observed distinct fragments; disk spilling is not yet
-implemented. Use development downsample sizes until memory scaling is measured.
+Within each cell/gene, exact `(BI, IMI)` observations collapse. The IMI is the
+global genomic coordinate of the strand-aware aligned 5-prime base, with strand
+included in the key. Soft clipping is not extrapolated. Reverse reads use the
+last aligned base; internal splice structure is not part of the key. These are
+this mode's conventions.
+
+Each mapping thread keeps its distinct fragments as flat 24-byte records and
+compacts them as it goes; the threads' records are merged after mapping, so
+duplicate reads in different threads collapse. Memory grows with the number of
+distinct fragments; there is no spilling to disk.
 
 ## Transcript estimator and outputs
 
@@ -128,9 +159,8 @@ B > 10:  count = max(B, floor(I / IPM))
 With `--soloPipseqIPM 0`, calibrate using all assigned cell/gene groups
 with 5–32 occupied bins, before cell filtering. The coupon-collector expectation
 is the stopping-time mean `E[M|reach B] = sum(j=0..B-1, 64/(64-j))`.
-IPM is the arithmetic mean of I/E across eligible groups. This is an explicit
-interpretation of the documentation, not a claim that its numerical edge cases
-have been verified against DRAGEN.
+IPM is the arithmetic mean of I/E across eligible groups. This is this mode's
+reading of the documentation.
 
 Effective IPM is at least one, enforcing the documented bound B <= count <= I.
 Both the raw estimate and this floor are reported. A finite explicit IPM >=1
@@ -139,50 +169,129 @@ error requesting an explicit IPM or more reads; if every group has at most ten
 bins, IPM is unused and counts can still be emitted. There is no silent
 high-occupancy fallback.
 
-Under `Solo.out/GeneFull/` (or `Gene/`):
+Under `Solo.out/<feature>/`:
 
 - `raw/{matrix.mtx,features.tsv,barcodes.tsv}`: estimated transcript counts.
 - `filtered/`: the same units after optional standard cell calling.
 - `Pipseq.groups.tsv`: barcode, gene ID, assigned reads, occupied bins,
   unique BI/IMI pairs and estimated transcripts.
-- `Pipseq.metrics.tsv`: effective counting policies, calibration population,
-  raw/effective IPM, calibration size and barcode/read rejection categories.
-  `reads_total` equals `barcode_exact + barcode_corrected + barcode_invalid +
-  barcode_nonmatch + barcode_phase_tie + barcode_ambiguous`.
+- `Pipseq.metrics.tsv`: effective counting policies (including `cdna_trim`),
+  calibration population, raw/effective IPM, calibration size and barcode/read
+  rejection categories. `reads_total` equals `barcode_exact +
+  barcode_corrected + barcode_invalid + barcode_nonmatch + barcode_phase_tie +
+  barcode_ambiguous`.
 - `Summary.csv`: read, barcode and mapping fractions, distinct BI/IMI
   fragments, estimated transcripts, IPM and, with a cell filter, the called-cell
   summary. It is written from the PIP counters; `Barcodes.stats` and
   `Features.stats` of the ordinary UMI path are not produced in this mode.
 
 The raw barcode axis contains cells with at least one counted RNA observation.
-Inputs with no accepted RNA observations yield a valid empty matrix. Matrix counts and offsets are checked
-against STAR's 32-bit matrix limits. The sample-level calibration and resulting
-counts depend on the reads supplied; a downsample is not expected to reproduce
-full-library counts.
+Inputs with no accepted RNA observations yield a valid empty matrix. Matrix
+counts and offsets are checked against STAR's 32-bit matrix limits. The
+sample-level calibration and resulting counts depend on the reads supplied; a
+downsample is not expected to reproduce full-library counts.
+
+Standard `--soloCellFilter` options, including `EmptyDrops_CR`, can filter the
+estimated-transcript matrix with STAR's existing callers. The threshold rule of
+the published description is not implemented.
+
+Not in this mode: Flex, two-pass, restart, pfMulti guide integration, the v3
+chemistry, guide reads.
 
 ## Validation
 
-`core/legacy/test/test_pipseq.cpp` (`make -C core/legacy/source test_PipSeq`)
-checks decoding, all 64 BIs, exact-first matching in both list orders, single
-and multiple one-substitution candidates under both `--soloPipseqMultiMatch`
-values, phase ties, malformed input, fragment merging and estimator edges.
-`tests/test_pipseq_smoke.py` builds a small synthetic index and runs complete
-FASTQ-to-matrix fixtures, including reverse reads, duplicate fragment starts,
-fixed/estimated IPM, cell filtering and mode-off ordinary UMI counting.
-`tests/test_pipseq_edges.py` adds EmptyDrops, empty matrices, threaded merging
-and calibration-failure cases using the smoke fixture's generated index.
+### Tests in the repository
 
-The initial clean build and these synthetic checks passed. The existing
-complex-barcode whitelist lookup regression also passed. The external CB/UB
-integration script skipped because its sample-whitelist fixture was absent.
-No real-data or DRAGEN parity result is implied by these checks.
+- `core/legacy/test/test_pipseq.cpp` (`make -C core/legacy/source test_PipSeq`):
+  decoding in all phases and bins, exact-first matching in both list orders,
+  one and several one-substitution candidates under both
+  `--soloPipseqMultiMatch` values, phase ties, malformed input, the fragment
+  store (collapse, merging of stores, compaction), estimator edges and the
+  trimming functions.
+- `tests/test_pipseq_smoke.py`: FASTQ to matrix on a small generated genome,
+  including reverse reads, duplicate fragment starts, fixed and estimated IPM,
+  cell filtering, the mode's trimming against the same reads without technical
+  sequence, BAM tags (unsorted and sorted), exon-priority gene assignment and
+  ordinary UMI counting with the mode off.
+- `tests/test_pipseq_edges.py`: EmptyDrops, empty matrices, merging across
+  threads and calibration failures, on the smoke fixture's index.
 
 ```bash
-python3 tests/test_pipseq_smoke.py \
-  --star core/legacy/source/STAR \
-  --out tests/pipseq_output_example
+python3 tests/test_pipseq_smoke.py --star core/legacy/source/STAR --out tests/pipseq_output_example
 ```
 
-Use a fresh output directory. Clean-build STAR before investigating a regression.
-Guide hook matching, guide-to-RNA barcode transformations, guide read counting,
-v3 profiles, BAM annotation and reference-output parity are subsequent milestones.
+### A public library with a deposited matrix
+
+GSE295097 / GSM8942285 (run SRR33231853, 180,144,123 read pairs) has a
+deposited filtered matrix of 5,675 cells. Its file names follow the published
+DRAGEN documentation; the GEO record names PIPseeker 3.3.3 and the paper names
+DRAGEN on BaseSpace; no version is stated. Its 40,429 features are exactly the
+GENCODE v44 genes that are not pseudogenes or small RNAs. Sources and
+checksums are in `tests/ARTIFACTS.md`. Only the filtered matrix is deposited:
+there are no alignments and no unfiltered matrix, so nothing can be compared
+read by read.
+
+The runs used the raw read pair, the mode's defaults, tier lists derived from
+reads, 16 threads, and a GRCh38 index with the GENCODE v44-based 2024-A gene
+set (38,606 genes, 38,346 shared with the deposit).
+
+| | `GeneFull` | `GeneFull_Ex50pAS` |
+| --- | ---: | ---: |
+| Reads with an accepted barcode | 167,966,621 (93.2%) | same |
+| Reads counted | 120,224,073 | 119,707,413 |
+| Estimated transcripts, all barcodes | 37,364,813 | 37,194,872 |
+| IPM | 1.513 | 1.511 |
+| Deposited cell labels that have our counts | 5,675 of 5,675 | 5,675 of 5,675 |
+| Per-cell total, ours / deposited | 1.044 | 1.040 |
+| Per-cell totals, Pearson on log10 | 0.9994 | 0.9993 |
+| Per-gene totals, Pearson on log1p | 0.930 | 0.957 |
+| Genes with counts only in the deposit | 3,047 | 2,107 |
+| (cell, gene) entries in both; equal | 10,986,681; 85.3% | 11,071,055; 85.1% |
+| Wall time; peak memory | 539 s; 33.3 GB | 1,343 s; 34.5 GB (with unsorted BAM, 23 GB) |
+
+The index takes 29.7 GB of that memory. Every deposited label is among our
+barcodes, with at least 6,074 reads.
+
+Where the two differ, from the tagged BAM of the `GeneFull_Ex50pAS` run:
+
+- **About 10% more observations per entry in ours.** For an entry with B
+  occupied bins in ours, the deposit holds about 0.90 B, at every B up to ten;
+  above ten bins the same factor passes through the division by IPM. In
+  entries whose bins all have several reads the deposit holds 95–97% as many
+  counts as we have bins; in entries whose bins all have one read, 74–87%.
+  Reads in entries the deposit lacks align over
+  shorter stretches (25% under 50 aligned bases, against 5% in entries that
+  agree). These entries follow expression: across genes their number has a
+  rank correlation of 0.94 with all our bins, over 27,000 genes. The deposit
+  in turn has 856,052 entries we lack; 40% of their counts are in 100 genes.
+- **Reads of multi-copy genes.** Ribosomal-protein genes are 18% higher in
+  ours. Genes that contain a same-strand processed pseudogene which is not in
+  the deposit's annotation are higher in the deposit (for example PLEKHA7 with
+  `RPL36AP37`, SNX6 with `RPS19P3`, OOEP with `RPL39P3` and `RPS6P8`).
+- **SLC26A3** has 102,220 deposited counts, in 5,672 of the 5,675 cells, and 2
+  in ours. STAR places no read on the gene's strand there in the first four
+  million reads; the reads it does place in the gene are poly-T reads that
+  begin with reversed barcode sequence and have several alignments.
+- **Gene ends.** `GeneFull_Ex50pAS` leaves out reads that run past the
+  annotated end of a gene unless half of the read is exonic; `GeneFull` counts
+  any overlap. The documentation's rule (a read overlapping a gene by at least
+  20% of its length) lies between the two and is not available in STAR.
+  MT-CO2 shows it: 118,960 deposited, 62,452 with `GeneFull_Ex50pAS`.
+- **Cell set.** 675 barcodes outside the deposit total at least as much as the
+  lowest deposited cell. None is one substitution from a deposited label;
+  their genes detected and mitochondrial share are close to deposited cells of
+  the same size. The documented threshold rule, applied to our totals with the
+  documented expected-cell values of 2,000, 10,000 and 100,000, gives 4,298,
+  18,101 and 25,946 cells.
+
+Checked and found to change little: trimming with cutadapt instead of the
+mode's own, and no intron limit (per-gene correlation 0.929 against 0.930);
+merging fragment starts within two bases of each other (1.3% fewer counts
+above ten bins; 3.6% of neighbouring starts in a bin are that close).
+
+### Existing modes
+
+The same commands run with the `master` binary (024b72f) and the branch binary
+give identical output: complex barcodes on two libraries, whitelist counting
+with adapter clipping and BAM barcode tags, plain alignment with clipping, and
+the Flex default-route test with `master` as the reference binary.
