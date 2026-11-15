@@ -1,7 +1,9 @@
 #ifndef STAR_SPLITSEQ_H
 #define STAR_SPLITSEQ_H
 
+#include <array>
 #include <cstdint>
+#include <ostream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -44,6 +46,10 @@ private:
     std::vector<Tier> tiers_;
     unsigned cellLength_ = 0, minimumReadLength_ = 0;
 };
+
+// Splitseq.metrics.tsv from the summed per-thread counters of
+// SoloReadBarcode::splitStats.
+void writeMetrics(std::ostream& out, const std::array<uint64_t, 13>& stats);
 
 } // namespace splitseq
 #endif

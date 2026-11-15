@@ -23,7 +23,8 @@ def main():
             "--soloPipseqMode", "Illumina", "--soloPipseqWhitelist",
             *[fixture / ("tier%d.txt" % i) for i in range(4)],
             "--outSAMtype", "None", "--soloStrand", "Forward", "--alignIntronMax", "1000",
-            "--outFilterMatchNminOverLread", "0.5", "--outFilterScoreMinOverLread", "0.5"]
+            "--outFilterMatchNminOverLread", "0.5", "--outFilterScoreMinOverLread", "0.5",
+            "--soloPipseqTrim", "None"]  # fixture cDNA reads carry no technical sequence
 
     def run(label, r2, r1, extra, success=True):
         target = args.out / label

@@ -481,6 +481,7 @@ clipAdapterType             Hamming
     string:                 adapter clipping type
                             Hamming ... adapter clipping based on Hamming distance, with the number of mismatches controlled by --clip5pAdapterMMp
                             CellRanger4 ... 5p and 3p adapter clipping similar to CellRanger4. Utilizes Opal package by Martin Šošić: https://github.com/Martinsos/opal
+                            PIPseq ... 5p adapters (--clip5pAdapterSeq, comma-separated) and 3p homopolymers (--clip3pAdapterSeq polyA,polyG or one of them) placed by overlap: at least 12 aligned bases, mismatches up to --clip5pAdapterMMp/--clip3pAdapterMMp of them, no indels; mates left shorter than 20 bases are not aligned. Set by --soloPipseqTrim Kit.
                             None ... no adapter clipping, all other clip* parameters are disregarded
 
 clip3pPolyG                 auto
@@ -1649,7 +1650,7 @@ soloSplitseqMode             None
     string: None or Fixed. Split-pool RNA with explicit fixed barcode/UMI coordinates; cDNA FASTQ first, barcode FASTQ last; outSAMtype None. Defaults to GeneFull and EmptyDrops_CR.
 
 soloSplitseqWhitelist        -
-    strings: 2-4 per-round allowlists in cell-ID order. Rows contain observed ACGT sequence and optional same-length canonical replacement; correction is exact then unique Hamming-1 per round.
+    strings: 2-4 per-round allowlists in cell-ID order. Rows contain observed ACGT sequence and optional same-length canonical replacement; correction is exact then unique Hamming-1 per round (one non-ACGT base counts as the substitution).
 
 soloSplitseqCBposition       -
     strings: zero-based offset_length for each barcode round, in allowlist/cell-ID order; total barcode length <=31. No Cartesian expansion.
@@ -1658,7 +1659,7 @@ soloSplitseqUMIposition      -
     string: zero-based offset_length for the UMI (length 1-16); standard STAR UMI counting. Coordinates must not overlap barcode rounds.
 
 soloPipseqMode               None
-    string: None or Illumina. Newer PIP RNA BI/IMI counting; requires R2 then R1 FASTQs and outSAMtype None.
+    string: None or Illumina. Newer PIP RNA BI/IMI counting; requires R2 then R1 FASTQs. Sets --alignIntronMax 25000 unless given. BAM output may carry CR, CB, UR, sS, GX, GN and sF; UB is not defined.
 
 soloPipseqWhitelist          -
     strings: four single-column tier allowlists in read order (8/6/6/8 bases); no Cartesian expansion. Each tier: exact match first, then one substitution.
@@ -1668,6 +1669,9 @@ soloPipseqMultiMatch         Reject
 
 soloPipseqIPM                0
     float: 0 estimates fragments per molecule from groups with 5-32 occupied bins; a value >=1 supplies IPM.
+
+soloPipseqTrim               Kit
+    string: Kit or None. Kit trims the cDNA read before alignment: one leading base, the template-switch and SMART PCR adapter sequences at the 5p end, polyA and polyG at the 3p end (sets --clipAdapterType PIPseq --clip5pNbases 1 --clip5pAdapterSeq AGAGTGAATGGG,TCAACGCAGAGT --clip3pAdapterSeq polyA,polyG unless given). None leaves the clip parameters alone, for reads trimmed beforehand.
 
 soloType                    None
     string(s): type of single-cell RNA-seq

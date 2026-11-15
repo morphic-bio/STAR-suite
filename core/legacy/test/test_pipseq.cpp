@@ -4,6 +4,8 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 using namespace pipseq;
 
@@ -77,36 +79,146 @@ int main(int argc, char** argv) {
     try { Decoder invalid(paths); } catch (const std::runtime_error&) { failed = true; }
     assert(failed);
 
-    Group g;
-    g.add(0, 100, false); g.add(0, 100, false); g.add(0, 101, false);
-    g.add(0, 100, true); g.add(1, 100, false);
-    assert(g.reads == 5 && g.fragments.size() == 4 && g.occupiedBins() == 2);
-    Group other; other.add(0, 100, false); other.add(63, 100, false);
-    g.merge(other);
-    assert(g.reads == 7 && g.fragments.size() == 5 && g.occupiedBins() == 3);
-    assert(transcripts(g, 2) == 3);
-    Group boundary;
-    for (unsigned b = 0; b < 10; ++b) { boundary.add(b, 100, false); boundary.add(b, 200, false); }
-    assert(transcripts(boundary, 1.35) == 10);
-    boundary.add(10, 100, false); boundary.add(10, 200, false);
-    assert(transcripts(boundary, 1.35) == 16);
-    assert(transcripts(boundary, 100) == 11);
-    assert(transcripts(boundary, 1) == 22);
+    // Fragment store: identical (cell, gene, BI, IMI) collapse; strand and
+    // bin are part of the key; stores filled separately merge to the same.
+    const auto summaries = [](const Fragments& f) {
+        std::vector<GroupSummary> out;
+        f.forEachGroup([&](const GroupSummary& g) { out.push_back(g); });
+        return out;
+    };
+    Fragments g;
+    g.add(7, 3, 0, 100, false); g.add(7, 3, 0, 100, false); g.add(7, 3, 0, 101, false);
+    g.add(7, 3, 0, 100, true); g.add(7, 3, 1, 100, false);
+    g.finalize();
+    auto s = summaries(g);
+    assert(s.size() == 1 && s[0].cell == 7 && s[0].gene == 3);
+    assert(s[0].reads == 5 && s[0].fragments == 4 && s[0].bins == 2);
+    Fragments other; other.add(7, 3, 0, 100, false); other.add(7, 3, 63, 100, false);
+    g.absorb(other);
+    s = summaries(g);
+    assert(other.size() == 0 && s.size() == 1);
+    assert(s[0].reads == 7 && s[0].fragments == 5 && s[0].bins == 3);
+    assert(transcripts(s[0].bins, s[0].fragments, 2) == 3);
+    // Groups come out ordered by cell, then gene, whatever the input order.
+    Fragments order;
+    order.add(9, 1, 0, 5, false); order.add(2, 8, 0, 5, false); order.add(2, 4, 0, 5, false); order.add(9, 0, 1, 5, true);
+    order.finalize();
+    s = summaries(order);
+    assert(s.size() == 4 && s[0].cell == 2 && s[0].gene == 4 && s[1].gene == 8 && s[2].cell == 9 && s[2].gene == 0 && s[3].gene == 1);
+    // Many reads over few fragments: compaction during add() keeps the answer.
+    Fragments heavy, split1, split2;
+    for (unsigned i = 0; i < 3000000; ++i) {
+        const unsigned bin = i % 7; const uint64_t at = 1000 + i % 11; const bool rev = i % 2;
+        heavy.add(i % 3, i % 5, bin, at, rev);
+        (i % 4 ? split1 : split2).add(i % 3, i % 5, bin, at, rev);
+    }
+    heavy.finalize();
+    split1.absorb(split2);
+    const auto h = summaries(heavy), m = summaries(split1);
+    assert(h.size() == 15 && m.size() == 15 && heavy.size() == split1.size());
+    uint64_t reads = 0;
+    for (size_t i = 0; i < h.size(); ++i) {
+        assert(h[i].cell == m[i].cell && h[i].gene == m[i].gene && h[i].reads == m[i].reads);
+        assert(h[i].fragments == m[i].fragments && h[i].bins == m[i].bins);
+        reads += h[i].reads;
+    }
+    assert(reads == 3000000);
+    bool rangeFailed = false;
+    try { Fragments bad; bad.add(0, 0, 64, 1, false); } catch (const std::runtime_error&) { rangeFailed = true; }
+    assert(rangeFailed);
+
+    const auto filled = [](unsigned bins, unsigned startsPerBin) {
+        Fragments f;
+        for (unsigned b = 0; b < bins; ++b)
+            for (unsigned k = 0; k < startsPerBin; ++k) f.add(0, 0, b, 100 * (k + 1), false);
+        f.finalize();
+        return f;
+    };
+    // Estimator edges: bins <= 10 give the bin count; above ten,
+    // max(bins, min(fragments, floor(fragments / IPM))).
+    assert(transcripts(10, 20, 1.35) == 10);
+    assert(transcripts(11, 22, 1.35) == 16);
+    assert(transcripts(11, 22, 100) == 11);
+    assert(transcripts(11, 22, 1) == 22);
+    assert(transcripts(64, 64, 1) == 64);
     assert(expectedMolecules(1) == 1 && std::abs(expectedMolecules(2) - (1 + 64.0 / 63)) < 1e-12);
-    Groups low; low[{0, 0}] = g;
-    assert(calibrate(low, 0).source == "unused_low_occupancy");
-    Groups fit; fit[{0, 0}] = boundary;
-    const auto c = calibrate(fit, 0);
+    assert(calibrate(g, 0).source == "unused_low_occupancy");
+    const auto c = calibrate(filled(11, 2), 0);
     assert(c.groups == 1 && c.raw > 1 && c.raw < 2 && c.effective == c.raw);
-    Group onePerBin; for (unsigned b = 0; b < 5; ++b) onePerBin.add(b, 100, false);
-    fit.clear(); fit[{0, 0}] = onePerBin;
-    assert(calibrate(fit, 0).raw < 1 && calibrate(fit, 0).effective == 1);
-    Group saturated; for (unsigned b = 0; b < 64; ++b) saturated.add(b, 100, false);
-    assert(saturated.occupiedBins() == 64 && transcripts(saturated, 1) == 64);
-    fit.clear(); fit[{0, 0}] = saturated;
-    failed = false; try { calibrate(fit, 0); } catch (const std::runtime_error&) { failed = true; }
-    assert(failed && calibrate(fit, 2).source == "supplied");
-    failed = false; try { transcripts(g, 0.5); } catch (const std::runtime_error&) { failed = true; }
+    assert(calibrate(filled(5, 1), 0).raw < 1 && calibrate(filled(5, 1), 0).effective == 1);
+    const auto saturated = filled(64, 1);
+    assert(summaries(saturated)[0].bins == 64);
+    failed = false; try { calibrate(saturated, 0); } catch (const std::runtime_error&) { failed = true; }
+    assert(failed && calibrate(saturated, 2).source == "supplied");
+    failed = false; try { transcripts(3, 5, 0.5); } catch (const std::runtime_error&) { failed = true; }
     assert(failed);
-    std::cout << "PASS PIP decoder and estimator unit checks\n";
+
+    // cDNA trimming. Sequences are numeric: A, C, G, T = 0..3, N = 4.
+    const auto numeric = [](const std::string& text) {
+        std::string out;
+        for (char ch : text) out += char(ch == 'A' ? 0 : ch == 'C' ? 1 : ch == 'G' ? 2 : ch == 'T' ? 3 : 4);
+        return out;
+    };
+    const std::string kit = "AAGCAGTGGTATCAACGCAGAGTGAATGGG"; // template-switch oligo; holds both kit adapters
+    const std::string tso = numeric(kit);
+    const std::string cdna = "CGTACCGTTAGCATCGGATCCATGCTAGCTAGGCTAACGTTACGGATC";
+    // One adapter given whole: it may hang off the read start by all but 12 bases.
+    const auto clip5 = [&](const std::string& text) {
+        const std::string n = numeric(text);
+        return clip5pAdapter(n.data(), n.size(), tso.data(), tso.size(), 0.1);
+    };
+    assert(clip5(cdna) == 0);                                    // no adapter
+    assert(clip5(kit + cdna) == 30);                             // complete, at the start
+    assert(clip5("GGA" + kit + cdna) == 33);                     // complete, after other bases
+    assert(clip5(kit.substr(18) + cdna) == 12);                  // last 12 bases at the start
+    assert(clip5(kit.substr(19) + cdna) == 0);                   // 11 bases: below the overlap
+    auto oneWrong = kit; oneWrong[5] = 'T';
+    assert(clip5(oneWrong + cdna) == 30);                        // 1 of 30 mismatched
+    auto fourWrong = kit; for (unsigned i : {2u, 9u, 16u, 23u}) fourWrong[i] = fourWrong[i] == 'A' ? 'C' : 'A';
+    assert(clip5(fourWrong + cdna) == 0);                        // 4 of 30: above floor(0.1 * 30)
+    auto partWrong = kit.substr(18); partWrong[3] = partWrong[3] == 'A' ? 'C' : 'A';
+    assert(clip5(partWrong + cdna) == 12);                       // 1 of 12 allowed
+    partWrong[7] = partWrong[7] == 'A' ? 'C' : 'A';
+    assert(clip5(partWrong + cdna) == 0);                        // 2 of 12 not allowed
+    auto withN = kit; withN[10] = 'N';
+    assert(clip5(withN + cdna) == 30);                           // N is a mismatch
+    assert(clip5(kit.substr(0, 20)) == 0);                       // the adapter never hangs off the read end
+    assert(clip5(kit) == 30 && clip5("") == 0);
+    // The kit's two 12-base adapters, as a list: each must be complete.
+    const std::string adapters = numeric(kitAdapters5p);
+    assert(std::string(kitAdapters5p) == kit.substr(18) + "," + kit.substr(11, 12));
+    const auto clipKit = [&](const std::string& text) {
+        const std::string n = numeric(text);
+        return clip5pAdapter(n.data(), n.size(), adapters.data(), adapters.size(), 0.1);
+    };
+    assert(clipKit(cdna) == 0);
+    assert(clipKit(kit + cdna) == 30);                           // both found; the later end wins the tie
+    assert(clipKit("GGA" + kit + cdna) == 33);
+    assert(clipKit(kit.substr(18) + cdna) == 12);                // template-switch adapter alone
+    assert(clipKit(kit.substr(19) + cdna) == 0);                 // one base short
+    assert(clipKit(kit.substr(0, 23) + cdna) == 23);             // SMART PCR adapter alone
+    auto tailWrong = kit; tailWrong[20] = tailWrong[20] == 'A' ? 'C' : 'A';
+    assert(clipKit(tailWrong + cdna) == 30);                     // one mismatch in each adapter
+    tailWrong = kit; tailWrong[24] = 'C'; tailWrong[27] = 'C';
+    assert(clipKit(tailWrong + cdna) == 23);                     // only the SMART PCR adapter is left
+    const auto clip3 = [&](const std::string& text, char base = 'A') {
+        const std::string n = numeric(text);
+        return clip3pHomopolymer(n.data(), n.size(), base == 'A' ? 0 : 2, 0.1);
+    };
+    const std::string tail = "GCTTAGGCATCG";
+    assert(clip3(cdna) == 0 && clip3(cdna, 'G') == 0);
+    assert(clip3(cdna + std::string(10, 'A')) == 0);             // 10 A: two non-A in the last window
+    assert(clip3(cdna + std::string(11, 'A')) == 12);            // the base before 11 A is the one mismatch
+    assert(clip3(cdna + std::string(12, 'A')) == 12);
+    assert(clip3(cdna + std::string(30, 'A') + tail) == 30 + tail.size()); // everything from the first A window
+    assert(clip3(cdna + "AAAAACAAAAAA") == 12);                  // 11 of 12 A, no clean window
+    assert(clip3(cdna + "AAAAACAAAAAAAAAAAA") == 12);            // a clean window wins over the earlier 11 of 12
+    assert(clip3(cdna + "AAAACAAAACAAAA") == 0);                 // two non-A in every window
+    assert(clip3(std::string(12, 'A')) == 12 && clip3("AAAA") == 0);
+    assert(clip3(cdna + std::string(15, 'G'), 'G') == 15 && clip3(cdna + std::string(15, 'G')) == 0);
+    assert(std::string(kitAdapters3p) == "polyA,polyG");
+    // Tags: the barcode and BI as read at a phase.
+    assert(Decoder::rawCell("GG" + body + "ACT", 2) == "ACGTACGTGACTGCCTAGCATGCATGCA" && Decoder::rawBin("GG" + body + "ACT", 2) == "ACT");
+    assert(Decoder::rawCell(body, -1) == "-" && Decoder::rawBin(body, 0) == "-" && Decoder::rawCell(body.substr(0, 38), 0) == "-");
+    std::cout << "PASS PIP decoder, fragment store, estimator and trimming unit checks\n";
 }

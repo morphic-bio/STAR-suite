@@ -1728,7 +1728,7 @@ void ParametersSolo::initialize(Parameters *pPin)
 
     //////////////////////////////////////////////////////////////SAM attributes
     samAttrYes=false;
-    if ( (pP->outSAMattrPresent.CB || pP->outSAMattrPresent.UB) && type!=SoloTypes::CB_samTagOut) {
+    if ( (pP->outSAMattrPresent.CB || pP->outSAMattrPresent.UB) && type!=SoloTypes::CB_samTagOut && !pipseqDecoder) {//PIP writes CB with the alignment
         samAttrYes=true;
         // CB/UB tags require either:
         // - Sorted BAM output (tags injected after Solo counting)

@@ -43,8 +43,17 @@ int main(int argc, char** argv) {
     auto variant = read; variant[78] = 'C'; variant[48] = 'A'; variant[10] = 'A';
     assert(decoder.decode(variant).correctedRounds == 7); // independent round corrections
     assert(decoder.decode(read.substr(0,85)).status == Status::ShortRead);
+    // One non-ACGT base in a round is one substitution; two are invalid.
     variant = read; variant[78] = 'N';
+    auto unknown = decoder.decode(variant);
+    assert(unknown.status == Status::Accepted && unknown.cell == exact.cell && unknown.correctedRounds == 1);
+    assert(unknown.rawCell[0] == 'N' && unknown.canonicalCell == exact.canonicalCell);
+    variant[48] = 'N'; variant[17] = 'N';
+    assert(decoder.decode(variant).correctedRounds == 7 && decoder.decode(variant).cell == exact.cell);
+    variant = read; variant[78] = 'N'; variant[79] = 'N';
     assert(decoder.decode(variant).status == Status::InvalidBarcode);
+    variant = read; variant[78] = 'N'; variant[80] = 'A'; // N plus a substitution: two away
+    assert(decoder.decode(variant).status == Status::NoMatch);
     variant = read; variant.replace(48,8,"AAAAAAAA");
     assert(decoder.decode(variant).status == Status::NoMatch);
     const auto ambiguous = file("ambiguous", "CTAGCTAG\nCTAGCTAA\n");
@@ -55,12 +64,20 @@ int main(int argc, char** argv) {
     variant = read; variant[17] = 'C';
     assert(tie.decode(variant).status == Status::Ambiguous);
     assert(tieReversed.decode(variant).status == Status::Ambiguous);
+    auto unknownTie = read; unknownTie[17] = 'N'; // N at the base where two entries differ
+    assert(tie.decode(unknownTie).status == Status::Ambiguous);
+    assert(tieReversed.decode(unknownTie).status == Status::Ambiguous);
+    unknownTie = read; unknownTie[10] = 'N';      // N elsewhere: one entry fits
+    assert(tie.decode(unknownTie).status == Status::Accepted && tie.decode(unknownTie).correctedRounds == 4);
     // Two observed aliases of one canonical sequence are not a conflict.
     const auto alias = file("alias", "CTAGCTAG GGGGGGGG\nCTAGCTAA GGGGGGGG\n");
     Decoder aliased({"78_8","48_8","10_8"}, "0_10", {r1,r2,alias});
     const auto resolved = aliased.decode(variant);
     assert(resolved.status == Status::Accepted && resolved.correctedRounds == 4);
     assert(resolved.canonicalCell == "TGCATGCAGACTGACTGGGGGGGG");
+    auto unknownAlias = read; unknownAlias[17] = 'N'; // both fillings are aliases of one sequence
+    assert(aliased.decode(unknownAlias).status == Status::Accepted);
+    assert(aliased.decode(unknownAlias).canonicalCell == "TGCATGCAGACTGACTGGGGGGGG");
     // A third neighbor with a different canonical sequence is a conflict.
     const auto mixedAlias = file("mixed_alias", "CTAGCTAG GGGGGGGG\nCTAGCTAA GGGGGGGG\nCTAGCTAT TTTTTTTT\n");
     Decoder conflicted({"78_8","48_8","10_8"}, "0_10", {r1,r2,mixedAlias});

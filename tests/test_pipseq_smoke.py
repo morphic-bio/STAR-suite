@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import random
+import shutil
 import subprocess
 import sys
 
@@ -84,14 +85,17 @@ def main():
     for path, column in ((r2, 1), (r1, 2)):
         path.write_text("".join("@%s\n%s\n+\n%s\n" % (row[0], row[column], "I" * len(row[column])) for row in records))
 
-    common = [args.star, "--genomeDir", index, "--readFilesIn", r2, r1,
-              "--soloPipseqMode", "Illumina", "--soloPipseqWhitelist", *lists,
-              "--outSAMtype", "None", "--soloStrand", "Forward",
-              "--alignIntronMax", "1000", "--outFilterMatchNminOverLread", "0.5",
-              "--outFilterScoreMinOverLread", "0.5"]
+    mode = [args.star, "--genomeDir", index,
+            "--soloPipseqMode", "Illumina", "--soloPipseqWhitelist", *lists,
+            "--outSAMtype", "None", "--soloStrand", "Forward",
+            "--alignIntronMax", "1000", "--outFilterMatchNminOverLread", "0.5",
+            "--outFilterScoreMinOverLread", "0.5"]
+    # These cDNA reads carry no technical sequence: the mode's trimming is off
+    # here and exercised separately below.
+    common = mode + ["--readFilesIn", r2, r1, "--soloPipseqTrim", "None"]
 
-    def matrix(run_dir):
-        raw = run_dir / "Solo.out/GeneFull/raw"
+    def matrix(run_dir, feature="GeneFull"):
+        raw = run_dir / "Solo.out" / feature / "raw"
         assert (raw / "barcodes.tsv").read_text().splitlines() == [cell]
         features = [x.split("\t")[0] for x in (raw / "features.tsv").read_text().splitlines()]
         lines = [x for x in (raw / "matrix.mtx").read_text().splitlines() if not x.startswith("%")]
@@ -112,6 +116,7 @@ def main():
         metrics = dict(csv.reader((target / "Solo.out/GeneFull/Pipseq.metrics.tsv").open(), delimiter="\t"))
         assert metrics["barcode_corrected"] == "1", metrics
         assert metrics["barcode_correction"] == "exact_then_one_substitution_per_tier", metrics
+        assert metrics["cdna_trim"] == "none", metrics
         exclusive = ("barcode_exact", "barcode_corrected", "barcode_invalid", "barcode_nonmatch",
                      "barcode_phase_tie", "barcode_ambiguous")
         assert sum(int(metrics[key]) for key in exclusive) == int(metrics["reads_total"]), metrics
@@ -126,6 +131,79 @@ def main():
             filtered = target / "Solo.out/GeneFull/filtered"
             assert (filtered / "matrix.mtx").read_bytes() == (target / "Solo.out/GeneFull/raw/matrix.mtx").read_bytes()
         receipts[label] = {"counts": counts, "metrics": metrics}
+    # The mode's own cDNA trimming (the default): every read gets the leading
+    # base; some get the template-switch oligo, whole or as its last 14 bases;
+    # some run through poly-A into further sequence. Trimmed, they are the reads
+    # above, so the ledger and the matrix must not change.
+    tso = "AAGCAGTGGTATCAACGCAGAGTGAATGGG"
+    kit_r2 = out / "kit_R2.fastq"
+    with kit_r2.open("w") as handle:
+        for i, row in enumerate(records):
+            sequence = "T" + (tso, tso[-14:], "")[i % 3] + row[1] + ("A" * 20 + "GCTTAGGCATCG" if i % 2 == 0 else "")
+            handle.write("@%s\n%s\n+\n%s\n" % (row[0], sequence, "I" * len(sequence)))
+    target = out / "kit_trim"
+    target.mkdir()
+    run("kit_trim", mode + ["--readFilesIn", kit_r2, r1, "--runThreadN", "1", "--soloPipseqIPM", "1.35",
+                            "--soloCellFilter", "None", "--outFileNamePrefix", str(target) + "/"])
+    for name in ("Pipseq.groups.tsv", "raw/matrix.mtx", "raw/barcodes.tsv"):
+        assert (target / "Solo.out/GeneFull" / name).read_bytes() == (out / "fixed/Solo.out/GeneFull" / name).read_bytes(), name
+    kit_metrics = dict(csv.reader((target / "Solo.out/GeneFull/Pipseq.metrics.tsv").open(), delimiter="\t"))
+    assert kit_metrics["cdna_trim"] == "kit", kit_metrics
+    assert "[PIP effective] clipAdapterType = PIPseq" in (target / "Log.out").read_text()
+    for key in ("reads_counted", "reads_unmapped", "reads_total"):
+        assert kit_metrics[key] == receipts["fixed"]["metrics"][key], (key, kit_metrics)
+    # Untrimmed, the same reads lose alignments: the trimming is doing the work.
+    target = out / "kit_untrimmed"
+    target.mkdir()
+    run("kit_untrimmed", mode + ["--readFilesIn", kit_r2, r1, "--soloPipseqTrim", "None", "--runThreadN", "1",
+                                 "--soloPipseqIPM", "1.35", "--soloCellFilter", "None",
+                                 "--outFileNamePrefix", str(target) + "/"])
+    untrimmed = dict(csv.reader((target / "Solo.out/GeneFull/Pipseq.metrics.tsv").open(), delimiter="\t"))
+    assert int(untrimmed["reads_counted"]) < int(kit_metrics["reads_counted"]), untrimmed
+    receipts["kit_trim"] = {"metrics": kit_metrics, "reads_counted_untrimmed": untrimmed["reads_counted"]}
+    # BAM output: CR and UR as read, CB after correction, written with each
+    # alignment; counting is unchanged.
+    at = mode.index("--outSAMtype")
+    mode_bam = mode[:at] + mode[at + 2:]
+    for kind, name in (("Unsorted", "Aligned.out.bam"), ("SortedByCoordinate", "Aligned.sortedByCoord.out.bam")):
+        target = out / ("bam_" + kind.lower())
+        target.mkdir()
+        run("bam_" + kind.lower(), mode_bam + ["--readFilesIn", kit_r2, r1, "--runThreadN", "2", "--soloPipseqIPM", "1.35",
+                                        "--soloCellFilter", "None", "--outSAMtype", "BAM", kind,
+                                        "--outSAMattributes", "NH", "HI", "AS", "nM", "CR", "CB", "UR", "GX", "GN", "sS",
+                                        "--outSAMunmapped", "Within", "--outFileNamePrefix", str(target) + "/"])
+        for item in ("Pipseq.groups.tsv", "raw/matrix.mtx"):
+            assert (target / "Solo.out/GeneFull" / item).read_bytes() == (out / "fixed/Solo.out/GeneFull" / item).read_bytes(), (kind, item)
+        if shutil.which("samtools"):
+            view = subprocess.run(["samtools", "view", str(target / name)], check=True, capture_output=True, text=True).stdout
+            rows = [dict(f.split(":", 2)[::2] for f in line.split("\t")[11:]) | {"name": line.split("\t")[0], "flag": int(line.split("\t")[1])}
+                    for line in view.splitlines()]
+            assert len(rows) == len(records), (kind, len(rows))
+            barcodes = {row[0]: row[2] for row in records}
+            for row in rows:
+                read = barcodes[row["name"]]
+                assert row["sS"] == read, row
+                phase = len(read) - len(read.lstrip("G")) if read.startswith("G") and not read.startswith("GACT") else 0
+                if "N" * 39 in read:
+                    assert row["CR"] == "-" and row["CB"] == "-" and row["UR"] == "-", row
+                    continue
+                assert row["CB"] == cell and len(row["CR"]) == 28 and row["UR"] == read[phase + 39:phase + 42], row
+                if not row["flag"] & 4 and row["NH"] == "1":
+                    assert row["GX"] in ("PLUS", "MINUS"), row
+            assert sum(1 for row in rows if row["CR"] != row["CB"] and row["CB"] == cell) == 1  # the corrected read
+            receipts["bam_" + kind.lower()] = {"records": len(rows)}
+    ub = run("ub_undefined", mode_bam + ["--readFilesIn", kit_r2, r1, "--outSAMtype", "BAM", "Unsorted",
+                                     "--outSAMattributes", "NH", "CB", "UB", "--outFileNamePrefix", str(out / "ub_")], success=False)
+    assert "not defined in PIP mode" in ub
+    clip_conflict = run("clip_conflict", mode + ["--readFilesIn", kit_r2, r1, "--clipAdapterType", "Hamming",
+                                                 "--outFileNamePrefix", str(out / "clip_conflict_")], success=False)
+    assert "conflicts with PIP mode" in clip_conflict
+    # Exon-priority gene assignment is accepted and counts the same fully exonic reads.
+    target = out / "ex50pas"
+    target.mkdir()
+    run("ex50pas", common + ["--soloFeatures", "GeneFull_Ex50pAS", "--runThreadN", "1", "--soloPipseqIPM", "1.35",
+                             "--soloCellFilter", "None", "--outFileNamePrefix", str(target) + "/"])
+    assert matrix(target, "GeneFull_Ex50pAS") == {"PLUS": 16, "MINUS": 10}
     conflict = run("conflict", common + ["--soloUMIdedup", "1MM_CR", "--outFileNamePrefix", str(out / "conflict_")], success=False)
     assert "conflicts with PIP mode" in conflict
     bad_ipm = run("bad_ipm", common + ["--soloPipseqIPM", "0.5", "--outFileNamePrefix", str(out / "bad_ipm_")], success=False)
@@ -148,7 +226,7 @@ def main():
     receipts["status"] = "PASS"
     receipts["star_sha256"] = hashlib.sha256(args.star.read_bytes()).hexdigest()
     (out / "RESULTS.json").write_text(json.dumps(receipts, indent=2) + "\n")
-    print("PASS PIP RNA end-to-end fixture and mode-off counting")
+    print("PASS PIP RNA end-to-end fixture, cDNA trimming and mode-off counting")
 
 
 if __name__ == "__main__":

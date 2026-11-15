@@ -10,15 +10,17 @@ void ParametersSolo::initializePipseq() {
                       std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
     };
     if (pipseqMode == "None") {
-        if (pipseqIPM != 0 || pipseqMultiMatch != "Reject" || (!pipseqWhitelist.empty() && pipseqWhitelist != vector<string>{"-"}))
-            fail("--soloPipseqWhitelist/IPM/MultiMatch require --soloPipseqMode Illumina");
+        if (pipseqIPM != 0 || pipseqMultiMatch != "Reject" || pipseqTrim != "Kit" ||
+            (!pipseqWhitelist.empty() && pipseqWhitelist != vector<string>{"-"}))
+            fail("--soloPipseqWhitelist/IPM/MultiMatch/Trim require --soloPipseqMode Illumina");
         return;
     }
     if (pipseqMode != "Illumina") fail("--soloPipseqMode must be None or Illumina");
     if (pP->runMode != "alignReads" || pP->readFilesTypeN != 1 || pP->readNends != 2 || barcodeReadIn != 0)
         fail("requires alignReads with --readFilesIn R2.fastq R1.fastq and --soloBarcodeMate 0");
-    if (pP->outSAMtype != vector<string>{"None"})
-        fail("initial RNA implementation requires --outSAMtype None; PIP BAM tags are not implemented");
+    if (pP->outSAMattrPresent.UB || pP->outSAMattrPresent.CY || pP->outSAMattrPresent.UY ||
+        pP->outSAMattrPresent.sM || pP->outSAMattrPresent.sQ)
+        fail("--outSAMattributes UB, CY, UY, sM and sQ are not defined in PIP mode; CR, CB, UR, sS, GX, GN and sF are");
     if (flexModeStr != "no" || pP->twoPass.yes || pP->runRestart.type != 0 ||
         (!pP->pfMulti.pfMultiConfig.empty() && pP->pfMulti.pfMultiConfig != "-"))
         fail("Flex, two-pass, restart and pfMulti guide integration are not supported with PIP RNA mode");
@@ -26,26 +28,13 @@ void ParametersSolo::initializePipseq() {
         fail("--soloPipseqIPM must be 0 (automatic) or a finite value >= 1");
     if (pipseqMultiMatch != "Reject" && pipseqMultiMatch != "FirstListed")
         fail("--soloPipseqMultiMatch must be Reject or FirstListed");
+    if (pipseqTrim != "Kit" && pipseqTrim != "None")
+        fail("--soloPipseqTrim must be Kit or None");
 
     // Assay-owned settings bypass ordinary CB/UMI algorithms. An explicit
     // conflicting value is an error, not a silently ignored request.
     const auto parameter = [&](const string& name, const string& wanted, bool owned) {
-        for (auto* p : pP->parArray) {
-            if (p->nameString != name) continue;
-            if (p->inputLevel > 0) {
-                std::ostringstream out; out << *p;
-                std::istringstream values(out.str());
-                string token, actual;
-                while (values >> token) { if (!actual.empty()) actual += ' '; actual += token; }
-                if (owned && actual != wanted) fail("--" + name + " conflicts with PIP mode (effective value: " + wanted + ")");
-            } else {
-                std::istringstream in(wanted);
-                p->inputValues(in);
-            }
-            pP->inOut->logMain << "[PIP effective] " << name << " = " << *p << '\n';
-            return;
-        }
-        fail("internal parameter registration missing: " + name);
+        assayParameter("PIPseq", "PIP", "PIP", name, wanted, owned);
     };
     parameter("soloType", "CB_UMI_Simple", true);
     parameter("soloCBwhitelist", "None", true);
@@ -68,8 +57,21 @@ void ParametersSolo::initializePipseq() {
     parameter("soloCellReadStats", "None", true);
     parameter("soloFeatures", "GeneFull", false);
     parameter("soloCellFilter", "None", false);
-    if (featureIn != vector<string>{"Gene"} && featureIn != vector<string>{"GeneFull"})
-        fail("requires exactly one --soloFeatures Gene or GeneFull");
+    if (featureIn.size() != 1 || (featureIn[0] != "Gene" && featureIn[0] != "GeneFull" &&
+                                  featureIn[0] != "GeneFull_Ex50pAS" && featureIn[0] != "GeneFull_ExonOverIntron"))
+        fail("requires exactly one --soloFeatures Gene, GeneFull, GeneFull_Ex50pAS or GeneFull_ExonOverIntron");
+    if (pipseqTrim == "Kit") {
+        // cDNA trimming as in the published pipeline description. The clip
+        // type is the mode's; its sequences and thresholds can be replaced.
+        parameter("clipAdapterType", "PIPseq", true);
+        parameter("clip5pNbases", "1", false);
+        parameter("clip5pAdapterSeq", pipseq::kitAdapters5p, false);
+        parameter("clip5pAdapterMMp", "0.1", false);
+        parameter("clip3pAdapterSeq", pipseq::kitAdapters3p, false);
+        parameter("clip3pAdapterMMp", "0.1", false);
+    }
+    // Maximum intron length given for STAR in the published pipeline description.
+    parameter("alignIntronMax", "25000", false);
     try {
         pipseqDecoder = std::make_shared<pipseq::Decoder>(pipseqWhitelist,
             pipseqMultiMatch == "FirstListed" ? pipseq::MultiMatch::FirstListed : pipseq::MultiMatch::Reject);
@@ -79,6 +81,6 @@ void ParametersSolo::initializePipseq() {
     pP->inOut->logMain << "[PIP] Illumina BI/IMI estimator; ordinary UMI correction/filtering disabled; "
         "RNA only; unique genomic alignments; exact tier match first, then one substitution ("
         << (pipseqMultiMatch == "FirstListed" ? "several candidates: first listed" : "several candidates: rejected")
-        << "); phase ties rejected; "
-        "IMI=strand-aware aligned 5-prime base; sample=one biological library per invocation\n";
+        << "); phase ties rejected; cDNA trimming " << (pipseqTrim == "Kit" ? "by the mode (leading base, 5-prime adapters, poly-A/G)" : "not applied by the mode")
+        << "; IMI=strand-aware aligned 5-prime base; sample=one biological library per invocation\n";
 }

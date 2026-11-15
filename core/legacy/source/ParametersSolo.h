@@ -90,6 +90,7 @@ public:
     vector<string> pipseqWhitelist;
     double pipseqIPM = 0;
     string pipseqMultiMatch = "Reject";
+    string pipseqTrim = "Kit";
     std::shared_ptr<pipseq::Decoder> pipseqDecoder;
     void initializePipseq();
     string splitseqMode = "None";
@@ -97,6 +98,9 @@ public:
     string splitseqUMIposition = "-";
     std::shared_ptr<splitseq::Decoder> splitseqDecoder;
     void initializeSplitseq();
+    // Shared by the two assay modes (ParametersSolo_assayParameter.cpp).
+    void assayParameter(const string& assay, const string& mode, const string& logTag,
+                        const string& name, const string& wanted, bool owned);
     enum SoloTypes : int32 {None=0, CB_UMI_Simple=1, CB_UMI_Complex=2, CB_samTagOut=3, SmartSeq=4};
     SoloTypes type;
     string strandStr;

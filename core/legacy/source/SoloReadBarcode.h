@@ -76,6 +76,9 @@ public:
                      vector<uint8_t> *cbMatchQual1 = nullptr);
     bool convertCheckUMI();
     void addStats(const int32 cbMatch1);
+    // Segmented-barcode assays (SoloReadBarcode_segmentedAssays.cpp).
+    void getCBandUMIpipseq(char **readSeq, uint64 *readLen);
+    void getCBandUMIsplitseq(char **readSeq, char **readQual, uint64 *readLen);
     
 
 protected:

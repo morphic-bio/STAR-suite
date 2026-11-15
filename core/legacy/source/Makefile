@@ -194,7 +194,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	ParametersSolo.o FlexProbeHalfIndex.o FlexHashCacheStorage.o FlexProbePairKhash.o FlexHashScreen.o FlexHashCacheGenerate.o FlexPipeline.o SoloRead.o SoloRead_record.o \
 	SoloReadBarcode.o SoloReadBarcode_getCBandUMI.o SoloBarcode_extractBarcode.o \
 	SoloReadFeature.o SoloReadFeature_record.o SoloReadFeature_record_base.o flex/SoloReadFeature_record_flex.o SoloReadFeature_inputRecords.o \
-	Solo.o PipSeq.o ParametersSoloPipseq.o SoloFeature_countPipseq.o SplitSeq.o ParametersSoloSplitseq.o SoloFeature.o SoloFeature_outputResults.o SoloFeature_processRecords.o SoloFeature_prepareReadInfoOnly.o SoloReadInfoLoader.o SoloReadInfoSink.o \
+	Solo.o PipSeq.o ParametersSoloPipseq.o SoloFeature_countPipseq.o SplitSeq.o ParametersSoloSplitseq.o ParametersSolo_assayParameter.o SoloReadBarcode_segmentedAssays.o SoloFeature.o SoloFeature_outputResults.o SoloFeature_processRecords.o SoloFeature_prepareReadInfoOnly.o SoloReadInfoLoader.o SoloReadInfoSink.o \
 	PackedReadInfo.o InlineCBCorrection.o solo/CbCorrector.o solo/CbBayesianResolver.o GeneResolver.o \
 	ReadAlign_transformGenome.o Genome_transformGenome.o Transcript_convertGenomeCigar.o \
 	twoPassRunPass1.o samHeaders.o Genome_genomeLoad.o Genome_genomeOutLoad.o Transcript_transformGenome.o ReadAlign_outputSpliceGraphSAM.o \

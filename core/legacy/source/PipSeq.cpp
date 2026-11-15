@@ -5,6 +5,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace pipseq {
 namespace {
@@ -119,21 +120,70 @@ std::string Decoder::cellSequence(uint64_t cell) {
     return s;
 }
 
-void Group::add(unsigned bin, uint64_t coordinate, bool reverse) {
+namespace {
+bool fragmentLess(const Fragment& a, const Fragment& b) {
+    if (a.cell != b.cell) return a.cell < b.cell;
+    if (a.gene != b.gene) return a.gene < b.gene;
+    return a.key < b.key;
+}
+bool sameFragment(const Fragment& a, const Fragment& b) {
+    return a.cell == b.cell && a.gene == b.gene && a.key == b.key;
+}
+const size_t compactAfter = size_t(1) << 20; // unsorted records before a compaction
+}
+
+std::string Decoder::rawCell(const std::string& read, int phase) {
+    if (phase < 0 || read.size() < size_t(phase) + 39) return "-";
+    std::string s;
+    for (unsigned t = 0; t < 4; ++t) s.append(read, phase + starts[t], lengths[t]);
+    return s;
+}
+std::string Decoder::rawBin(const std::string& read, int phase) {
+    if (phase < 0 || read.size() < size_t(phase) + 42) return "-";
+    return read.substr(phase + 39, 3);
+}
+
+void Fragments::add(uint64_t cell, uint32_t gene, unsigned bin, uint64_t coordinate, bool reverse) {
     if (bin >= 64 || coordinate > (std::numeric_limits<uint64_t>::max() >> 7))
         throw std::runtime_error("PIP fragment key out of range");
-    ++reads;
-    bins |= uint64_t(1) << bin;
-    fragments.insert((coordinate << 7) | (uint64_t(reverse) << 6) | bin);
+    records_.push_back({cell, (coordinate << 7) | (uint64_t(reverse) << 6) | bin, gene, 1});
+    // Keep memory near the number of distinct fragments, not of reads.
+    if (records_.size() - sorted_ >= std::max(compactAfter, sorted_)) finalize();
 }
-void Group::merge(Group& other) {
-    bins |= other.bins;
-    reads += other.reads;
-    if (fragments.size() < other.fragments.size()) fragments.swap(other.fragments);
-    fragments.insert(other.fragments.begin(), other.fragments.end());
-    other.fragments.clear();
+void Fragments::collapse() {
+    size_t out = 0;
+    for (size_t i = 0; i < records_.size(); ++i) {
+        if (out && sameFragment(records_[out - 1], records_[i])) {
+            const uint64_t reads = uint64_t(records_[out - 1].reads) + records_[i].reads;
+            if (reads > std::numeric_limits<uint32_t>::max()) throw std::runtime_error("PIP fragment read count exceeds 32 bits");
+            records_[out - 1].reads = reads;
+        } else records_[out++] = records_[i];
+    }
+    records_.resize(out);
+    sorted_ = out;
 }
-unsigned Group::occupiedBins() const { return __builtin_popcountll(bins); }
+void Fragments::finalize() {
+    if (sorted_ == records_.size()) return;
+    std::sort(records_.begin() + sorted_, records_.end(), fragmentLess);
+    std::inplace_merge(records_.begin(), records_.begin() + sorted_, records_.end(), fragmentLess);
+    collapse();
+}
+void Fragments::absorb(Fragments& other) {
+    finalize();
+    other.finalize();
+    if (records_.empty()) records_.swap(other.records_);
+    else {
+        const size_t middle = records_.size();
+        records_.insert(records_.end(), other.records_.begin(), other.records_.end());
+        std::inplace_merge(records_.begin(), records_.begin() + middle, records_.end(), fragmentLess);
+    }
+    other.clear();
+    collapse();
+}
+void Fragments::clear() {
+    std::vector<Fragment>().swap(records_);
+    sorted_ = 0;
+}
 
 double expectedMolecules(unsigned bins) {
     if (bins > 64) throw std::runtime_error("PIP occupied bin count exceeds 64");
@@ -143,21 +193,20 @@ double expectedMolecules(unsigned bins) {
     for (unsigned i = 0; i < bins; ++i) mean += 64.0 / (64 - i);
     return mean;
 }
-Calibration calibrate(const Groups& groups, double suppliedIPM) {
+Calibration calibrate(const Fragments& fragments, double suppliedIPM) {
     Calibration c;
     if (!std::isfinite(suppliedIPM) || (suppliedIPM != 0 && suppliedIPM < 1))
         throw std::runtime_error("PIP IPM must be 0 (estimate) or a finite value >= 1");
     if (suppliedIPM != 0) { c.raw = c.effective = suppliedIPM; c.source = "supplied"; return c; }
     long double sum = 0;
     bool needsIPM = false;
-    for (const auto& entry : groups) {
-        const unsigned b = entry.second.occupiedBins();
-        needsIPM |= b > 10;
-        if (b >= 5 && b <= 32) {
-            sum += entry.second.fragments.size() / expectedMolecules(b);
+    fragments.forEachGroup([&](const GroupSummary& g) {
+        needsIPM |= g.bins > 10;
+        if (g.bins >= 5 && g.bins <= 32) {
+            sum += g.fragments / expectedMolecules(g.bins);
             ++c.groups;
         }
-    }
+    });
     if (!c.groups) {
         if (needsIPM) throw std::runtime_error("No PIP cell/gene groups with 5-32 bins for IPM calibration; supply --soloPipseqIPM >= 1 or process more reads");
         c.source = "unused_low_occupancy";
@@ -169,10 +218,58 @@ Calibration calibrate(const Groups& groups, double suppliedIPM) {
     }
     return c;
 }
-uint64_t transcripts(const Group& group, double ipm) {
+uint64_t transcripts(unsigned bins, uint64_t fragments, double ipm) {
     if (!std::isfinite(ipm) || ipm < 1) throw std::runtime_error("Invalid PIP IPM");
-    const unsigned b = group.occupiedBins();
-    if (b <= 10) return b;
-    return std::max<uint64_t>(b, std::min<uint64_t>(group.fragments.size(), std::floor(group.fragments.size() / ipm)));
+    if (bins <= 10) return bins;
+    return std::max<uint64_t>(bins, std::min<uint64_t>(fragments, std::floor(fragments / ipm)));
+}
+
+const char* const kitAdapters5p = "AGAGTGAATGGG,TCAACGCAGAGT";
+const char* const kitAdapters3p = "polyA,polyG";
+
+uint32_t clip5pAdapter(const char* read, uint32_t length, const char* adapters, uint32_t adaptersLength,
+                       double maxMismatchFraction, uint32_t minOverlap) {
+    int bestScore = 0;
+    uint32_t bestClip = 0;
+    for (uint32_t first = 0; first < adaptersLength;) {
+        // One adapter: a run of A/C/G/T codes.
+        while (first < adaptersLength && (adapters[first] < 0 || adapters[first] > 3)) ++first;
+        uint32_t adapterLength = 0;
+        while (first + adapterLength < adaptersLength && adapters[first + adapterLength] >= 0 && adapters[first + adapterLength] <= 3) ++adapterLength;
+        const char* adapter = adapters + first;
+        first += adapterLength;
+        if (adapterLength == 0 || length == 0) continue;
+        const uint32_t overlapMin = std::max<uint32_t>(1, std::min(minOverlap, adapterLength));
+        // start: read position of the adapter's first base; negative when the
+        // adapter hangs off the read start. It never hangs off the read end.
+        for (int64_t start = -int64_t(adapterLength - overlapMin); start + adapterLength <= length; ++start) {
+            const uint32_t skip = start < 0 ? uint32_t(-start) : 0;
+            const uint32_t overlap = adapterLength - skip;
+            const uint32_t allowed = uint32_t(maxMismatchFraction * overlap + 1e-9);
+            uint32_t mismatches = 0;
+            for (uint32_t i = skip; i < adapterLength && mismatches <= allowed; ++i)
+                mismatches += read[start + i] != adapter[i];
+            if (mismatches > allowed) continue;
+            const int score = int(overlap) - 2 * int(mismatches);
+            const uint32_t clip = uint32_t(start + adapterLength);
+            if (score > bestScore || (score == bestScore && clip > bestClip)) { bestScore = score; bestClip = clip; }
+        }
+    }
+    return bestClip;
+}
+
+uint32_t clip3pHomopolymer(const char* read, uint32_t length, char base, double maxMismatchFraction, uint32_t window) {
+    if (window == 0 || length < window) return 0;
+    const uint32_t allowed = uint32_t(maxMismatchFraction * window + 1e-9);
+    uint32_t other = 0;
+    for (uint32_t i = 0; i < window; ++i) other += read[i] != base;
+    uint32_t best = length, fewest = allowed + 1;
+    for (uint32_t start = 0;; ++start) {
+        if (other < fewest) { best = start; fewest = other; if (other == 0) break; }
+        if (start + window >= length) break;
+        other += (read[start + window] != base);
+        other -= (read[start] != base);
+    }
+    return length - best;
 }
 } // namespace pipseq

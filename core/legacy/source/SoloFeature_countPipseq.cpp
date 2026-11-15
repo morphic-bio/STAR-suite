@@ -1,4 +1,5 @@
 #include "SoloFeature.h"
+#include "SoloReadFeature.h"
 #include "PipSeq.h"
 #include "streamFuns.h"
 #include "ErrorWarning.h"
@@ -7,28 +8,49 @@
 #include <iomanip>
 #include <limits>
 
+// One aligned read of a PIP library: called from SoloReadFeature::record().
+void SoloReadFeature::recordPipseq(SoloReadBarcode &soloBar, uint nTr, Transcript **alignOut, ReadAnnotations &readAnnot) {
+    const pipseq::Decoded& decoded = soloBar.pipDecoded;
+    if (decoded.status != pipseq::DecodeStatus::Accepted) { ++pipReadStats[0]; return; }
+    if (decoded.bin < 0) { ++pipReadStats[1]; return; }
+    if (nTr == 0) { ++pipReadStats[2]; return; }
+    if (nTr != 1) { ++pipReadStats[3]; return; }
+    const auto& genes = readAnnot.annotFeatures[featureType].fSet;
+    if (genes.size() != 1 || alignOut[0]->nExons == 0) { ++pipReadStats[4]; return; }
+    const Transcript& a = *alignOut[0];
+    const bool reverse = a.Str != 0;
+    const unsigned block = reverse ? a.nExons - 1 : 0;
+    // The aligned 5' base: clipping is not extrapolated; strand is part
+    // of the key. Internal splice structure does not change this IMI.
+    const uint64_t coordinate = a.exons[block][EX_G] +
+        (reverse ? a.exons[block][EX_L] - 1 : 0);
+    pipFragments.add(decoded.cell, *genes.begin(), decoded.bin, coordinate, reverse);
+    ++pipReadStats[5];
+}
+
 void SoloFeature::countPipseq() {
-    pipseq::Groups groups;
-    std::array<uint64_t, 8> barcodeStats{};
-    std::array<uint64_t, 6> readStats{};
-    for (int t = 0; t < P.runThreadN; ++t) {
-        auto* sr = RAchunk[t]->RA->soloRead;
-        auto* rf = sr->readFeat[pSolo.featureInd[featureType]];
-        for (auto& entry : rf->pipGroups) groups[entry.first].merge(entry.second);
-        rf->pipGroups.clear();
-        for (size_t i = 0; i < barcodeStats.size(); ++i) barcodeStats[i] += sr->readBar->pipStats[i];
-        for (size_t i = 0; i < readStats.size(); ++i) readStats[i] += rf->pipReadStats[i];
-    }
     const auto fail = [&](const string& message) {
         exitWithError("EXITING because of PIPseq counting error: " + message + "\n",
                       std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
     };
+    pipseq::Fragments fragments;
+    std::array<uint64_t, 8> barcodeStats{};
+    std::array<uint64_t, 6> readStats{};
+    try {
+        for (int t = 0; t < P.runThreadN; ++t) {
+            auto* sr = RAchunk[t]->RA->soloRead;
+            auto* rf = sr->readFeat[pSolo.featureInd[featureType]];
+            fragments.absorb(rf->pipFragments);
+            for (size_t i = 0; i < barcodeStats.size(); ++i) barcodeStats[i] += sr->readBar->pipStats[i];
+            for (size_t i = 0; i < readStats.size(); ++i) readStats[i] += rf->pipReadStats[i];
+        }
+    } catch (const std::exception& e) { fail(e.what()); }
     const auto checked32 = [&](uint64_t n) -> uint32_t {
         if (n > std::numeric_limits<uint32_t>::max()) fail("count or matrix offset exceeds STAR's 32-bit matrix capacity");
         return static_cast<uint32_t>(n);
     };
     pipseq::Calibration calibration;
-    try { calibration = pipseq::calibrate(groups, pSolo.pipseqIPM); }
+    try { calibration = pipseq::calibrate(fragments, pSolo.pipseqIPM); }
     catch (const std::exception& e) { fail(e.what()); }
 
     outputPrefix = P.outFileNamePrefix + pSolo.outFileNames[0] + SoloFeatureTypes::Names[featureType] + '/';
@@ -44,31 +66,28 @@ void SoloFeature::countPipseq() {
     countMatStride = 2;
     nReadsInput = barcodeStats[0]; nReadsMapped = readStats[5];
     uint64_t previous = UINT64_MAX;
-    uint64_t totalTranscripts = 0, totalFragments = 0;
-    for (const auto& entry : groups) {
-        const uint64_t cell = entry.first.first;
-        const uint32_t gene = entry.first.second;
-        const pipseq::Group& group = entry.second;
-        if (gene >= Trans.nGe) fail("gene index exceeds loaded annotation");
-        if (cell != previous) {
-            previous = cell;
+    uint64_t totalTranscripts = 0, totalFragments = 0, nGroups = 0;
+    fragments.forEachGroup([&](const pipseq::GroupSummary& group) {
+        if (group.gene >= Trans.nGe) fail("gene index exceeds loaded annotation");
+        if (group.cell != previous || pSolo.cbWLstr.empty()) {
+            previous = group.cell;
             const uint32_t i = checked32(pSolo.cbWLstr.size());
-            pSolo.cbWLstr.push_back(pipseq::Decoder::cellSequence(cell));
+            pSolo.cbWLstr.push_back(pipseq::Decoder::cellSequence(group.cell));
             indCB.push_back(i); indCBwl.push_back(i);
             countCellGeneUMIindex.push_back(checked32(countCellGeneUMI.size()));
             nUMIperCB.push_back(0); nGenePerCB.push_back(0);
             nReadPerCB.push_back(0); nReadPerCBunique.push_back(0); nReadPerCBtotal.push_back(0);
         }
-        const uint32_t count = checked32(pipseq::transcripts(group, calibration.effective));
-        countCellGeneUMI.push_back(gene); countCellGeneUMI.push_back(count);
+        const uint32_t count = checked32(pipseq::transcripts(group.bins, group.fragments, calibration.effective));
+        countCellGeneUMI.push_back(group.gene); countCellGeneUMI.push_back(count);
         nUMIperCB.back() = checked32(uint64_t(nUMIperCB.back()) + count);
         ++nGenePerCB.back();
         nReadPerCB.back() = checked32(uint64_t(nReadPerCB.back()) + group.reads);
         nReadPerCBunique.back() = nReadPerCBtotal.back() = nReadPerCB.back();
-        totalTranscripts += count; totalFragments += group.fragments.size();
-        ledger << pSolo.cbWLstr.back() << '\t' << Trans.geID[gene] << '\t' << group.reads
-               << '\t' << group.occupiedBins() << '\t' << group.fragments.size() << '\t' << count << '\n';
-    }
+        totalTranscripts += count; totalFragments += group.fragments; ++nGroups;
+        ledger << pSolo.cbWLstr.back() << '\t' << Trans.geID[group.gene] << '\t' << group.reads
+               << '\t' << group.bins << '\t' << group.fragments << '\t' << count << '\n';
+    });
     ledger.close();
     if (!ledger) fail("could not write Pipseq.groups.tsv");
     countCellGeneUMIindex.push_back(checked32(countCellGeneUMI.size()));
@@ -84,6 +103,7 @@ void SoloFeature::countPipseq() {
         << "imi_policy\tstrand_aware_aligned_5prime_base\n"
         << "phase_tie_policy\treject\nbarcode_correction\texact_then_one_substitution_per_tier\n"
         << "barcode_multi_match\t" << (pSolo.pipseqMultiMatch == "FirstListed" ? "first_listed" : "reject") << "\n"
+        << "cdna_trim\t" << (pSolo.pipseqTrim == "Kit" ? "kit" : "none") << "\n"
         << "calibration_population\tall_assigned_cell_gene_groups_before_cell_filtering\n"
         << "ipm_source\t" << calibration.source << "\nipm_raw\t" << calibration.raw
         << "\nipm_effective\t" << calibration.effective << "\nipm_calibration_groups\t" << calibration.groups
@@ -98,10 +118,10 @@ void SoloFeature::countPipseq() {
     for (size_t i = 0; i < readStats.size(); ++i) metrics << readNames[i] << '\t' << readStats[i] << '\n';
     metrics.close();
     if (!metrics) fail("could not write Pipseq.metrics.tsv");
-    P.inOut->logMain << "[PIP] groups=" << groups.size() << " barcodes=" << nCB
+    P.inOut->logMain << "[PIP] groups=" << nGroups << " barcodes=" << nCB
         << " IPM=" << calibration.effective << " calibration_groups=" << calibration.groups
         << " estimated_transcripts=" << totalTranscripts << '\n';
-    groups.clear();
+    fragments.clear();
     outputResults(false, outputPrefix + "raw/");
     if (pSolo.cellFilter.type[0] != "None") {
         if (nCB) cellFiltering();

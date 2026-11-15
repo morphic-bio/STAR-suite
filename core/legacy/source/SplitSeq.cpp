@@ -110,9 +110,31 @@ Decoded Decoder::decode(const std::string& read) const {
         const auto& r = regions_[i];
         result.rawCell.append(read, r.offset, r.length);
         uint64_t observed;
-        if (!pack(read, r.offset, r.length, observed)) { result.status = Status::InvalidBarcode; return result; }
-        auto found = tiers_[i].exact.find(observed);
-        if (found == tiers_[i].exact.end()) {
+        auto found = tiers_[i].exact.end();
+        if (!pack(read, r.offset, r.length, observed)) {
+            // One non-ACGT base is one substitution, as in ordinary barcode
+            // matching: the round is corrected when the entries reachable by
+            // filling that base stand for a single canonical sequence.
+            size_t unknown = std::string::npos;
+            for (size_t p = r.offset; p < r.offset + r.length; ++p) {
+                if (read[p] == 'A' || read[p] == 'C' || read[p] == 'G' || read[p] == 'T') continue;
+                if (unknown != std::string::npos) { result.status = Status::InvalidBarcode; return result; }
+                unknown = p;
+            }
+            std::string filled = read.substr(r.offset, r.length);
+            for (char base : {'A', 'C', 'G', 'T'}) {
+                filled[unknown - r.offset] = base;
+                pack(filled, observed);
+                const auto candidate = tiers_[i].exact.find(observed);
+                if (candidate == tiers_[i].exact.end()) continue;
+                if (found != tiers_[i].exact.end() && found->second != candidate->second) {
+                    result.status = Status::Ambiguous; return result;
+                }
+                found = candidate;
+            }
+            if (found == tiers_[i].exact.end()) { result.status = Status::NoMatch; return result; }
+            result.correctedRounds |= 1U << i;
+        } else if ((found = tiers_[i].exact.find(observed)) == tiers_[i].exact.end()) {
             const auto neighbor = tiers_[i].neighbors.find(observed);
             if (neighbor == tiers_[i].neighbors.end()) { result.status = Status::NoMatch; return result; }
             if (neighbor->second == UINT64_MAX) { result.status = Status::Ambiguous; return result; }
@@ -125,5 +147,13 @@ Decoded Decoder::decode(const std::string& read) const {
     }
     result.status = Status::Accepted;
     return result;
+}
+
+void writeMetrics(std::ostream& out, const std::array<uint64_t, 13>& stats) {
+    const char* names[] = {"reads_total", "barcode_exact", "barcode_corrected", "read_too_short",
+        "barcode_non_acgt", "barcode_no_match", "barcode_ambiguous", "umi_non_acgt",
+        "umi_homopolymer", "round1_corrected", "round2_corrected", "round3_corrected", "round4_corrected"};
+    out << "metric\tvalue\n";
+    for (size_t i = 0; i < stats.size(); ++i) out << names[i] << '\t' << stats[i] << '\n';
 }
 } // namespace splitseq

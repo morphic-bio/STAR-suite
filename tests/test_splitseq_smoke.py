@@ -82,6 +82,7 @@ def main():
     records += [(plus, barcode(umi=u1_error), cell_a, u1_error),
                 (plus, barcode(umi=u2), cell_a, u2),
                 (plus, barcode(first="TGCATGCA"), cell_a, u1),  # replacement alias
+                (plus, barcode(first="NCGTACGT"), cell_a, u1),  # one N: corrected like a substitution
                 (plus, barcode(first="CCGTACGT", second="AACTGACT", third="ATAGCTAG"), cell_a, u1),
                 (minus, barcode(umi=u2), cell_a, u2),
                 (plus, barcode(first="GCTAGCTA"), cell_b, u1)]
@@ -89,7 +90,7 @@ def main():
     cell_c = "GCTAGCTAGACTGACTCTAGCTAA"
     records += [(plus, barcode(first="ACTAGCTA", third="CTAGCTAA"), cell_c, u2)]
     invalid = [(plus, barcode(third="CTAGCTAC"), None, None),  # equally close to two tier entries
-               (plus, barcode(first="NCGTACGT"), None, None),
+               (plus, barcode(first="NNGTACGT"), None, None),  # two non-ACGT bases in one round
                (plus, barcode(second="AAAAAAAA"), None, None),
                (plus, barcode()[:85], None, None),
                (plus, barcode(umi="N" + u1[1:]), None, None),
@@ -145,11 +146,11 @@ def main():
         metrics = dict(csv.reader((target / "Solo.out/Splitseq.metrics.tsv").open(), delimiter="\t"))
         for key in ("read_too_short", "barcode_non_acgt", "barcode_no_match", "barcode_ambiguous", "umi_non_acgt", "umi_homopolymer"):
             assert metrics[key] == "1500", (label, key, metrics)
-        assert metrics["barcode_corrected"] == "3000", metrics
+        assert metrics["barcode_corrected"] == "4500", metrics
         exclusive = ("barcode_exact", "barcode_corrected", "read_too_short", "barcode_non_acgt",
                      "barcode_no_match", "barcode_ambiguous", "umi_non_acgt", "umi_homopolymer")
         assert sum(int(metrics[key]) for key in exclusive) == int(metrics["reads_total"]), metrics
-        assert metrics["round1_corrected"] == "3000" and metrics["round2_corrected"] == "1500" and metrics["round3_corrected"] == "1500"
+        assert metrics["round1_corrected"] == "4500" and metrics["round2_corrected"] == "1500" and metrics["round3_corrected"] == "1500"
         filtered = target / "Solo.out/GeneFull/filtered"
         if label == "exact":
             assert not filtered.exists()
@@ -163,6 +164,13 @@ def main():
         assert not (target / "Aligned.out.cb_ub.bin").exists()
         results[label] = {"counts": {c + "/" + g: n for (c, g), n in actual.items()}, "metrics": metrics}
     assert results["default"] == results["threads4"]
+
+    # Exon-priority gene assignment is accepted and gives the same counts here.
+    target = out / "ex50pas"
+    target.mkdir()
+    run("ex50pas", common + ["--runThreadN", "2", "--soloFeatures", "GeneFull_Ex50pAS", "--soloCellFilter", "None",
+                             "--outFileNamePrefix", str(target) + "/"])
+    assert matrix(target / "Solo.out/GeneFull_Ex50pAS/raw") == expected
 
     # Mode-off reference: the same accepted records, flattened to canonical CB+UMI.
     flat_rna, flat_cb = fastqs("flat", [r for r in records if r[2]], flat=True)

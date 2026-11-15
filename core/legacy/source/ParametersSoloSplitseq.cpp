@@ -27,22 +27,7 @@ void ParametersSolo::initializeSplitseq() {
     catch (const std::exception& e) { fail(e.what()); }
 
     const auto parameter = [&](const string& name, const string& wanted, bool owned) {
-        for (auto* p : pP->parArray) {
-            if (p->nameString != name) continue;
-            if (p->inputLevel > 0) {
-                std::ostringstream out; out << *p;
-                std::istringstream values(out.str());
-                string token, actual;
-                while (values >> token) { if (!actual.empty()) actual += ' '; actual += token; }
-                if (owned && actual != wanted) fail("--" + name + " conflicts with split-seq mode (effective value: " + wanted + ")");
-            } else {
-                std::istringstream in(wanted);
-                p->inputValues(in);
-            }
-            pP->inOut->logMain << "[SPLIT effective] " << name << " = " << *p << '\n';
-            return;
-        }
-        fail("internal parameter registration missing: " + name);
+        assayParameter("split-seq", "split-seq", "SPLIT", name, wanted, owned);
     };
     // Feed the existing sparse no-global-whitelist spool with canonical packed
     // tuples. Per-round references are enforced by the decoder, before counting.
@@ -67,8 +52,9 @@ void ParametersSolo::initializeSplitseq() {
     parameter("soloMultiMappers", "Unique", false);
     parameter("soloFeatures", "GeneFull", false);
     parameter("soloCellFilter", "EmptyDrops_CR", false);
-    if (featureIn != vector<string>{"Gene"} && featureIn != vector<string>{"GeneFull"})
-        fail("requires exactly one --soloFeatures Gene or GeneFull");
+    if (featureIn.size() != 1 || (featureIn[0] != "Gene" && featureIn[0] != "GeneFull" &&
+                                  featureIn[0] != "GeneFull_Ex50pAS" && featureIn[0] != "GeneFull_ExonOverIntron"))
+        fail("requires exactly one --soloFeatures Gene, GeneFull, GeneFull_Ex50pAS or GeneFull_ExonOverIntron");
     cbWLsize = 0;
     for (size_t i = 0; i < splitseqDecoder->regions().size(); ++i)
         pP->inOut->logMain << "[SPLIT] round " << i + 1 << " entries=" << splitseqDecoder->tierSize(i) << '\n';

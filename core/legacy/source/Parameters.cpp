@@ -623,6 +623,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoVector<string>(-1, -1, "soloPipseqWhitelist", &pSolo.pipseqWhitelist));
     parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "soloPipseqIPM", &pSolo.pipseqIPM));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloPipseqMultiMatch", &pSolo.pipseqMultiMatch));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloPipseqTrim", &pSolo.pipseqTrim));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloSplitseqMode", &pSolo.splitseqMode));
     parArray.push_back(new ParameterInfoVector<string>(-1, -1, "soloSplitseqWhitelist", &pSolo.splitseqWhitelist));
     parArray.push_back(new ParameterInfoVector<string>(-1, -1, "soloSplitseqCBposition", &pSolo.splitseqCBposition));

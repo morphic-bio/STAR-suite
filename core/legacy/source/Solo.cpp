@@ -3,6 +3,7 @@
 #include "streamFuns.h"
 #include "InlineCBCorrection.h"
 #include "SoloReadBarcode.h"
+#include "SplitSeq.h"
 #include <cstdlib>
 
 Solo::Solo(ReadAlignChunk **RAchunkIn, Parameters &Pin, Transcriptome &inTrans)
@@ -100,13 +101,8 @@ void Solo::processAndOutput()
         statsStream->close();
 
         if (pSolo.splitseqDecoder) {
-            const char* names[] = {"reads_total", "barcode_exact", "barcode_corrected", "read_too_short",
-                "barcode_non_acgt", "barcode_no_match", "barcode_ambiguous", "umi_non_acgt",
-                "umi_homopolymer", "round1_corrected", "round2_corrected", "round3_corrected", "round4_corrected"};
             ofstream& metrics = ofstrOpen(P.outFileNamePrefix+pSolo.outFileNames[0]+"Splitseq.metrics.tsv", ERROR_OUT, P);
-            metrics << "metric\tvalue\n";
-            for (size_t i = 0; i < readBarSum->splitStats.size(); ++i)
-                metrics << names[i] << '\t' << readBarSum->splitStats[i] << '\n';
+            splitseq::writeMetrics(metrics, readBarSum->splitStats);
             metrics.close();
         }
 
