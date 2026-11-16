@@ -1,7 +1,7 @@
 date_utc=2026-09-05T07:38:00Z
 mode=cbq
 threads=32
-run_dir=/home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/jax_cbq_20260905T073800Z
+run_dir=<home>/STAR-suite-bgzf-ingest-benchmark-20260901/jax_cbq_20260905T073800Z
 commit=0a14a5a30eb6a65920a34faba5c4a1552b2ab62c
  07:38:00 up 51 days, 13:02,  3 users,  load average: 6.32, 11.67, 7.37
     PID COMMAND         %CPU %MEM     ELAPSED
@@ -24,3 +24,4 @@ commit=0a14a5a30eb6a65920a34faba5c4a1552b2ab62c
 2892608 kubelet          1.6  0.1 27-12:36:44
 2892601 kubelet          1.5  0.1 27-12:36:44
 2892607 kubelet          1.5  0.1 27-12:36:44
+# Command lines of processes unrelated to the benchmark redacted, and local paths replaced with <home> and <local>, on 2026-11-16.

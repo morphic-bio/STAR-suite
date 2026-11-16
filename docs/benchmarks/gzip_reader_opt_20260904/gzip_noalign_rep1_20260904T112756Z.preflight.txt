@@ -6,14 +6,14 @@ align=noalign
 threads=32
 bucket_mode=ram
 bucket_count=256
-run_dir=/home/lhhung/jax_gzip_reader_opt_20260904/gzip_noalign_rep1_20260904T112756Z
+run_dir=<home>/jax_gzip_reader_opt_20260904/gzip_noalign_rep1_20260904T112756Z
 commit=680eb963a61f8ccdf9b2a199577e98f49daf79c6
 star_mtime=2026-09-04 11:19:22.827586982 +0000
 working_tree=clean
 env_STAR_FLEX_HASH_H0_ONLY=unset
-stage_fastq=/home/lhhung/jax_stage_20260903/fastq
-stage_cbq=/home/lhhung/jax_stage_20260903/cbq
-tmpdir=/home/lhhung/jax_gzip_reader_opt_20260904/tmp
+stage_fastq=<home>/jax_stage_20260903/fastq
+stage_cbq=<home>/jax_stage_20260903/cbq
+tmpdir=<home>/jax_gzip_reader_opt_20260904/tmp
  11:27:56 up 50 days, 16:52,  2 users,  load average: 27.68, 22.63, 20.35
                total        used        free      shared  buff/cache   available
 Mem:             125           8         114           0           1         115
@@ -29,3 +29,4 @@ Mem:             125           8         114           0           1         115
 2320548 htop             2.7  0.0  2-08:41:23
 2103404 specstory        2.6  0.0    03:23:32
    1835 dockerd          2.2  0.1 50-16:50:37
+# Command lines of processes unrelated to the benchmark redacted, and local paths replaced with <home> and <local>, on 2026-11-16.

@@ -6,14 +6,14 @@ align=noalign
 threads=32
 bucket_mode=ram
 bucket_count=256
-run_dir=/home/lhhung/jax_bgzf_reader_mate_stem_20260904/bgzf_noalign_rep1_20260904T111404Z
+run_dir=<home>/jax_bgzf_reader_mate_stem_20260904/bgzf_noalign_rep1_20260904T111404Z
 commit=ec47f15bb0a9f79750e3046f36d1ab1cbb407b38
 star_mtime=2026-09-04 11:11:48.060810950 +0000
 working_tree=clean
 env_STAR_FLEX_HASH_H0_ONLY=unset
-stage_fastq=/home/lhhung/jax_stage_20260903/fastq
-stage_cbq=/home/lhhung/jax_stage_20260903/cbq
-tmpdir=/home/lhhung/jax_bgzf_reader_mate_stem_20260904/tmp
+stage_fastq=<home>/jax_stage_20260903/fastq
+stage_cbq=<home>/jax_stage_20260903/cbq
+tmpdir=<home>/jax_bgzf_reader_mate_stem_20260904/tmp
  11:14:04 up 50 days, 16:38,  2 users,  load average: 2.62, 15.58, 17.92
                total        used        free      shared  buff/cache   available
 Mem:             125           8         114           0           1         115
@@ -29,3 +29,4 @@ Mem:             125           8         114           0           1         115
 2847584 kubelet          2.8  0.2 26-16:15:59
 2320548 htop             2.7  0.0  2-08:27:31
    1835 dockerd          2.2  0.1 50-16:36:45
+# Command lines of processes unrelated to the benchmark redacted, and local paths replaced with <home> and <local>, on 2026-11-16.

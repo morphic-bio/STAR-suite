@@ -6,12 +6,12 @@ align=noalign
 threads=32
 bucket_mode=ram
 bucket_count=256
-run_dir=/home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z
+run_dir=<home>/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z
 commit=47bfbfd082cbcb5a102b956c17710b48b5abbcdc
 star_mtime=2026-09-03 16:10:59.890445153 +0000
-stage_fastq=/home/lhhung/jax_stage_20260903/fastq
-stage_cbq=/home/lhhung/jax_stage_20260903/cbq
-tmpdir=/home/lhhung/jax_matrix_20260903/tmp
+stage_fastq=<home>/jax_stage_20260903/fastq
+stage_cbq=<home>/jax_stage_20260903/cbq
+tmpdir=<home>/jax_matrix_20260903/tmp
  16:54:47 up 49 days, 22:19,  3 users,  load average: 3.74, 2.94, 2.35
                total        used        free      shared  buff/cache   available
 Mem:             125          10           1           0         113         113
@@ -27,3 +27,4 @@ Mem:             125          10           1           0         113         113
 2847362 etcd             3.7  0.0 25-21:56:47
 2847584 kubelet          2.8  0.2 25-21:56:42
 2320548 htop             2.6  0.0  1-14:08:14
+# Command lines of processes unrelated to the benchmark redacted, and local paths replaced with <home> and <local>, on 2026-11-16.
