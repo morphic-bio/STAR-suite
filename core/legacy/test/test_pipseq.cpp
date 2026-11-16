@@ -152,6 +152,33 @@ int main(int argc, char** argv) {
     assert(failed && calibrate(saturated, 2).source == "supplied");
     failed = false; try { transcripts(3, 5, 0.5); } catch (const std::runtime_error&) { failed = true; }
     assert(failed);
+    // The worked example of the published documentation ("Transcript
+    // Counting", figure): one barcode and gene, 19 distinct BI/IMI pairs in
+    // 12 bins from 111 reads, correction factor 1.35, recorded count 14.
+    {
+        struct Row { const char* bi; uint64_t imi; unsigned reads; };
+        const Row rows[] = {
+            {"ACC", 140633101, 12}, {"ATA", 140633107, 3}, {"AGT", 140631790, 1}, {"AGT", 140632057, 4},
+            {"AGT", 140632995, 10}, {"TTA", 140631790, 7}, {"TCG", 140633098, 3}, {"TCG", 140633101, 1},
+            {"TCT", 140633108, 1}, {"CAA", 140633109, 3}, {"CGT", 140633455, 9}, {"CCG", 140632099, 5},
+            {"CCG", 140632125, 16}, {"CCG", 140632128, 20}, {"CCG", 140632675, 1}, {"GGA", 140633106, 8},
+            {"GTC", 140632098, 4}, {"GCC", 140632057, 1}, {"GCC", 140632126, 2}};
+        const auto code = [](char ch) { return unsigned(ch == 'A' ? 0 : ch == 'C' ? 1 : ch == 'G' ? 2 : 3); };
+        Fragments documented;
+        for (const Row& r : rows)
+            for (unsigned k = 0; k < r.reads; ++k)
+                documented.add(1, 1, 16 * code(r.bi[0]) + 4 * code(r.bi[1]) + code(r.bi[2]), r.imi, false);
+        documented.finalize();
+        const auto d = summaries(documented);
+        assert(d.size() == 1 && d[0].reads == 111 && d[0].fragments == 19 && d[0].bins == 12);
+        assert(transcripts(d[0].bins, d[0].fragments, 1.35) == 14);
+        // Calibrated on this group alone: 12 bins are expected from
+        // sum_{j<12} 64/(64-j) = 13.17 molecules, so IPM = 19/13.17 = 1.44.
+        const auto dc = calibrate(documented, 0);
+        assert(dc.groups == 1 && std::abs(expectedMolecules(12) - 13.174204) < 1e-6);
+        assert(std::abs(dc.raw - 19 / expectedMolecules(12)) < 1e-12 && dc.effective == dc.raw);
+        assert(transcripts(12, 19, dc.effective) == 13);
+    }
 
     // cDNA trimming. Sequences are numeric: A, C, G, T = 0..3, N = 4.
     const auto numeric = [](const std::string& text) {

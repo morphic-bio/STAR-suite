@@ -119,6 +119,30 @@ update this file with its output location.
   reference, `gene_list_change_effect_three_lists_*` the side-by-side table).
   The index of the documented list is in `index_documented_gene_list_*/index`
   there (28 GB) and is not needed again.
+- Molecule-counting check of 2026-11-16:
+  `/storage/cc_pip_native_real_validation/20261116T095954Z_transcript_counting_recipe/`.
+  - `ctrl_full_pipref_ex50pas_bam_*`: the `GeneFull_Ex50pAS` run on the
+    reference repeated with an unsorted BAM (`NH HI AS nM CR CB UR GX GN sF`,
+    22 GB, 19 minutes, same binary). Its ledger and matrix are byte-identical
+    to `ctrl_full_pipref_genefull_ex50pas_*` of 2026-11-15
+    (`bam_run_equals_previous_run_*`).
+  - `fragments_from_bam_*`: the 122,362,778 counted reads of every barcode,
+    collapsed to 56,557,444 rows of cell, gene, BI, strand, contig, 5' base,
+    leftmost base and read count (four `.npy` files, 1.3 GB, with
+    `barcodes.txt` and `contigs.txt`). Any other counting rule can be tried on
+    this table without aligning again.
+  - `recount_recipe_*`: the documented recipe recomputed from that table and
+    compared with the mode's ledger (19,731,758 groups, all equal), the
+    points the documentation leaves open, and the comparison with the
+    deposited matrix. `entry_presence_*` and `above_ten_bins_vs_published_*`
+    are the same comparison from the ledger alone.
+  - Documentation read for the recipe, retrieved 2026-11-16: the transcript
+    counting sections of the DRAGEN 4.4, 4.5 and 4.6 guides
+    (`https://help.dragen.illumina.com/dragen-v4.6/product-guides/dragen-v4.6/dragen-single-cell-pipeline/dragen-scrna-illumina`
+    and the 4.5 and 4.4 pages), identical in the three versions, with the
+    worked example of their figure. The preprint they cite (bioRxiv
+    10.1101/2024.10.04.616561) describes an earlier counting method with an
+    integer correction factor; it was read and not used.
 - Keep all of this untracked.
 
 ## Spatial decoder hot-path equivalence (2026-10-26)

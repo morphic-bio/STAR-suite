@@ -132,14 +132,15 @@ void SoloFeature::countPipseq() {
 
     // The ordinary Solo summary reads counters this mode does not fill, so
     // write the same file from the PIP counters. Counts are estimated
-    // transcripts; saturation is 1 - distinct BI/IMI fragments / counted reads.
+    // transcripts; saturation is 1 - estimated transcripts / counted reads,
+    // the formula of the published description (molecules over counted reads).
     {
         const string name = SoloFeatureTypes::Names[featureType];
         const double reads = barcodeStats[0] ? double(barcodeStats[0]) : 1.0;
         ofstream& summary = ofstrOpen(outputPrefix + "Summary.csv", ERROR_OUT, P);
         summary << "Number of Reads," << barcodeStats[0] << '\n'
             << "Reads With Valid Barcodes," << (barcodeStats[1] + barcodeStats[2]) / reads << '\n'
-            << "Sequencing Saturation," << (readStats[5] ? 1.0 - double(totalFragments) / readStats[5] : 0.0) << '\n'
+            << "Sequencing Saturation," << (readStats[5] ? 1.0 - double(totalTranscripts) / readStats[5] : 0.0) << '\n'
             << "Reads Mapped to Genome: Unique+Multiple," << double(g_statsAll.mappedReadsU + g_statsAll.mappedReadsM) / reads << '\n'
             << "Reads Mapped to Genome: Unique," << double(g_statsAll.mappedReadsU) / reads << '\n'
             << "Reads Mapped to " << name << ": Unique " << name << ',' << readStats[5] / reads << '\n'

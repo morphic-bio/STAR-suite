@@ -204,6 +204,43 @@ def main():
     run("ex50pas", common + ["--soloFeatures", "GeneFull_Ex50pAS", "--runThreadN", "1", "--soloPipseqIPM", "1.35",
                              "--soloCellFilter", "None", "--outFileNamePrefix", str(target) + "/"])
     assert matrix(target, "GeneFull_Ex50pAS") == {"PLUS": 16, "MINUS": 10}
+    # The worked example of the published documentation ("Transcript Counting",
+    # figure), from reads: one barcode and gene, 19 distinct BI/IMI pairs in 12
+    # bins, 111 reads. With the example's correction factor of 1.35 the count is
+    # 14. Calibrated on this group alone, 12 bins are expected from 13.17
+    # molecules, IPM is 19/13.17 and the count is 13.
+    documented = [("ACC", 140633101, 12), ("ATA", 140633107, 3), ("AGT", 140631790, 1), ("AGT", 140632057, 4),
+                  ("AGT", 140632995, 10), ("TTA", 140631790, 7), ("TCG", 140633098, 3), ("TCG", 140633101, 1),
+                  ("TCT", 140633108, 1), ("CAA", 140633109, 3), ("CGT", 140633455, 9), ("CCG", 140632099, 5),
+                  ("CCG", 140632125, 16), ("CCG", 140632128, 20), ("CCG", 140632675, 1), ("GGA", 140633106, 8),
+                  ("GTC", 140632098, 4), ("GCC", 140632057, 1), ("GCC", 140632126, 2)]
+    doc_r2, doc_r1 = out / "documented_R2.fastq", out / "documented_R1.fastq"
+    with doc_r2.open("w") as cdna, doc_r1.open("w") as barcode:
+        serial = 0
+        for binning_index, imi, copies in documented:
+            start = 600 + imi - 140631790          # inside PLUS, same spacing as the example
+            for copy in range(copies):
+                read = "G" * (serial % 4) + body + binning_index + "TTTT"
+                cdna.write("@d%d\n%s\n+\n%s\n" % (serial, genome[start:start + 50], "I" * 50))
+                barcode.write("@d%d\n%s\n+\n%s\n" % (serial, read, "I" * len(read)))
+                serial += 1
+    for label, ipm, expected_ipm, expected_count in (("documented_fixed", "1.35", 1.35, 14),
+                                                     ("documented_automatic", "0", 19 / sum(64 / (64 - j) for j in range(12)), 13)):
+        target = out / label
+        target.mkdir()
+        run(label, mode + ["--readFilesIn", doc_r2, doc_r1, "--soloPipseqTrim", "None", "--runThreadN", "2",
+                           "--soloPipseqIPM", ipm, "--soloCellFilter", "None", "--outFileNamePrefix", str(target) + "/"])
+        ledger = list(csv.DictReader((target / "Solo.out/GeneFull/Pipseq.groups.tsv").open(), delimiter="\t"))
+        assert ledger == [{"barcode": cell, "gene_id": "PLUS", "reads": "111", "occupied_bins": "12",
+                           "unique_bi_imi": "19", "estimated_transcripts": str(expected_count)}], ledger
+        doc_metrics = dict(csv.reader((target / "Solo.out/GeneFull/Pipseq.metrics.tsv").open(), delimiter="\t"))
+        assert abs(float(doc_metrics["ipm_effective"]) - expected_ipm) < 1e-12, doc_metrics
+        entries = [x.split() for x in (target / "Solo.out/GeneFull/raw/matrix.mtx").read_text().splitlines() if not x.startswith("%")]
+        assert entries == [["2", "1", "1"], ["1", "1", str(expected_count)]], entries
+        # Saturation by the documented formula: 1 - molecules / counted reads.
+        summary = dict(csv.reader((target / "Solo.out/GeneFull/Summary.csv").open()))
+        assert abs(float(summary["Sequencing Saturation"]) - (1 - expected_count / 111)) < 1e-5, summary
+        receipts[label] = {"ledger": ledger, "ipm": doc_metrics["ipm_effective"]}
     conflict = run("conflict", common + ["--soloUMIdedup", "1MM_CR", "--outFileNamePrefix", str(out / "conflict_")], success=False)
     assert "conflicts with PIP mode" in conflict
     bad_ipm = run("bad_ipm", common + ["--soloPipseqIPM", "0.5", "--outFileNamePrefix", str(out / "bad_ipm_")], success=False)

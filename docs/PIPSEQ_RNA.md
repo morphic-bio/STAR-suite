@@ -143,7 +143,7 @@ whole genes that sit inside another gene.
 `CR`, `CB` and `UR` are `-` where undefined (no phase, tied phases, rejected
 barcode). `UB` is not defined: there is no molecule identifier.
 
-## Barcode and fragment contract
+## Barcode contract
 
 After a phase of 0–3 bases, barcode intervals are zero-based half-open
 `[0,8), [11,17), [20,26), [31,39)`; BI is `[39,42)`.
@@ -182,38 +182,92 @@ without separators or an added suffix. Lookup tables cover the individual
 tiers; only observed cell/gene combinations are stored. The 96^4 Cartesian
 product is never allocated.
 
-Within each cell/gene, exact `(BI, IMI)` observations collapse. The IMI is the
-global genomic coordinate of the strand-aware aligned 5-prime base, with strand
-included in the key. Soft clipping is not extrapolated. Reverse reads use the
-last aligned base; internal splice structure is not part of the key. These are
-this mode's conventions.
+## Molecule counting
+
+This chemistry has no UMI. The work that UMI deduplication does elsewhere is
+done from two things every counted read carries:
+
+- the **binning index (BI)**, three random bases on the bead next to the
+  barcode. Every copy of one captured molecule has the same BI;
+- the **intrinsic molecular identifier (IMI)**, the place where the cDNA
+  fragment starts. The kit amplifies each captured molecule for five cycles and
+  then cuts the copies at random, so one molecule gives up to fifteen
+  fragments with different starts.
+
+The mode follows the recipe in the published documentation ("Transcript
+Counting"). The text and its worked example are the same in the DRAGEN 4.4,
+4.5 and 4.6 guides.
+
+### The recipe
+
+For one barcode and gene, B is the number of occupied bins and I the number of
+distinct BI/IMI pairs.
+
+| Step | Published description | This mode |
+| --- | --- | --- |
+| Group | Reads are grouped by cell barcode and assigned gene | The same, over the reads that [the mode counts](#what-the-mode-sets) |
+| IMI | "The genome alignment position ... serves as the IMI for each read"; fragments have "unique starting positions" | The genome coordinate of the read's first aligned base, with the strand |
+| Bin | "IMIs are grouped in one of 64 bins, based on the 3-base binning index"; the BI is not corrected | All 64 indexes, uncorrected. A BI with a letter other than A, C, G, T is not counted |
+| Collapse | "For each bin, all identical IMIs are collapsed into a single count" | The same |
+| Ten bins or fewer | The count is the number of occupied bins | `count = B` |
+| More than ten bins | I divided by the correction factor, rounded down; at least B and at most I | `count = max(B, min(I, floor(I / IPM)))` |
+| Correction factor | Over barcode and gene combinations with 5 to 32 occupied bins: I divided by "the average number of molecules expected based on the number of unique bin indexes" under the coupon-collector model; the factor is the average of these values | `IPM = mean(I / E(B))` over those groups of all barcodes, with `E(B) = sum(j=0..B-1) 64 / (64 - j)` |
+| Saturation | 1 − total molecules / total counted reads | The same, in `Summary.csv` |
+
+The documentation's example is one barcode and gene with 19 distinct BI/IMI
+pairs in 12 bins, from 111 reads, and a correction factor of 1.35. Twelve bins
+is more than ten, so the count is floor(19 / 1.35) = 14. Both test programs
+reproduce it, `test_pipseq_smoke.py` from reads.
+
+`--soloPipseqIPM 0`, the default, estimates IPM as in the table. A value of 1
+or more replaces the estimate. An estimate below one is raised to one, which
+keeps a count from exceeding I; both the raw and the effective value are
+reported. A library in which some group has more than ten bins and no group
+has 5 to 32 stops with an error that asks for a value or for more reads. IPM
+is a property of the whole library, so a subsample does not reproduce the
+counts of the full run.
+
+### Where the documentation gives no rule
+
+The recipe leaves five points open. Each was measured on the public library of
+[Validation](#validation) by recounting it with that one point changed. IPM is
+used only for groups above ten bins, under 2% of that library's groups and 21%
+of its transcripts, so none of the five moves the totals much.
+
+- **Which end of a reverse-strand alignment is the IMI.** The documentation
+  says "the genome alignment position". The mode takes the read's own first
+  aligned base on either strand, which is where the fragment was cut, and
+  keeps the strand in the key. Soft-clipped bases are not counted back to the
+  read start, and the splice structure is not part of the key. With the
+  leftmost aligned base for both strands the library has 4.6% fewer distinct
+  fragments, an IPM of 1.411 in place of 1.482 and 0.02% fewer transcripts.
+  Leaving the strand out of the key changes nothing.
+- **Whether all 64 indexes count.** The counting text speaks of 64 bins and of
+  no correction of the BI. The description of the metrics file gives
+  homopolymers and Ns as examples of invalid identifiers. The mode counts all
+  64. Leaving the four homopolymers out would remove 7.8% of the transcripts;
+  the deposited matrix has them (see
+  [Checking the molecule counting](#checking-the-molecule-counting)).
+- **The expected number of molecules for B bins.** The documentation says "the
+  average number of molecules expected" and cites the coupon-collector
+  problem. The mode uses the mean number of draws needed to see B of 64
+  indexes, the E(B) of the table. Inverting the expected occupancy instead,
+  `ln(1 - B/64) / ln(63/64)`, gives an IPM of 1.481 and 0.01% more
+  transcripts.
+- **How the per-group values are averaged.** "The average of these values" is
+  taken as the mean of I / E(B). The ratio of the two sums gives an IPM of
+  1.503 and 0.3% fewer transcripts.
+- **Which barcodes calibrate IPM.** The documentation names the barcode and
+  gene combinations with 5 to 32 bins and no cell filter. The mode uses every
+  barcode. Using only the deposited cells gives an IPM of 1.508 and 0.3% fewer
+  transcripts.
 
 Each mapping thread keeps its distinct fragments as flat 24-byte records and
 compacts them as it goes; the threads' records are merged after mapping, so
 duplicate reads in different threads collapse. Memory grows with the number of
 distinct fragments; there is no spilling to disk.
 
-## Transcript estimator and outputs
-
-Let B be occupied BI bins and I distinct BI/IMI pairs for one cell/gene:
-
-```text
-B <= 10: count = B
-B > 10:  count = max(B, floor(I / IPM))
-```
-
-With `--soloPipseqIPM 0`, calibrate using all assigned cell/gene groups
-with 5–32 occupied bins, before cell filtering. The coupon-collector expectation
-is the stopping-time mean `E[M|reach B] = sum(j=0..B-1, 64/(64-j))`.
-IPM is the arithmetic mean of I/E across eligible groups. This is this mode's
-reading of the documentation.
-
-Effective IPM is at least one, enforcing the documented bound B <= count <= I.
-Both the raw estimate and this floor are reported. A finite explicit IPM >=1
-overrides calibration. With no eligible groups, high-occupancy groups cause an
-error requesting an explicit IPM or more reads; if every group has at most ten
-bins, IPM is unused and counts can still be emitted. There is no silent
-high-occupancy fallback.
+### Outputs
 
 Under `Solo.out/<feature>/`:
 
@@ -228,14 +282,13 @@ Under `Solo.out/<feature>/`:
   barcode_ambiguous`.
 - `Summary.csv`: read, barcode and mapping fractions, distinct BI/IMI
   fragments, estimated transcripts, IPM and, with a cell filter, the called-cell
-  summary. It is written from the PIP counters; `Barcodes.stats` and
+  summary. Sequencing saturation is 1 − estimated transcripts / counted reads.
+  The file is written from the PIP counters; `Barcodes.stats` and
   `Features.stats` of the ordinary UMI path are not produced in this mode.
 
 The raw barcode axis contains cells with at least one counted RNA observation.
 Inputs with no accepted RNA observations yield a valid empty matrix. Matrix
-counts and offsets are checked against STAR's 32-bit matrix limits. The
-sample-level calibration and resulting counts depend on the reads supplied; a
-downsample is not expected to reproduce full-library counts.
+counts and offsets are checked against STAR's 32-bit matrix limits.
 
 Standard `--soloCellFilter` options, including `EmptyDrops_CR`, can filter the
 estimated-transcript matrix with STAR's existing callers. The threshold rule of
@@ -252,12 +305,13 @@ chemistry, guide reads.
   decoding in all phases and bins, exact-first matching in both list orders,
   one and several one-substitution candidates under both
   `--soloPipseqMultiMatch` values, phase ties, malformed input, the fragment
-  store (collapse, merging of stores, compaction), estimator edges and the
-  trimming functions.
+  store (collapse, merging of stores, compaction), estimator edges, the worked
+  example of the documentation and the trimming functions.
 - `tests/test_pipseq_smoke.py`: FASTQ to matrix on a small generated genome,
   including reverse reads, duplicate fragment starts, fixed and estimated IPM,
   cell filtering, the mode's trimming against the same reads without technical
-  sequence, BAM tags (unsorted and sorted), exon-priority gene assignment and
+  sequence, BAM tags (unsorted and sorted), exon-priority gene assignment, the
+  worked example of the documentation as reads (count and saturation) and
   ordinary UMI counting with the mode off.
 - `tests/test_pipseq_edges.py`: EmptyDrops, empty matrices, merging across
   threads and calibration failures, on the smoke fixture's index.
@@ -333,20 +387,50 @@ same genome. Counts are totals over the deposited cells with
 - **The reference** (39,523 genes) keeps the added genes and restores the
   neighbours. On it, our counts are 6.3% above the deposit per cell.
 
+#### Checking the molecule counting
+
+One more run on the reference wrote an unsorted BAM with `CB`, `UR`, `GX` and
+`NH` (19 minutes, 22 GB). Its ledger and matrix are byte-identical to those of
+the run in the table above.
+
+**The mode against a recount from the BAM.** A separate Python script took
+from the BAM every read with a barcode, one alignment, one gene and a valid
+BI, collapsed them to fragments and applied [the recipe](#the-recipe). Its
+reads, occupied bins, distinct fragments and counts equal the mode's ledger in
+all 19,731,758 barcode and gene groups. Its IPM equals the mode's to 15 digits
+(1.48178, from 1,153,925 groups).
+
+**The deposited matrix against the recipe.** Only counts are deposited, so
+each row is something the recipe implies for counts:
+
+| What the recipe implies | In the deposited matrix |
+| --- | --- |
+| All 64 indexes are counted | Of our 3,796,773 entries with one bin of three or more reads, 96.0% have a deposited count. By index the share is 94.7% to 96.8%; for the four homopolymers, 94.8% to 96.3% |
+| Up to ten bins the count is the number of bins | Our entries with one bin and four or more fragments: the deposited count is 1 in 97.5% of them and 1.01 on average |
+| Above ten bins the count steps up to I / IPM | Entries with two to three fragments per bin: the deposited mean is 9.2 where we have ten bins (ours 10) and 15.5 where we have thirteen (ours 19.0). The share with a deposited count above our number of bins is 5% at ten bins, 62% at twelve and 84% at fifteen |
+| One IPM for the library | Deposited over ours is 0.87 to 0.92 in every class from thirteen bins up, and 0.91 in the 30 entries with all 64 bins occupied |
+
+**Where the 6% is.** In the deposited cells, our entries with at most ten bins
+hold 20,318,562 counts of ours and 18,212,211 deposited ones. A least-squares
+fit of the deposited count on our bins, by the reads a bin holds, gives 0.77
+per bin with one read (6,424,069 bins), 0.89 per bin with two (4,247,969) and
+0.98 per bin with three or more (9,646,524). About 70% of the difference is in
+bins that rest on a single read. The recipe gives every occupied bin one
+count, so this is a difference in which reads are counted, not in how
+molecules are counted from them.
+
 #### Where the two differ
 
 The figures below come from an earlier `GeneFull_Ex50pAS` run on the
 2024-A-style list and its tagged BAM, except where the reference is named;
 every gene named is in all three lists.
 
-- **About 10% more observations per entry in ours.** For an entry with B
-  occupied bins in ours, the deposit holds about 0.90 B, at every B up to ten;
-  above ten bins the same factor passes through the division by IPM. In
-  entries whose bins all have several reads the deposit holds 95–97% as many
-  counts as we have bins; in entries whose bins all have one read, 74–87%.
-  Reads in entries the deposit lacks align over
-  shorter stretches (25% under 50 aligned bases, against 5% in entries that
-  agree). These entries follow expression: across genes their number has a
+- **Reads counted only by us.** Most of the bins behind the difference rest on
+  one read (see
+  [Checking the molecule counting](#checking-the-molecule-counting)). Reads in
+  entries the deposit lacks align over shorter stretches (25% under 50 aligned
+  bases, against 5% in entries that agree). These entries follow expression:
+  across genes their number has a
   rank correlation of 0.94 with all our bins, over 27,000 genes. The deposit
   in turn has 856,052 entries we lack; 40% of their counts are in 100 genes.
 - **Reads of multi-copy genes.** Ribosomal-protein genes are 19% higher in
