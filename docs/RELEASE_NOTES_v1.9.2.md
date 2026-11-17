@@ -52,6 +52,13 @@ at 32 threads. The comparison build is 1.9.1 with only the soloCellFiltering
 fix; it reproduces the in-run 1.9.1 PBMC callset exactly. These are correctness
 checks, not timed benchmarks.
 
+Note added 2026-11-17: until v1.13.0, `--runMode soloCellFiltering` left the
+last barcode of the raw matrix out of the call, and with a rank-based caller
+one barcode fewer can change more than one call. Both columns of the PBMC and
+iPSC2 rows below were made with such re-calls and have not been recomputed.
+Calls made during an alignment run were not affected. See the
+[v1.13.0 release notes](RELEASE_NOTES_v1.13.0.md).
+
 | Dataset | 1.9.1 | 1.9.2 |
 | --- | --- | --- |
 | PBMC 10K v3 vs Cell Ranger 9.0.1 (11,806 cells) | 12,146 cells, Jaccard 0.971358 | 11,863 cells, Jaccard 0.995027 |
