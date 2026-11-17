@@ -31,6 +31,33 @@ update this file with its output location.
 - Complete archive files were not downloaded or MD5-verified. Data and
   generated files remain untracked; this is not an alignment benchmark.
 
+## Split-pool v3 lists and the GSE352893 check (2026-11-16, 2026-11-17)
+
+- Bundled lists: `share/star-suite/barcode_lists/splitseq_v3/` (source files of
+  the kallisto-bustools documentation, `pachterlab/kb_docs` commit
+  `a4a4d985a4491264e02aa29807dff06f31e09fec`, BSD-2-Clause; generated lists;
+  `PROVENANCE.md` with checksums). Bundled PIP tier lists:
+  `share/star-suite/barcode_lists/pipseq_readderived/` (the lists of the next
+  section).
+- Reads: GEO GSE352893 / GSM10165610, run SRR41469160, fetched from SRA with
+  `prefetch` and written with `fasterq-dump --split-files --include-technical`:
+  `/storage/cc_perturb_seq/GSE352893/acquire_SRR41469160_20261116T190530Z/`
+  (`fastq/SRR41469160_1.fastq.gz`, cDNA read, 64 bases, SHA256 prefix
+  `5391c97b`; `fastq/SRR41469160_2.fastq.gz`, barcode read, 58 bases, SHA256
+  prefix `069ae022`; 97,458,666 pairs; full checksums in `MANIFEST.tsv`).
+- Deposited matrix: `/storage/benchmark_candidates_20261114/GSE352893/processed/GSE352893_iPSC_K562_mixed_integrated.h5mu`
+  (16,818 cells; its `uns/provenance_json` states the count limits applied).
+- Full-depth run of `--soloSplitseqMode Fixed` (branch build `f5ff7e2`,
+  index `/storage/autoindex_110_44/bulk_index`):
+  `/storage/cc_perturb_seq/GSE352893/star_full_20261116T214013Z/`; comparison
+  with the deposited matrix: `compare_published_v2_20261116T214844Z/`; reads
+  without linkers and their alignments: `linker_groups_2m_*`, `map_*`,
+  `linker_alignments_*` in the same directory.
+- Heads of other public libraries (first 8,000,000 bytes of each barcode-read
+  file from the ENA mirror) and their decode shares:
+  `/storage/cc_perturb_seq/parse_v3_public_peeks/`.
+- Keep read files and deposited files untracked.
+
 ## Newer PIP barcode tier lists (2026-11-14, revised 2026-11-15)
 
 - The four tier lists used for the PIP checks are derived from public reads

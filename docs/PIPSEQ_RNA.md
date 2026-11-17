@@ -52,6 +52,9 @@ The cDNA read (R2) is first and the barcode read (R1) last. Lanes of one
 library go in as comma-separated lists. Process each library in its own run:
 cell barcodes carry no library label.
 
+`Solo.out/<feature>/raw/` holds every barcode with a counted read and
+`filtered/` the cells called by `EmptyDrops_CR`, the mode's default caller.
+
 The raw FASTQ pair is the input. The mode trims the cDNA read itself; there is
 no separate trimming step.
 
@@ -94,7 +97,11 @@ genes on unplaced scaffolds.
 ### Tier lists
 
 `--soloPipseqWhitelist` takes four one-column lists in read order, with
-sequences of 8, 6, 6 and 8 bases. None is bundled.
+sequences of 8, 6, 6 and 8 bases. A set read off one public library is in
+`share/star-suite/barcode_lists/pipseq_readderived/` (`PROVENANCE.md` there);
+it is not a manufacturer's list and has not been checked on another kit
+version.
+For another kit or to check a library,
 `scripts/make_pipseq_tier_lists.py` reads them off the barcode reads: among
 reads in which the three constant linkers match at exactly one phase, the 96
 most frequent sequences at each tier position. Its `summary.json` shows how far
@@ -110,7 +117,7 @@ output does not depend on the order of a list.
 | `--alignIntronMax` | 25000 | same |
 | Alignments counted | reads with one alignment | this mode's rule; the documentation counts the primary alignment above a mapping-quality limit |
 | `--soloFeatures` | `GeneFull` unless given | one of `Gene`, `GeneFull`, `GeneFull_Ex50pAS`, `GeneFull_ExonOverIntron` |
-| `--soloCellFilter` | `None` unless given | |
+| `--soloCellFilter` | `EmptyDrops_CR` unless given | STAR's existing caller on the estimated-transcript matrix; `None` writes no `filtered/` matrix |
 
 A value given on the command line replaces a default. The barcode, UMI and
 deduplication parameters belong to the mode; a conflicting value is an error.
@@ -272,7 +279,8 @@ distinct fragments; there is no spilling to disk.
 Under `Solo.out/<feature>/`:
 
 - `raw/{matrix.mtx,features.tsv,barcodes.tsv}`: estimated transcript counts.
-- `filtered/`: the same units after optional standard cell calling.
+- `filtered/`: the same units for the called cells (`EmptyDrops_CR` unless
+  another `--soloCellFilter` is given).
 - `Pipseq.groups.tsv`: barcode, gene ID, assigned reads, occupied bins,
   unique BI/IMI pairs and estimated transcripts.
 - `Pipseq.metrics.tsv`: effective counting policies (including `cdna_trim`),
@@ -290,9 +298,10 @@ The raw barcode axis contains cells with at least one counted RNA observation.
 Inputs with no accepted RNA observations yield a valid empty matrix. Matrix
 counts and offsets are checked against STAR's 32-bit matrix limits.
 
-Standard `--soloCellFilter` options, including `EmptyDrops_CR`, can filter the
-estimated-transcript matrix with STAR's existing callers. The threshold rule of
-the published description is not implemented.
+Cells are called on the estimated-transcript matrix with STAR's existing
+callers: `EmptyDrops_CR` by default, any other `--soloCellFilter` option when
+given, none with `--soloCellFilter None`. The caller is not tuned for this
+assay. The threshold rule of the published description is not implemented.
 
 Not in this mode: Flex, two-pass, restart, pfMulti guide integration, the v3
 chemistry, guide reads.
