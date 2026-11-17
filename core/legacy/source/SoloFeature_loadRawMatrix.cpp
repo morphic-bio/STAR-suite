@@ -121,7 +121,8 @@ void SoloFeature::loadRawMatrix()
         nUMIperCB[nCB] += countCellGeneUMI[ii*countMatStride+2];
         countCellGeneUMI[ii*countMatStride+1]=countCellGeneUMI[ii*countMatStride+2];//replace cell with count to keep standard convention about countCellGeneUMI
     };
-    
+    nCB++; //the loop above uses nCB as the 0-based index of the current cell; restore the number of cells, otherwise the last cell is left out of filtering
+
     {//load barcodes
         ifstream &wlstream = ifstrOpen(inputPrefix+pSolo.outFileNames[2], ERROR_OUT, "SOLUTION: check the path and permissions of the barcodes file", P);
         pSolo.cbWLstr.resize(nCB1);
