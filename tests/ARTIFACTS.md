@@ -31,6 +31,21 @@ update this file with its output location.
 - Complete archive files were not downloaded or MD5-verified. Data and
   generated files remain untracked; this is not an alignment benchmark.
 
+## v1.13.0 release validation (2026-11-17)
+
+- Output root: `/storage/cc_pip_native_real_validation/20261117T160000Z_release_v1.13.0/`,
+  one folder per step (`core_unit_tests_*`, `module_suite_*`,
+  `emptydrops_parity_*`, `server_tests_*`, `splitseq_full_*`, `pipseq_full_*`
+  and their `*_compare_*` folders, `splitseq_recall_*`, `container_build_*`,
+  `container_tier_a_*`, `suite_cbq_*`, `flex_half_probe_control_v1122_*`,
+  `partial_builds_*`), each with its command, logs and exit status;
+  `bin/` holds the binary that was tested (built from commit `ba470a1`).
+- The full-depth runs read the public libraries listed in the next two
+  sections and are compared with the runs named there. Only matrices are
+  written; no BAM.
+- Some manifest rows write under `/tmp` (`/tmp/slam_*`,
+  `/tmp/pf_dynamic_permit_100k_*`, `/tmp/star_cellbender_cuda_*`).
+
 ## Contract tests of the STAR-perturb add-ons and of cell filtering (2026-11-17)
 
 - `tests/run_perturb_addons_contract.sh` (split-pool and PIP RNA modes, their

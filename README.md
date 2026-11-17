@@ -101,6 +101,7 @@ docs/                    # Suite-level docs
 tests/                   # Suite-level tests (see tests/ARTIFACTS.md for artifact locations)
 tools/                   # Suite-level scripts/utilities
 mcp_server/              # MCP server for scripted discovery/preflight/run workflows
+share/star-suite/        # Packaged data: pinned recipe catalog and evidence snapshots, barcode lists
 ```
 
 ## Modules
@@ -112,6 +113,7 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
   ([`docs/HOST_API.md`](docs/HOST_API.md)).
 - **STAR-perturb** (`core/legacy/` + `core/features/process_features/`): CR-compatible perturb-seq path with integrated feature extraction/calling (`process_features` + `call_features`) and `crispr_analysis/` outputs in CR-compat mode.
   Primary run path: `STAR --pfMultiConfig ... --defaultCrCompat yes` (see STAR-perturb section below).
+  Experimental add-ons since 1.13.0, RNA only: split-pool barcoding (`--soloSplitseqMode Fixed`) and the newer PIP chemistry (`--soloPipseqMode Illumina`). See [STAR-perturb add-ons](#star-perturb-add-ons-split-pool-and-pip-rna-experimental).
 - **STAR-OCM scRNA-seq** (`core/legacy/`): GEM-X OCM support on the CR-compatible
   GEX path. Production uses `GeneFull Velocyto`, per-sample `EmptyDrops_CR`
   after OCM split, native `CB16+OCM_TAG8` effective barcodes, native per-sample
@@ -514,6 +516,77 @@ Standalone tool (`star_feature_call`):
 - `--call-only --mex-dir`: call_features-only pass on existing MEX.
 - `--emptydrops-use-fdr`, `--min-umi`, `--ratio-test`: calling controls.
 
+### STAR-perturb add-ons: split-pool and PIP RNA (experimental)
+
+New in 1.13.0. Two modes count gene expression for single-cell libraries
+whose cell barcode is not one whitelist segment followed by a UMI. They are
+experimental add-ons for STAR-perturb.
+
+| | Split-pool barcoding | PIP |
+| --- | --- | --- |
+| Mode | `--soloSplitseqMode Fixed` | `--soloPipseqMode Illumina` |
+| Libraries | Split-pool (SPLiT-seq style) RNA: two to four barcode rounds at fixed positions on the barcode read, and a UMI | The newer PIP chemistry: a four-tier cell barcode and a three-base binning index, no UMI |
+| Counting | STAR's UMI counting on the decoded cell barcode | Transcripts estimated per cell and gene from binning indices and fragment ends, following the published description of the chemistry |
+| Cell calling | `EmptyDrops_CR` unless another `--soloCellFilter` is given | the same |
+| Barcode lists | Your own, or the v3 lists in `share/star-suite/barcode_lists/splitseq_v3/` | Your own, or the set in `share/star-suite/barcode_lists/pipseq_readderived/` |
+| Tools | `scripts/make_splitseq_lists.py` | `scripts/make_pipseq_tier_lists.py`, `scripts/make_pipseq_reference_gtf.py` |
+| Launchpad recipe | `star_splitseq_rna` | `star_pipseq_rna` |
+| Runbook | [docs/SPLITSEQ_RNA.md](docs/SPLITSEQ_RNA.md) | [docs/PIPSEQ_RNA.md](docs/PIPSEQ_RNA.md) |
+
+What "experimental add-on" means here:
+
+- **RNA only.** Each mode writes the gene-expression matrices of one library
+  (`Solo.out/<feature>/raw` and `filtered`). Guide capture, `--pfMultiConfig`,
+  the `crispr_analysis/` outputs and the Cell Ranger-compatible layout are not
+  connected to these modes. For a perturbation screen on these platforms the
+  guide library has to be processed separately.
+- **STAR's own rules.** Alignment, gene assignment and cell calling are
+  STAR's. Neither mode reproduces a kit vendor's pipeline or its
+  cell-selection rule, and the cell caller is not tuned for these assays.
+- **Checked on few libraries.** The checks are listed below; the runbooks give
+  the figures with their sampling and limits.
+- **May change.** Option names, defaults and outputs can change in a later
+  release.
+
+The barcode lists are packaged with every release. Each folder has a
+`PROVENANCE.md` with the source, the checksums and what was checked on data.
+The split-pool lists are written from the on-list and replacement list of the
+kallisto-bustools documentation (BSD-2-Clause). The PIP set was read off the
+barcode reads of one public library; it is not a manufacturer's list.
+
+Checked so far:
+
+- **Split-pool, annotation.** On the first 100,000 read pairs of the public
+  IGVF library IGVFDS5482QPWM, all 94,999 accepted reads that carry the
+  submitter's barcode and UMI annotation agree with it.
+- **Split-pool, one v3 library at full depth** (GEO GSE352893, 97.5 million
+  read pairs, 5.5 minutes on 16 threads). All 16,818 deposited cells are among
+  the barcodes counted. Total counts per deposited cell are 0.88 of the
+  deposited totals (Pearson 0.9987). Per-gene totals correlate at 0.908
+  (0.970 on log counts); the deposit used another annotation. 64.8% of the
+  reads have a valid barcode; in the first 2 million pairs, about a quarter
+  of the barcode reads show no linker.
+- **Split-pool, decoding on other libraries.** On the first reads of seven
+  other public libraries whose records name the same kit, four decode at 83
+  to 85%. Three do not fit the layout as supplied (69%, 27% and 0%) and were
+  not followed up.
+- **PIP, one library with a deposited matrix** (GEO GSE295097, 180 million
+  read pairs, 8 minutes on 16 threads, 34 GB). 93.2% of the reads have an
+  accepted barcode, and all 5,675 deposited cell labels have counts. With
+  `GeneFull_Ex50pAS` on the mode's reference, per-cell totals are 6.3% above
+  the deposited ones (Pearson 0.9997 on log10 totals) and per-gene totals
+  correlate at 0.956 on log(1 + count).
+
+Not covered: guide reads in either mode; split-pool kits newer than the v3
+chemistry; split-pool reads whose linker is displaced (positions are fixed);
+BAM output in the split-pool mode; the older PIP chemistry with a 12-base UMI.
+
+Tests: `make -C core/legacy/source test_SplitSeq test_PipSeq`,
+`tests/run_perturb_addons_contract.sh` (both modes from FASTQ to matrices on
+generated inputs, and the list and reference tools) and
+`mcp_server/tests/test_star_splitseq_pipseq_recipes.py` (the recipes, run on
+generated reads with the packaged lists).
+
 ### OCM scRNA-seq
 
 See [docs/RUNBOOK_SCRNA_OCM_CR_COMPAT.md](docs/RUNBOOK_SCRNA_OCM_CR_COMPAT.md),
@@ -754,6 +827,42 @@ core/legacy/source/star_feature_call \
   --min-umi 10
 ```
 
+**STAR-perturb add-on: split-pool RNA (experimental):**
+
+Positions and lists are given for round 1, round 2 and round 3 in that order.
+The layout below is the v3 short-linker chemistry; other layouts and the list
+format are in [docs/SPLITSEQ_RNA.md](docs/SPLITSEQ_RNA.md).
+
+```bash
+L=share/star-suite/barcode_lists/splitseq_v3/48_wells   # 96_wells for a 96-well round 1
+core/legacy/source/STAR \
+  --genomeDir /path/to/genome_index \
+  --readFilesIn cDNA_R1.fastq.gz barcode_R2.fastq.gz --readFilesCommand zcat \
+  --soloSplitseqMode Fixed \
+  --soloSplitseqCBposition 50_8 30_8 10_8 \
+  --soloSplitseqUMIposition 0_10 \
+  --soloSplitseqWhitelist $L/round1.tsv $L/round2.tsv $L/round3.tsv \
+  --soloStrand Forward --outSAMtype None \
+  --runThreadN 16 --outFileNamePrefix /path/to/output/
+```
+
+**STAR-perturb add-on: PIP RNA (experimental):**
+
+The cDNA read (R2) is first and the barcode read (R1) second. The reference
+and the tier lists are described in [docs/PIPSEQ_RNA.md](docs/PIPSEQ_RNA.md).
+
+```bash
+T=share/star-suite/barcode_lists/pipseq_readderived
+core/legacy/source/STAR \
+  --genomeDir /path/to/pipseq_ref/index \
+  --readFilesIn R2.fastq.gz R1.fastq.gz --readFilesCommand zcat \
+  --soloPipseqMode Illumina \
+  --soloPipseqWhitelist $T/readderived_tier1.tsv $T/readderived_tier2.tsv \
+                        $T/readderived_tier3.tsv $T/readderived_tier4.tsv \
+  --soloFeatures GeneFull_Ex50pAS --soloStrand Forward --outSAMtype None \
+  --runThreadN 16 --outFileNamePrefix /path/to/output/
+```
+
 ## STAR Launchpad (Recipe Builder)
 
 If you prefer not to assemble command lines by hand, STAR Launchpad is a
@@ -894,6 +1003,8 @@ Helpful follow-up guides:
 - SLAM compatibility: [slam/docs/SLAM_COMPATIBILITY_MODE.md](slam/docs/SLAM_COMPATIBILITY_MODE.md)
 - SLAM methodology: [slam/docs/SLAM_seq.md](slam/docs/SLAM_seq.md)
 - STAR-perturb feature docs: [docs/feature_barcodes.md](docs/feature_barcodes.md)
+- STAR-perturb add-on, split-pool RNA (experimental): [docs/SPLITSEQ_RNA.md](docs/SPLITSEQ_RNA.md)
+- STAR-perturb add-on, PIP RNA (experimental): [docs/PIPSEQ_RNA.md](docs/PIPSEQ_RNA.md)
 - OCM scRNA-seq runbook: [docs/RUNBOOK_SCRNA_OCM_CR_COMPAT.md](docs/RUNBOOK_SCRNA_OCM_CR_COMPAT.md)
 - Velocyto CR-compat policy runbook: [docs/RUNBOOK_VELOCYTO_CR_COMPAT_POLICY_20260519.md](docs/RUNBOOK_VELOCYTO_CR_COMPAT_POLICY_20260519.md)
 - STAR Suite binary distribution: [docs/Star-binary-distribution.md](docs/Star-binary-distribution.md)
