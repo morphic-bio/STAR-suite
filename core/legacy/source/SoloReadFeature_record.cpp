@@ -12,6 +12,7 @@ bool nonFlexHashBridgeRecordMode(const ParametersSolo &pSolo)
 // Dispatcher: routes to base (upstream-compatible) or Flex implementation
 void SoloReadFeature::record(SoloReadBarcode &soloBar, uint nTr, Transcript **alignOut, uint64 iRead, ReadAnnotations &readAnnot)
 {
+    if (pSolo.pipseqDecoder) { recordPipseq(soloBar, nTr, alignOut, readAnnot); return; }
     if (nonFlexHashBridgeRecordMode(pSolo)) {
         record_base(this, soloBar, nTr, alignOut, iRead, readAnnot);
     } else if (pSolo.flexMode) {

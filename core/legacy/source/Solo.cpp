@@ -3,6 +3,7 @@
 #include "streamFuns.h"
 #include "InlineCBCorrection.h"
 #include "SoloReadBarcode.h"
+#include "SplitSeq.h"
 #include <cstdlib>
 
 Solo::Solo(ReadAlignChunk **RAchunkIn, Parameters &Pin, Transcriptome &inTrans)
@@ -79,9 +80,14 @@ void Solo::processAndOutput()
 {
     if (pSolo.type==0 )
         return;
+
+    if (pSolo.pipseqDecoder) {
+        for (uint32 ii = 0; ii < pSolo.nFeatures; ++ii) soloFeat[ii]->processRecords();
+        return;
+    }
     
     {//collect barcode statistics    
-        if (pSolo.cbWLyes) {//now we can define WL and counts
+        if (pSolo.cbWLyes || pSolo.splitseqDecoder) {//split-seq has per-round references
             for (int ii=0; ii<P.runThreadN; ii++) {
                 readBarSum->addCounts(*RAchunk[ii]->RA->soloRead->readBar);
                 readBarSum->addStats(*RAchunk[ii]->RA->soloRead->readBar);
@@ -93,6 +99,12 @@ void Solo::processAndOutput()
         ofstream *statsStream = &ofstrOpen(P.outFileNamePrefix+pSolo.outFileNames[0]+"Barcodes.stats",ERROR_OUT, P);
         readBarSum->statsOut(*statsStream);
         statsStream->close();
+
+        if (pSolo.splitseqDecoder) {
+            ofstream& metrics = ofstrOpen(P.outFileNamePrefix+pSolo.outFileNames[0]+"Splitseq.metrics.tsv", ERROR_OUT, P);
+            splitseq::writeMetrics(metrics, readBarSum->splitStats);
+            metrics.close();
+        }
 
         //pseudocounts
         if (pSolo.CBmatchWL.mm1_multi_pc) {

@@ -35,6 +35,8 @@ static bool ocmFlexBarcodeModeLocal(const Parameters& P) {
 void ParametersSolo::initialize(Parameters *pPin)
 {
     pP=pPin;
+    initializeSplitseq();
+    initializePipseq();
 
     {
         const string ocmMode = lowerStringLocal(pP->pfMulti.ocmMultiBarcodeMode);
@@ -146,7 +148,7 @@ void ParametersSolo::initialize(Parameters *pPin)
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////// Tag-table export (always enabled; legacy flag removed)
-    writeTagTableEnabled = true;
+    writeTagTableEnabled = !pipseqDecoder && !splitseqDecoder;
     writeTagTablePath = pP->outFileNamePrefix + "Aligned.out.cb_ub.bin";
     
     //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1273,6 +1275,10 @@ void ParametersSolo::initialize(Parameters *pPin)
     
     //initialize CB match to WL types
     init_CBmatchWL();
+    // Split rounds are already uniquely resolved against their own references.
+    // Their spool CB is a packed sequence, not an index into cbReadCountExact;
+    // do not require a whole-tuple exact anchor or index that array with it.
+    if (splitseqDecoder) CBmatchWL.oneExact = false;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////umiDedup
@@ -1722,7 +1728,7 @@ void ParametersSolo::initialize(Parameters *pPin)
 
     //////////////////////////////////////////////////////////////SAM attributes
     samAttrYes=false;
-    if ( (pP->outSAMattrPresent.CB || pP->outSAMattrPresent.UB) && type!=SoloTypes::CB_samTagOut) {
+    if ( (pP->outSAMattrPresent.CB || pP->outSAMattrPresent.UB) && type!=SoloTypes::CB_samTagOut && !pipseqDecoder) {//PIP writes CB with the alignment
         samAttrYes=true;
         // CB/UB tags require either:
         // - Sorted BAM output (tags injected after Solo counting)
@@ -1955,7 +1961,22 @@ void ParametersSolo::cellFiltering()
             errOut +=     "\nSOLUTION: --soloCellFilterType TopCells <NumberOfCells>\n";
             exitWithError(errOut, std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         };
-        cellFilter.topCells=stoi(cellFilter.type[1]);
+        //the whole argument has to be a decimal integer: a conversion that stops at the first other character would read 1e3 as 1 and 2junk as 2
+        const string &topCellsArg = cellFilter.type[1];
+        const uint64 topCellsMax = 4294967295ULL; //cellFilter.topCells is uint32
+        uint64 topCellsIn = 0;
+        bool topCellsOK = !topCellsArg.empty() && topCellsArg.size() <= 19 //19 digits fit into 64 bits
+                          && topCellsArg.find_first_not_of("0123456789") == string::npos;
+        if (topCellsOK) {
+            topCellsIn = stoull(topCellsArg);
+            topCellsOK = topCellsIn >= 1 && topCellsIn <= topCellsMax;
+        };
+        if (!topCellsOK) {
+            string errOut="EXITING because of fatal PARAMETERS error: the number of cells for --soloCellFilter TopCells has to be an integer >= 1 (digits only, at most " + to_string(topCellsMax) + "), got " + topCellsArg;
+            errOut +=     "\nSOLUTION: --soloCellFilter TopCells <NumberOfCells>\n";
+            exitWithError(errOut, std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        };
+        cellFilter.topCells=(uint32) topCellsIn;
     } else if (cellFilter.type[0]=="None") {
         //nothing to do
     } else {

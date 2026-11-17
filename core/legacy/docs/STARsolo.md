@@ -445,7 +445,7 @@ soloOutFileNames            Solo.out/          features.tsv barcodes.tsv        
 soloCellFilter              CellRanger2.2 3000 0.99 10
     string(s):              cell filtering type and parameters
                             None            ... do not output filtered cells
-                            TopCells        ... only report top cells by UMI count, followed by the exact number of cells
+                            TopCells        ... only report top cells by UMI count, followed by the exact number of cells (>=1). Cells with the same UMI count as the last one are reported as well
                             CellRanger2.2   ... simple filtering of CellRanger 2.2.
                                                 Can be followed by numbers: number of expected cells, robust maximum percentile for UMI count, maximum to minimum ratio for UMI count
                                                 The harcoded values are from CellRanger: nExpectedCells=3000;  maxPercentile=0.99;  maxMinRatio=10

@@ -182,6 +182,22 @@ workflows:
     schema_file: mcp_server/workflows/star_perturb_cr_compat.yaml
     visibility: public
 
+  - id: star_splitseq_rna
+    title: Split-pool RNA (experimental)
+    summary: Experimental add-on for STAR-perturb. One STAR alignReads command with --soloSplitseqMode Fixed for split-pool RNA libraries with three barcode rounds, a fixed barcode layout and one allowlist per round.
+    entry_script: core/legacy/source/STAR
+    kind: star_cli
+    schema_file: mcp_server/workflows/star_splitseq_rna.yaml
+    visibility: public
+
+  - id: star_pipseq_rna
+    title: PIPseq RNA (experimental)
+    summary: Experimental add-on for STAR-perturb. One STAR alignReads command with --soloPipseqMode Illumina for the newer PIP chemistry (four-tier barcode, binning index, no UMI) with four tier allowlists.
+    entry_script: core/legacy/source/STAR
+    kind: star_cli
+    schema_file: mcp_server/workflows/star_pipseq_rna.yaml
+    visibility: public
+
   - id: "jax_scrnaseq02_ocm_composite_smoke"
     title: "JAX scRNAseq02 OCM Composite Smoke"
     summary: "Native OCM flex/composite-barcode smoke harness with optional STAR run, materialization, and CR artifact comparison."

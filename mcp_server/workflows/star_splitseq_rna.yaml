@@ -1,0 +1,228 @@
+# Public recipe: split-pool RNA counting with --soloSplitseqMode Fixed (docs/SPLITSEQ_RNA.md).
+# Experimental add-on for STAR-perturb: RNA only, no guide capture.
+# The barcode layout and the three allowlists have no defaults here, so they
+# are always chosen for the library.
+id: star_splitseq_rna
+title: Split-pool RNA (experimental)
+summary: Single STAR alignReads with --soloSplitseqMode Fixed for split-pool (SPLiT-seq style) RNA libraries with three barcode rounds, fixed barcode and UMI positions and one allowlist per round; writes raw and EmptyDrops-filtered gene matrices.
+kind: star_cli
+entry_script: core/legacy/source/STAR
+supported_modes: [local]
+caveats:
+  - "Experimental add-on for STAR-perturb, new in STAR Suite 1.13.0. RNA only: guide capture, BAM output, sample demultiplexing and automatic kit detection are not part of the mode. It is a STAR baseline, not a reproduction of a kit vendor's pipeline or cell-selection rule."
+  - Build the binary first (make -C core/legacy/source STAR).
+  - "Order is --readFilesIn cDNA_read barcode_read. For gzipped FASTQ files set read_files_command to zcat."
+  - "Positions are zero-based offset_length on the barcode read, given for round 1, round 2 and round 3 in that order. They are fixed: linkers are skipped, not aligned. Known layouts: 50_8 30_8 10_8 with UMI 0_10 (v3 short-linker chemistry); 78_8 48_8 10_8 with UMI 0_10 (long-linker layout of the public IGVF library IGVFDS5482QPWM). Check them against your library; a wrong layout shows as a low share of reads with a valid barcode in Solo.out/Splitseq.metrics.tsv."
+  - "Allowlists: one file per round, one A/C/G/T sequence per line, with an optional second column giving its replacement. Lists for the v3 chemistry are bundled in share/star-suite/barcode_lists/splitseq_v3/ (48_wells or 96_wells: round1.tsv, round2.tsv, round3.tsv; see PROVENANCE.md there). Use the list that matches the round-1 wells of the library. scripts/make_splitseq_lists.py writes lists for other well ranges and well labels for a run's barcodes."
+  - "Process one sublibrary per run: cell IDs are barcode sequences and carry no sublibrary label."
+  - "The cell caller is STAR's EmptyDrops_CR, not tuned for this assay; None writes the raw matrix only."
+default_output_layout: Solo.out/<feature>/raw and filtered MEX folders and Solo.out/Splitseq.metrics.tsv under out_file_name_prefix.
+
+scripts:
+  - role: entry
+    path: core/legacy/source/STAR
+    description: STAR binary
+    language: native
+  - role: helper
+    path: scripts/make_splitseq_lists.py
+    description: Writes per-round allowlists and well labels from a kallisto-bustools on-list and replacement list.
+    language: python
+
+parameter_groups:
+  - name: core
+    title: Reads and reference
+    parameters:
+      - run_mode
+      - genome_dir
+      - read_files_cdna
+      - read_files_barcode
+      - read_files_command
+  - name: barcodes
+    title: Barcode layout and allowlists
+    description: Round 1, round 2, round 3 in that order for the positions and the lists.
+    parameters:
+      - solo_splitseq_mode
+      - cb_position_round1
+      - cb_position_round2
+      - cb_position_round3
+      - umi_position
+      - whitelist_round1
+      - whitelist_round2
+      - whitelist_round3
+  - name: counting
+    title: Counting and output
+    parameters:
+      - solo_strand
+      - solo_features
+      - solo_cell_filter
+      - out_sam_type
+      - out_file_name_prefix
+      - run_thread_n
+
+parameters:
+  - name: run_mode
+    cli_flag: --runMode
+    type: string
+    required: false
+    default: alignReads
+    description: STAR run mode.
+    category: core
+  - name: genome_dir
+    cli_flag: --genomeDir
+    type: directory
+    required: true
+    path_must_exist: true
+    description: STAR genome index directory.
+    category: core
+  - name: read_files_cdna
+    cli_flag: --readFilesIn
+    type: string
+    required: true
+    operand_group: readfiles_splitseq
+    description: cDNA read FASTQ (first argument to --readFilesIn); lanes of one sublibrary as a comma-separated list.
+    category: core
+  - name: read_files_barcode
+    cli_flag: --readFilesIn
+    type: string
+    required: true
+    operand_group: readfiles_splitseq
+    description: Barcode read FASTQ (second argument to --readFilesIn), lanes in the same order.
+    category: core
+  - name: read_files_command
+    cli_flag: --readFilesCommand
+    type: string
+    required: false
+    description: Command that writes the reads to standard output; zcat for gzipped FASTQ files. Leave empty for plain FASTQ.
+    category: core
+  - name: solo_splitseq_mode
+    cli_flag: --soloSplitseqMode
+    type: enum
+    required: false
+    default: Fixed
+    choices: [Fixed]
+    description: Split-pool mode with fixed barcode and UMI positions.
+    category: barcodes
+  - name: cb_position_round1
+    cli_flag: --soloSplitseqCBposition
+    type: string
+    required: true
+    operand_group: splitseq_cb_position
+    description: "Round-1 barcode on the barcode read, zero-based offset_length (50_8 for the v3 short-linker chemistry)."
+    category: barcodes
+  - name: cb_position_round2
+    cli_flag: --soloSplitseqCBposition
+    type: string
+    required: true
+    operand_group: splitseq_cb_position
+    description: "Round-2 barcode, zero-based offset_length (30_8 for the v3 short-linker chemistry)."
+    category: barcodes
+  - name: cb_position_round3
+    cli_flag: --soloSplitseqCBposition
+    type: string
+    required: true
+    operand_group: splitseq_cb_position
+    description: "Round-3 barcode, zero-based offset_length (10_8 for the v3 short-linker chemistry)."
+    category: barcodes
+  - name: umi_position
+    cli_flag: --soloSplitseqUMIposition
+    type: string
+    required: true
+    description: "UMI on the barcode read, zero-based offset_length (0_10 for the v3 short-linker chemistry); must not overlap a barcode round."
+    category: barcodes
+  - name: whitelist_round1
+    cli_flag: --soloSplitseqWhitelist
+    type: file
+    required: true
+    path_must_exist: true
+    operand_group: splitseq_whitelist
+    description: Round-1 allowlist (for example share/star-suite/barcode_lists/splitseq_v3/48_wells/round1.tsv).
+    category: barcodes
+  - name: whitelist_round2
+    cli_flag: --soloSplitseqWhitelist
+    type: file
+    required: true
+    path_must_exist: true
+    operand_group: splitseq_whitelist
+    description: Round-2 allowlist (round2.tsv of the same folder).
+    category: barcodes
+  - name: whitelist_round3
+    cli_flag: --soloSplitseqWhitelist
+    type: file
+    required: true
+    path_must_exist: true
+    operand_group: splitseq_whitelist
+    description: Round-3 allowlist (round3.tsv of the same folder).
+    category: barcodes
+  - name: solo_strand
+    cli_flag: --soloStrand
+    type: enum
+    required: true
+    choices: [Forward, Reverse, Unstranded]
+    description: "Strand of the cDNA read relative to the transcript (required; no default so it is always chosen for the library). Forward for the libraries the mode was checked on."
+    category: counting
+  - name: solo_features
+    cli_flag: --soloFeatures
+    type: enum
+    required: false
+    default: GeneFull
+    choices: [Gene, GeneFull, GeneFull_Ex50pAS, GeneFull_ExonOverIntron]
+    description: Gene model for counting; the mode takes exactly one.
+    category: counting
+  - name: solo_cell_filter
+    cli_flag: --soloCellFilter
+    type: enum
+    required: false
+    default: EmptyDrops_CR
+    choices: [EmptyDrops_CR, None]
+    description: Cell calling. EmptyDrops_CR writes filtered/ beside raw/; None writes the raw matrix only.
+    category: counting
+  - name: out_sam_type
+    cli_flag: --outSAMtype
+    type: enum
+    required: false
+    default: None
+    choices: [None]
+    description: The mode writes no BAM.
+    category: counting
+  - name: out_file_name_prefix
+    cli_flag: --outFileNamePrefix
+    type: string
+    required: true
+    is_output_root: true
+    description: Output prefix (a fresh directory path ending with / is recommended).
+    category: counting
+  - name: run_thread_n
+    cli_flag: --runThreadN
+    type: int
+    required: false
+    default: 16
+    description: Thread count.
+    category: counting
+
+constraints:
+  - kind: positive
+    params: [run_thread_n]
+    message: Must be positive.
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    - run_mode
+    - genome_dir
+    - read_files_cdna
+    - read_files_barcode
+    - read_files_command
+    - solo_splitseq_mode
+    - cb_position_round1
+    - cb_position_round2
+    - cb_position_round3
+    - umi_position
+    - whitelist_round1
+    - whitelist_round2
+    - whitelist_round3
+    - solo_strand
+    - solo_features
+    - solo_cell_filter
+    - out_sam_type
+    - out_file_name_prefix
+    - run_thread_n

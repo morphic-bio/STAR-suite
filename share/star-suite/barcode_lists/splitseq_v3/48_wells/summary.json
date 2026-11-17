@@ -1,0 +1,39 @@
+{
+ "onlist": {
+  "file": "splitseqv3_barcodes.txt",
+  "sha256": "a8452cc302ef720c7c1742b60f7aee6857571761aedd50964f401398c74f89b7"
+ },
+ "replace": {
+  "file": "splitseqv3_replace.txt",
+  "sha256": "303a9170b82626146db1ea25856b7c28f8d8690e032577d24e175dd327481321"
+ },
+ "column_rounds": [
+  "round3",
+  "round2",
+  "round1"
+ ],
+ "column_sizes": {
+  "round3": 96,
+  "round2": 96,
+  "round1": 208
+ },
+ "replace_lines": 106,
+ "replace_targets": 96,
+ "round1_without_replacement_line": 6,
+ "wells": 48,
+ "restricted_to": null,
+ "round1_kept": 99,
+ "round1_kept_primers": {
+  "T": 48,
+  "R": 48,
+  "X": 3
+ },
+ "round1_kept_wells": 48,
+ "labelled": null,
+ "outputs": {
+  "round1.tsv": "761c5071c0f1651966fd7350106e255b141b9edbadb080c74f7d48bc5030f4c8",
+  "round2.tsv": "346ecc6bf50e72c91e0ec115ca22918abbfa8d3dae7be0dab9e602a1564de199",
+  "round3.tsv": "35e18a9c0b63befe55320c25384232cecabbed7211a56454f6d77eef5e192b34",
+  "crosswalk.tsv": "6006ff1d97dd145f9bd6863bb8e0ca2a8fbf2105390940a41e6c37821d6c3e77"
+ }
+}

@@ -8,9 +8,9 @@ void ParametersClip::initialize(Parameters *pPin)
     pP = pPin;
     //yes = false;
     
-    if (adapterType[0]!="Hamming" && adapterType[0]!="CellRanger4") {
+    if (adapterType[0]!="Hamming" && adapterType[0]!="CellRanger4" && adapterType[0]!="PIPseq") {
         exitWithError("EXITING because of fatal PARAMETER error: --clipAdapterType = " + adapterType[0] + " is not a valid option\n" +
-                      "SOLUTION: use valid --clipAdapterType options: Hamming OR CellRanger4\n", std::cerr, pPin->inOut->logMain, EXIT_CODE_PARAMETER, *pPin);
+                      "SOLUTION: use valid --clipAdapterType options: Hamming OR CellRanger4 OR PIPseq\n", std::cerr, pPin->inOut->logMain, EXIT_CODE_PARAMETER, *pPin);
     };
 
     // resolve --clip3pPolyG
@@ -43,7 +43,7 @@ void ParametersClip::initialize(Parameters *pPin)
             in[0].adSeq[0] = "AAGCAGTGGTATCAACGCAGAGTACATGGG";
         };
 
-    } else {
+    } else if (adapterType[0]!="PIPseq") {//PIPseq clips a 5p adapter placed by overlap
         for (uint32 im=0; im<in[0].adSeq.size(); im++) {//TODO implement standard 5p clipping
             if (in[0].adSeq[im]!="-") {
                 exitWithError("EXITING because of fatal PARAMETER error: --clip5pAdapterSeq is not supported yet, except for --clipAdapterType CellRanger4.\
@@ -107,6 +107,8 @@ void ParametersClip::initializeClipMates(vector<vector<ClipMate>> &clipMates)
             
             if (adapterType[0]=="CellRanger4") {
                 clipMates[im][ip].type += 10;
+            } else if (adapterType[0]=="PIPseq") {
+                clipMates[im][ip].type += 20;
             };            
             
             if (im<pP->readNmates) {//true mates

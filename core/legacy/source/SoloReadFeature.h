@@ -151,6 +151,10 @@ public:
     SoloReadFlagClass readFlag;
     
     SoloReadFeatureStats stats;
+    pipseq::Fragments pipFragments;
+    // invalid barcode, invalid BI, unmapped, multimapped, no/ambiguous gene, counted
+    std::array<uint64_t, 6> pipReadStats{{0, 0, 0, 0, 0, 0}};
+    void recordPipseq(SoloReadBarcode &soloBar, uint nTr, Transcript **alignOut, ReadAnnotations &readAnnot);
 
     SoloReadFeature (int32 feTy, Parameters &Pin, int iChunk);
     ~SoloReadFeature();

@@ -28,6 +28,8 @@ const LAUNCHPAD_WORKFLOW_ORDER = [
   "star_scrna_solo_droplet",
   "star_flex_fixed_rna",
   "star_perturb_cr_compat",
+  "star_splitseq_rna",
+  "star_pipseq_rna",
   "slam_pe_100k_smoke",
   "slam_pe_production",
   "slam_deseq2_container",

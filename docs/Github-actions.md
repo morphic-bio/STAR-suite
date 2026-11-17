@@ -121,6 +121,8 @@ documented Make commands instead.
   - public-data-only or synthetic surfaces
   - current Docker set: `tests/run_solo_smoke.sh`,
     `tests/test_scrna_gex_counts.py`,
+    `tests/run_solo_cell_filtering_contract.sh`,
+    `tests/run_perturb_addons_contract.sh`,
     `tests/run_scrna_sidecar_off_golden.sh`,
     `tests/run_spatial_r1_tap_guard.sh`,
     `tests/test_visium_hd_gex_sidecar_concurrency.py`,
@@ -134,6 +136,14 @@ documented Make commands instead.
     `make -C core/legacy/source test_MultiGeneUmiCr`, a deterministic
     20,000-case comparison of the shared resolver with both pre-refactor
     conventional-Solo and bridge rules
+  - Docker image construction also runs `test_PipSeq` and `test_SplitSeq`,
+    the decoder and counting unit tests of the experimental split-pool and PIP
+    RNA modes; `tests/run_perturb_addons_contract.sh` then runs both modes from
+    FASTQ to matrices on generated inputs and checks the bundled barcode lists
+    of the image against their source files
+  - `tests/run_solo_cell_filtering_contract.sh` checks cell filtering of a raw
+    matrix (`--runMode soloCellFiltering`) and `--soloCellFilter TopCells` on
+    generated matrices
   - the scRNA golden gate omits `--soloSpatialFeatureSidecar` and requires the
     raw GeneFull MEX files to remain byte-identical to feature-branch base
     commit `a996107e271c013e39f9398151deda0017da35d6`

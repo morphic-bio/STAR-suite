@@ -38,6 +38,7 @@ void SoloReadBarcode::addCounts(const SoloReadBarcode &rfIn)
 
 void SoloReadBarcode::addStats(const SoloReadBarcode &rfIn)
 {
+    for (size_t i = 0; i < splitStats.size(); ++i) splitStats[i] += rfIn.splitStats[i];
     for (uint32 ii=0; ii<stats.nStats; ii++)
         stats.V[ii] += rfIn.stats.V[ii];
 };

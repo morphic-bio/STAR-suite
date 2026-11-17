@@ -140,12 +140,12 @@ void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64
 
 void SoloReadBarcode::addStats(const int32 cbMatch1)
 {
-    if (!pSolo.cbWLyes) //no stats if no WL
+    if (!pSolo.cbWLyes && !pSolo.splitseqDecoder) //split-seq enforces per-round references
         return;
        
     switch (cbMatch1) {
         case 0://exact matches
-            cbReadCountExact[cbMatchInd[0]]++;//note that this simply counts reads per exact CB, no checks of genes or UMIs
+            if (pSolo.cbWLyes) cbReadCountExact[cbMatchInd[0]]++;
             stats.V[stats.yesWLmatchExact]++;
             break;
         case 1: //one WL match counted here, but they may still get rejected in SoloReadFeature_inputRecords.cpp
@@ -313,6 +313,9 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
 {
     if (pSolo.type==0)
         return;
+
+    if (pSolo.pipseqDecoder) { getCBandUMIpipseq(readSeq, readLen); return; }
+    if (pSolo.splitseqDecoder) { getCBandUMIsplitseq(readSeq, readQual, readLen); return; }
 
     // Initialize UR fields
     urSeq = "";

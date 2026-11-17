@@ -78,6 +78,13 @@ UCSF was intentionally excluded. This note is MSK-only.
 - CR9 reference barcodes:
   `/storage/MSK-perturb-comparison/cr_full_grna_30crispr_20260306_173247/cr9_gex_grna_30crispr/outs/per_sample_outs/cr9_gex_grna_30crispr/count/sample_filtered_feature_bc_matrix/barcodes.tsv.gz`
 
+Note added 2026-11-17: the reruns in this note used
+`--runMode soloCellFiltering`, which until STAR Suite v1.13.0 left the last
+barcode of the raw matrix out of the call; with a rank-based caller one
+barcode fewer can change more than one call. The rerun folders under `/tmp`
+are no longer on disk, so the counts below were not recomputed. See the
+[v1.13.0 release notes](RELEASE_NOTES_v1.13.0.md).
+
 ## Native STAR Reruns
 
 These reruns used the same historical raw matrix and differed only in the

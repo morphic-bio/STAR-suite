@@ -4,6 +4,19 @@
 
 Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction install and clear provenance.
 
+## Release v1.13.0 (2026-11-17)
+
+- Release tag: `v1.13.0`; notes: [release notes](RELEASE_NOTES_v1.13.0.md).
+- Debian source version: `1.13.0-1`; Ubuntu binaries:
+  `1.13.0-1~ubuntu22.04.1` and `1.13.0-1~ubuntu24.04.1`.
+- Two experimental add-ons for STAR-perturb, RNA only: split-pool barcoding
+  (`--soloSplitseqMode Fixed`) and the newer PIP chemistry
+  (`--soloPipseqMode Illumina`). Packages now carry
+  `share/star-suite/barcode_lists/` with the split-pool v3 lists and a PIP
+  tier set read off one public library.
+- `--runMode soloCellFiltering` offers every barcode of the raw matrix to the
+  cell caller, and `--soloCellFilter TopCells N` reports N barcodes plus ties.
+
 ## Patch Release v1.12.2 (2026-10-27)
 
 - Release tag: `v1.12.2`; notes: [release notes](RELEASE_NOTES_v1.12.2.md).
