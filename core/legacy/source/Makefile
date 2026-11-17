@@ -416,8 +416,9 @@ cbq-ordered-encoder : input/cbq_ordered_encoder.cpp
 .PHONY: cbq-star-adapter-harness
 cbq-star-adapter-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 cbq-star-adapter-harness : LDFLAGS := $(LDFLAGSextra) -ldl
-cbq-star-adapter-harness : CbqInputModule.o CbqStarAdapter.o SequenceFuns.o ClipMate_clip.o ClipCR4.o opal/opal.o input/cbq_star_adapter_harness.cpp
-	$(CXX) -o cbq_star_adapter_harness $(CXXFLAGS) input/cbq_star_adapter_harness.cpp CbqInputModule.o CbqStarAdapter.o SequenceFuns.o ClipMate_clip.o ClipCR4.o opal/opal.o $(LDFLAGS)
+# ClipMate_clip.o calls the PIP trimming functions of PipSeq.o.
+cbq-star-adapter-harness : CbqInputModule.o CbqStarAdapter.o SequenceFuns.o ClipMate_clip.o PipSeq.o ClipCR4.o opal/opal.o input/cbq_star_adapter_harness.cpp
+	$(CXX) -o cbq_star_adapter_harness $(CXXFLAGS) input/cbq_star_adapter_harness.cpp CbqInputModule.o CbqStarAdapter.o SequenceFuns.o ClipMate_clip.o PipSeq.o ClipCR4.o opal/opal.o $(LDFLAGS)
 
 # Standalone process_features adapter harness. This exercises the native
 # in-memory record API without routing CBQ through temporary FASTQ files.
