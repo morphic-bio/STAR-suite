@@ -1,6 +1,7 @@
 #include "ParametersClip.h"
 #include "Parameters.h"
 #include "SequenceFuns.h"
+#include "PipSeq.h"
 
 uint32 ClipMate::clip(uint &Lread, char *seqNum)
 {
@@ -15,7 +16,7 @@ uint32 ClipMate::clip(uint &Lread, char *seqNum)
 		if (Lread>N) {
 			Lread -= N; // for 3p this is all
 			clippedN += N;
-			if (type==0) {//5p
+			if (type==0 || type==20) {//5p
 				memmove(seqNum, seqNum+N, Lread);
 			};
 		} else {
@@ -47,6 +48,21 @@ uint32 ClipMate::clip(uint &Lread, char *seqNum)
                 Lread=Lread;
                 */
             };
+            case 20: {//5p: PIPseq, adapter placed by overlap
+                clippedAdN = pipseq::clip5pAdapter(seqNum, Lread, adSeqNum.data(), adSeqNum.size(), adMMp);
+                memmove(seqNum, seqNum+clippedAdN, Lread-clippedAdN);
+                break;
+            };
+            case 21: {//3p: PIPseq, polyA and/or polyG window; a remainder below the minimum length is removed entirely
+                clippedAdN = 0;
+                if (adSeq.find("polyA") != string::npos)
+                    clippedAdN = pipseq::clip3pHomopolymer(seqNum, Lread, 0, adMMp);
+                if (adSeq.find("polyG") != string::npos)
+                    clippedAdN = max(clippedAdN, pipseq::clip3pHomopolymer(seqNum, Lread, 2, adMMp));
+                if (Lread-clippedAdN < pipseq::minTrimmedLength)
+                    clippedAdN = Lread;
+                break;
+            };
             case 10: {//5p: CR4
                 clippedAdN = min( (uint32)clippedInfo, (uint32)Lread );
                 memmove(seqNum, seqNum+clippedAdN, Lread-clippedAdN);
@@ -65,7 +81,7 @@ uint32 ClipMate::clip(uint &Lread, char *seqNum)
     	if (Lread > NafterAd) {
     		Lread -= NafterAd;
     		clippedN += NafterAd;
-			if (type==0) {//5p. For 3p, no need to move sequence
+			if (type==0 || type==20) {//5p. For 3p, no need to move sequence
 				memmove(seqNum, seqNum+NafterAd, Lread);
 			};
     	} else {//0-length after clipping

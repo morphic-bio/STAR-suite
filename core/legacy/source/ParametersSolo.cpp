@@ -35,6 +35,8 @@ static bool ocmFlexBarcodeModeLocal(const Parameters& P) {
 void ParametersSolo::initialize(Parameters *pPin)
 {
     pP=pPin;
+    initializeSplitseq();
+    initializePipseq();
 
     {
         const string ocmMode = lowerStringLocal(pP->pfMulti.ocmMultiBarcodeMode);
@@ -146,7 +148,7 @@ void ParametersSolo::initialize(Parameters *pPin)
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////// Tag-table export (always enabled; legacy flag removed)
-    writeTagTableEnabled = true;
+    writeTagTableEnabled = !pipseqDecoder && !splitseqDecoder;
     writeTagTablePath = pP->outFileNamePrefix + "Aligned.out.cb_ub.bin";
     
     //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1273,6 +1275,10 @@ void ParametersSolo::initialize(Parameters *pPin)
     
     //initialize CB match to WL types
     init_CBmatchWL();
+    // Split rounds are already uniquely resolved against their own references.
+    // Their spool CB is a packed sequence, not an index into cbReadCountExact;
+    // do not require a whole-tuple exact anchor or index that array with it.
+    if (splitseqDecoder) CBmatchWL.oneExact = false;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////umiDedup
@@ -1722,7 +1728,7 @@ void ParametersSolo::initialize(Parameters *pPin)
 
     //////////////////////////////////////////////////////////////SAM attributes
     samAttrYes=false;
-    if ( (pP->outSAMattrPresent.CB || pP->outSAMattrPresent.UB) && type!=SoloTypes::CB_samTagOut) {
+    if ( (pP->outSAMattrPresent.CB || pP->outSAMattrPresent.UB) && type!=SoloTypes::CB_samTagOut && !pipseqDecoder) {//PIP writes CB with the alignment
         samAttrYes=true;
         // CB/UB tags require either:
         // - Sorted BAM output (tags injected after Solo counting)

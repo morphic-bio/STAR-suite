@@ -4,6 +4,174 @@ This file tracks where **test outputs and artifacts** should live and what is
 expected to be **untracked** in git. If you add a new smoke/regression test,
 update this file with its output location.
 
+## Public PIPseq v3 input download (2026-11-13)
+
+- Dataset: PRJNA1170298 / SRR30911721, wild-type mouse brain single-cell
+  RNA-seq using PIPseq T20 v3.0.
+- Location: `/storage/pipseq_v3/PRJNA1170298/SRR30911721/`.
+- `fastq/` holds the paired ENA FASTQs (25.45 GB compressed); incomplete
+  transfers use `.part` names. `barcodes/` holds the four Teichlab v3 tier
+  allowlists (96 sequences each, lengths 8/6/6/8).
+- `manifest.json` and `metadata/` retain source URLs, ENA metadata/MD5 values
+  and barcode SHA256 values. `download_fastqs.py`, `logs/`, and
+  `download_status.json` retain transfer execution and status.
+- `DOWNLOAD_COMPLETE.json` is written only after both FASTQs pass size and
+  ENA MD5 verification. Barcode matching against the reads is not yet validated.
+- Keep downloaded data and transfer artifacts outside git. This acquisition
+  does not run STAR or any analysis pipeline.
+
+## Public PIPseq v5 layout prefixes (2026-11-14)
+
+- Dataset: GSE291758 / GSM8841894, PIPseq V PBMC RNA-seq.
+- Location: `/storage/pipseq_v5/GSE291758/layout_prefixes/20261114T151005Z/`.
+- Contains the first 1 MiB of compressed SRR32666640 R1/R2 and SRR32666639 R1,
+  plus the first 10,000 complete FASTQ records extracted from each prefix.
+- Files ending `.fastq.gz.prefix` are intentionally incomplete gzip streams;
+  use the extracted `.first10000.fastq` files for the bounded fixture.
+- Complete archive files were not downloaded or MD5-verified. Data and
+  generated files remain untracked; this is not an alignment benchmark.
+
+## Split-pool v3 lists and the GSE352893 check (2026-11-16, 2026-11-17)
+
+- Bundled lists: `share/star-suite/barcode_lists/splitseq_v3/` (source files of
+  the kallisto-bustools documentation, `pachterlab/kb_docs` commit
+  `a4a4d985a4491264e02aa29807dff06f31e09fec`, BSD-2-Clause; generated lists;
+  `PROVENANCE.md` with checksums). Bundled PIP tier lists:
+  `share/star-suite/barcode_lists/pipseq_readderived/` (the lists of the next
+  section).
+- Reads: GEO GSE352893 / GSM10165610, run SRR41469160, fetched from SRA with
+  `prefetch` and written with `fasterq-dump --split-files --include-technical`:
+  `/storage/cc_perturb_seq/GSE352893/acquire_SRR41469160_20261116T190530Z/`
+  (`fastq/SRR41469160_1.fastq.gz`, cDNA read, 64 bases, SHA256 prefix
+  `5391c97b`; `fastq/SRR41469160_2.fastq.gz`, barcode read, 58 bases, SHA256
+  prefix `069ae022`; 97,458,666 pairs; full checksums in `MANIFEST.tsv`).
+- Deposited matrix: `/storage/benchmark_candidates_20261114/GSE352893/processed/GSE352893_iPSC_K562_mixed_integrated.h5mu`
+  (16,818 cells; its `uns/provenance_json` states the count limits applied).
+- Full-depth run of `--soloSplitseqMode Fixed` (branch build `f5ff7e2`,
+  index `/storage/autoindex_110_44/bulk_index`):
+  `/storage/cc_perturb_seq/GSE352893/star_full_20261116T214013Z/`; comparison
+  with the deposited matrix: `compare_published_v2_20261116T214844Z/`; reads
+  without linkers and their alignments: `linker_groups_2m_*`, `map_*`,
+  `linker_alignments_*` in the same directory.
+- Heads of other public libraries (first 8,000,000 bytes of each barcode-read
+  file from the ENA mirror) and their decode shares:
+  `/storage/cc_perturb_seq/parse_v3_public_peeks/`.
+- Keep read files and deposited files untracked.
+
+## Newer PIP barcode tier lists (2026-11-14, revised 2026-11-15)
+
+- The four tier lists used for the PIP checks are derived from public reads
+  alone with `scripts/make_pipseq_tier_lists.py`: the 96 most frequent
+  sequences at each tier position in the first 500,000 barcode reads of
+  GSE291758 / SRR32666640, among reads in which the three constant linkers
+  match exactly at one phase. No reference list enters the derivation.
+- Location: `/storage/cc_pip_native_real_validation/20261115T110445Z_pip_tiers_and_dragen_comparison/tiers_from_reads_500k_*/`
+  (`readderived_tier{1..4}.tsv`, per-tier read counts and `summary.json`).
+- Cross-check only: `/storage/pipseq_v5/GSE333448/dragen446_barcode_reference/20261114T152447Z/`
+  holds five public GEO `barcodes.tsv.gz` files (GSM9890436–GSM9890440, whose
+  sample metadata identifies DRAGEN 4.4.6 processing). The tier sequences in
+  those cell labels are the same 96 per tier. Barcode-label files only; no
+  FASTQs, BAMs or count matrices were downloaded for this. Keep deposited
+  files untracked.
+
+## Public PIPseq library with a deposited matrix: GSE295097 (2026-11-15)
+
+- Dataset: GSE295097 / GSM8942285 (organoid_Ctrl), BioProject PRJNA1253453,
+  run SRR33231853: 180,144,123 read pairs, 45 + 151 bases.
+- Location: `/storage/pipseq_v5/GSE295097/`.
+  - `fastq/SRR33231853_{1,2}.fastq.gz` from
+    `https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR332/053/SRR33231853/`, retrieved
+    2026-11-15; 4,364,631,954 and 13,291,753,035 bytes; MD5
+    `e1bdfdc610ce24e27a983c693c2da284` and `18204177b5027e4a74faf5a91c4cd782`,
+    as listed by ENA, verified. `DOWNLOAD_COMPLETE.json` is written after both
+    pass.
+  - `published/`: `<sample>.scRNA.filtered.{barcodes,features,matrix}` files of
+    the three GEO samples (GSM8942285–GSM8942287) from
+    `https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM8942nnn/<GSM>/suppl/`,
+    retrieved 2026-11-15. Control sample MD5: barcodes
+    `3267f0427e1fd62701b577143a34c748`, features
+    `2a092f56bfe0daf71922079bf90527c5`, matrix
+    `4b10197d01a81f62fed3bd56cb942dba`.
+- What is recorded about how the deposited matrices were made: the GEO sample
+  records name PIPseeker 3.3.3; the methods of the publication (PMC13529364)
+  name DRAGEN on BaseSpace; the file names follow the published DRAGEN
+  documentation; the cell labels are 28 bases, four tier sequences; the 40,429
+  features are exactly the GENCODE v44 genes that are not pseudogenes or small
+  RNAs. No software version is stated. Only filtered matrices are deposited;
+  SRA holds FASTQ files and no alignments.
+- `/storage/references_public/gencode_v44/gencode.v44.primary_assembly.annotation.gtf.gz`
+  from `https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_44/`,
+  MD5 `b182a9f3b134b9cc2da566a2b1692557` (matches `MD5SUMS`). Used to classify
+  genes, not for alignment.
+- Run outputs: `/storage/cc_pip_native_real_validation/20261115T110445Z_pip_tiers_and_dragen_comparison/`
+  (first full-depth run, comparison) and
+  `/storage/cc_pip_native_real_validation/20261115T142139Z_branch_changes_and_read_trace/`
+  (identity checks of the changed binary, full-depth runs with the mode's own
+  trimming, the tagged BAM, the read trace, and the master-against-branch
+  regression runs `regress_*`). Results are summarised in
+  `docs/PIPSEQ_RNA.md`. Removed on 2026-11-15 to free disk space, with their
+  commands, logs and receipts kept in place: the tagged BAM
+  (`ctrl_full_guide_ex50pas_bam_*/Aligned.out.bam`, 23.4 GB, about 22 minutes
+  to regenerate) and the cutadapt-trimmed reads of the first full-depth run
+  (`ctrl_full_trim_tso_*`, `ctrl_full_trim_polya_*`, 38.8 GB).
+  Dataset-specific scripts, commands and receipts are in
+  the private provenance repository under the host's provenance policy.
+- What is documented about the annotation (pages retrieved 2026-11-15): the
+  DRAGEN Single Cell RNA app guide
+  (`https://help.multiomics.illumina.com/dragen-single-cell-rna/run-set-up-in-bssh/manual-launch`)
+  gives GENCODE v44 as the default GTF of the built-in hg38 references and
+  says that with this kit the pseudogene, shortRNA and rRNA biotypes are
+  ignored; the DRAGEN product files page
+  (`https://support.illumina.com/sequencing/sequencing_software/dragen-bio-it-platform/product_files.html`)
+  describes the annotation files as the comprehensive GENCODE annotation on
+  the reference chromosomes only. No annotation file was taken from Illumina.
+- `/storage/references_public/gencode_v44/gencode.v44.annotation.gtf.gz` from
+  the same GENCODE release directory, MD5 `ee330cfe6d0654ba9b9cf434d5c1bfb1`
+  (matches `MD5SUMS`), 62,700 genes. Dropping the three classes as
+  `scripts/make_pipseq_reference_gtf.py --drop pseudogene,shortRNA,rRNA` does
+  leaves 40,429 genes, identical with version suffixes to the deposited
+  feature list.
+- PIP reference: `/storage/references_public/pipseq_gencode_v44/`. `genes.gtf`
+  is the tool's default output for that file (also without read-through
+  genes; 39,523 genes; SHA256
+  `257ab732d8395ab28b052c6fef5c5b954785b13a6692f883bd6926b321753c53`),
+  `report.json` its report, `index/` the STAR index (28 GB) built with the
+  branch binary at `008b981`, `--sjdbOverhang 100`, on the GRCh38
+  primary-assembly sequence already used for the other indexes
+  (`/storage/autoindex_110_44/bulk_index/cellranger_ref/genome.fa`).
+  `README.md` there repeats the commands.
+- Gene-list runs of 2026-11-15:
+  `/storage/cc_pip_native_real_validation/20261115T204650Z_annotation_documentation/`
+  (`ctrl_full_doclist_*` on the documented list, `ctrl_full_pipref_*` on the
+  reference, `gene_list_change_effect_three_lists_*` the side-by-side table).
+  The index of the documented list is in `index_documented_gene_list_*/index`
+  there (28 GB) and is not needed again.
+- Molecule-counting check of 2026-11-16:
+  `/storage/cc_pip_native_real_validation/20261116T095954Z_transcript_counting_recipe/`.
+  - `ctrl_full_pipref_ex50pas_bam_*`: the `GeneFull_Ex50pAS` run on the
+    reference repeated with an unsorted BAM (`NH HI AS nM CR CB UR GX GN sF`,
+    22 GB, 19 minutes, same binary). Its ledger and matrix are byte-identical
+    to `ctrl_full_pipref_genefull_ex50pas_*` of 2026-11-15
+    (`bam_run_equals_previous_run_*`).
+  - `fragments_from_bam_*`: the 122,362,778 counted reads of every barcode,
+    collapsed to 56,557,444 rows of cell, gene, BI, strand, contig, 5' base,
+    leftmost base and read count (four `.npy` files, 1.3 GB, with
+    `barcodes.txt` and `contigs.txt`). Any other counting rule can be tried on
+    this table without aligning again.
+  - `recount_recipe_*`: the documented recipe recomputed from that table and
+    compared with the mode's ledger (19,731,758 groups, all equal), the
+    points the documentation leaves open, and the comparison with the
+    deposited matrix. `entry_presence_*` and `above_ten_bins_vs_published_*`
+    are the same comparison from the ledger alone.
+  - Documentation read for the recipe, retrieved 2026-11-16: the transcript
+    counting sections of the DRAGEN 4.4, 4.5 and 4.6 guides
+    (`https://help.dragen.illumina.com/dragen-v4.6/product-guides/dragen-v4.6/dragen-single-cell-pipeline/dragen-scrna-illumina`
+    and the 4.5 and 4.4 pages), identical in the three versions, with the
+    worked example of their figure. The preprint they cite (bioRxiv
+    10.1101/2024.10.04.616561) describes an earlier counting method with an
+    integer correction factor; it was read and not used.
+- Keep all of this untracked.
+
 ## Spatial decoder hot-path equivalence (2026-10-26)
 
 - `make -C core/legacy/source test_SpatialR1DecoderHotpaths` builds
@@ -1992,3 +2160,34 @@ JSONs, `final_bridge_comparison.json`, `bucket_comparison.json` and
 `core/features/process_features/tests/test_fastq_discovery`. The test creates
 and removes temporary `pf-discovery-*` and `pf-triplets-*` directories. Build
 products and external validation logs are untracked.
+
+## PIPseq RNA implementation fixtures
+
+- `tests/pipseq_output_*/`: generated synthetic FASTQs, tier lists, small STAR
+  index, unit-test binaries, command receipts, BAM files and RNA count outputs
+  from `tests/test_pipseq_smoke.py` and `tests/test_pipseq_edges.py`. These
+  check implementation behaviour, not biological accuracy.
+- Test source: `core/legacy/test/test_pipseq.cpp` and
+  `tests/test_pipseq_smoke.py`. Build products and fixture outputs stay untracked.
+
+## SPLiT-seq RNA implementation fixtures
+
+- `tests/splitseq_output_*/`: synthetic FASTQs, per-round allowlists, small STAR
+  indexes, decoder test binaries, command receipts and raw/filtered MEX outputs.
+- `make -C core/legacy/source test_SplitSeq` builds `core/legacy/test/test_splitseq`
+  and writes its small allowlist fixtures to `core/legacy/test/test_splitseq_work/`.
+- Test source: `core/legacy/test/test_splitseq.cpp` and
+  `tests/test_splitseq_smoke.py`. These test implementation behavior; they do
+  not establish Parse agreement or biological cell-calling accuracy.
+
+## Native PIPseq and SPLiT-seq real-read development checks
+
+- `/storage/cc_pip_native_real_validation/<timestamp>/`: bounded public FASTQ
+  prefixes, paired subsamples, reference lists, decoder audit binaries,
+  flattened-input controls, MEX outputs and count comparisons.
+- Runs with a `_pip_trim` suffix retain cDNA preprocessing inputs and outputs
+  and a larger-prefix PIP counting check. Dataset-specific scripts, exact
+  commands, source snapshots and receipts are retained in the private research
+  provenance repository under the host's provenance policy.
+- These prefix checks qualify development behaviour. The matched comparison
+  for PIP is the GSE295097 entry above; there is none yet for split-seq.

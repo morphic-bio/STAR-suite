@@ -18,6 +18,9 @@ SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
     
     readInfoYes = pSolo.readInfoYes[featureType];
     readIndexYes = pSolo.readIndexYes[featureType];
+
+    if (pSolo.pipseqDecoder)
+        return; // PIP stores sparse BI/IMI groups, never ordinary UMI spools.
     
     if (pSolo.cbWLyes) {
         cbReadCount.resize(pSolo.cbWLsize,0);

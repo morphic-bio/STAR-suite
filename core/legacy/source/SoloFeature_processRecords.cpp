@@ -56,6 +56,11 @@ void SoloFeature::processRecords()
     if (pSolo.type==0)
         return;
 
+    if (pSolo.pipseqDecoder) {
+        countPipseq();
+        return;
+    }
+
     const auto processStart = std::chrono::steady_clock::now();
     time_t rawTime;
     time(&rawTime);
@@ -214,7 +219,12 @@ void SoloFeature::processRecords()
     time(&rawTime);
     P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Solo: cell filtering" <<endl;    
     const auto cellFilterStart = std::chrono::steady_clock::now();
+    if (pSolo.splitseqDecoder) filteredCells.reset(nCB);
     cellFiltering();
+    // The shared caller returns early when no cells pass. Emit a complete empty
+    // filtered MEX for this assay as well as the always-retained raw matrix.
+    if (pSolo.splitseqDecoder && pSolo.cellFilter.type[0] != "None" && filteredCells.nCells == 0)
+        outputResults(true, outputPrefixFiltered);
     P.inOut->logMain << "Solo timing: cellFiltering " << soloElapsedSeconds(cellFilterStart) << " s" << endl;
     
     //summary stats output

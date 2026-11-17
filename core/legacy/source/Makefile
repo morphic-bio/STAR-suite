@@ -194,7 +194,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	ParametersSolo.o FlexProbeHalfIndex.o FlexHashCacheStorage.o FlexProbePairKhash.o FlexHashScreen.o FlexHashCacheGenerate.o FlexPipeline.o SoloRead.o SoloRead_record.o \
 	SoloReadBarcode.o SoloReadBarcode_getCBandUMI.o SoloBarcode_extractBarcode.o \
 	SoloReadFeature.o SoloReadFeature_record.o SoloReadFeature_record_base.o flex/SoloReadFeature_record_flex.o SoloReadFeature_inputRecords.o \
-	Solo.o SoloFeature.o SoloFeature_outputResults.o SoloFeature_processRecords.o SoloFeature_prepareReadInfoOnly.o SoloReadInfoLoader.o SoloReadInfoSink.o \
+	Solo.o PipSeq.o ParametersSoloPipseq.o SoloFeature_countPipseq.o SplitSeq.o ParametersSoloSplitseq.o ParametersSolo_assayParameter.o SoloReadBarcode_segmentedAssays.o SoloFeature.o SoloFeature_outputResults.o SoloFeature_processRecords.o SoloFeature_prepareReadInfoOnly.o SoloReadInfoLoader.o SoloReadInfoSink.o \
 	PackedReadInfo.o InlineCBCorrection.o solo/CbCorrector.o solo/CbBayesianResolver.o GeneResolver.o \
 	ReadAlign_transformGenome.o Genome_transformGenome.o Transcript_convertGenomeCigar.o \
 	twoPassRunPass1.o samHeaders.o Genome_genomeLoad.o Genome_genomeOutLoad.o Transcript_transformGenome.o ReadAlign_outputSpliceGraphSAM.o \
@@ -589,6 +589,17 @@ test_MultiGeneUmiCr: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_MultiGeneUmiCr: MultiGeneUmiCr.o
 	$(CXX) $(CXXFLAGS) -I./ ../test/test_multi_gene_umi_cr.cpp MultiGeneUmiCr.o -o ../test/test_multi_gene_umi_cr
 	../test/test_multi_gene_umi_cr
+
+.PHONY: test_PipSeq
+test_PipSeq:
+	$(CXX) $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -I./ ../test/test_pipseq.cpp PipSeq.cpp -o ../test/test_pipseq
+	@pip_test_dir=$$(mktemp -d) || exit 1; ../test/test_pipseq "$$pip_test_dir"; result=$$?; rm -rf "$$pip_test_dir"; exit $$result
+
+# Writes its small allowlist fixtures to ../test/test_splitseq_work (untracked).
+.PHONY: test_SplitSeq
+test_SplitSeq:
+	$(CXX) $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -I./ ../test/test_splitseq.cpp SplitSeq.cpp -o ../test/test_splitseq
+	@mkdir -p ../test/test_splitseq_work && ../test/test_splitseq ../test/test_splitseq_work
 
 .PHONY: test_complex_barcode_whitelist_lookup
 test_complex_barcode_whitelist_lookup:

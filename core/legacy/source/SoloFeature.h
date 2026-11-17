@@ -113,6 +113,7 @@ public:
     ~SoloFeature();
     void clearLarge(); //clear large vectors
     void processRecords();
+    void countPipseq();
     void sumThreads();
     void countSmartSeq();
     void countCBgeneUMI();
