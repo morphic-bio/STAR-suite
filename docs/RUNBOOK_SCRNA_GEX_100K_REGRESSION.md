@@ -126,3 +126,6 @@ the current implementation uses the zero-based element at `topCells` as its
 inclusive UMI threshold. That pre-existing behavior is not changed here. The
 analytical test uses an explicit CellRanger2.2 threshold instead; a TopCells
 boundary/tie-policy change should be reviewed separately.
+
+Changed on 2026-11-17: `TopCells N` now takes the count of the N-th barcode as
+its inclusive threshold, so it reports N barcodes plus any tied with the N-th.

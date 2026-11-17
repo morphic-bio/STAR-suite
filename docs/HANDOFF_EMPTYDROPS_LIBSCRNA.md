@@ -33,6 +33,22 @@ Latest run (2026‑01‑31):
 - diff = 0
 - Simple filter parity: `nUMImax=25422`, `nUMImin=2542`, `nCellsSimple=1132`
 
+Note added 2026-11-17. In the outputs of that run the log of the "legacy" arm
+names the libscrna backend, so the run compared the libscrna backend with
+itself. Both arms are re-calls with `--runMode soloCellFiltering`, which at the
+time left the last barcode of the matrix out of the call. The script now asks
+both arms for the same knee (`--soloEmptyDropsLegacyKnee yes`) and fails
+unless each arm's `Log.out` names its backend. Result on the same matrix
+after the last-barcode fix:
+- legacy count = 1167
+- libscrna count = 1168
+- one barcode differs (GGGGTTAAGGTCTAGC, 948 UMIs: adjusted p 0.0214 in the
+  legacy backend, 0.0085 in libscrna), within the tolerance of one
+- Simple filter parity: `nUMImax=25422`, `nUMImin=2542`, `nCellsSimple=1132`
+
+The libscrna backend is the default and the reference; the script's header
+describes how the two backends adjust p-values.
+
 ### Flex EmptyDrops Parity (large MEX)
 
 **Script**: `tests/run_flexfilter_parity.sh`  
