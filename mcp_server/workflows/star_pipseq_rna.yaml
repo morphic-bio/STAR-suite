@@ -1,0 +1,243 @@
+# Public recipe: PIPseq RNA counting with --soloPipseqMode Illumina (docs/PIPSEQ_RNA.md).
+# Experimental add-on for STAR-perturb: RNA only, no guide reads.
+# The four tier allowlists have no defaults here, so they are always chosen
+# for the kit.
+id: star_pipseq_rna
+title: PIPseq RNA (experimental)
+summary: Single STAR alignReads with --soloPipseqMode Illumina for the newer PIP chemistry (four-tier cell barcode, three-base binning index, no UMI); trims the cDNA read, estimates transcripts per cell and gene and writes raw and EmptyDrops-filtered matrices.
+kind: star_cli
+entry_script: core/legacy/source/STAR
+supported_modes: [local]
+caveats:
+  - "Experimental add-on for STAR-perturb, new in STAR Suite 1.13.0. RNA only: guide reads and --pfMultiConfig are not part of the mode, and the older v3 chemistry with a 12-base UMI is not processed. The mode is written from public descriptions and states its own rule where they leave one open; it does not claim to reproduce another pipeline's output."
+  - Build the binary first (make -C core/legacy/source STAR).
+  - "Order is --readFilesIn cDNA_read barcode_read: R2 first, R1 second. For gzipped FASTQ files set read_files_command to zcat. Process each library in its own run: cell barcodes carry no library label."
+  - "Tier allowlists: four one-column files in read order, with sequences of 8, 6, 6 and 8 bases. A set read off one public library is bundled in share/star-suite/barcode_lists/pipseq_readderived/ (see PROVENANCE.md there); it is not a manufacturer's list and has not been checked on another kit version. scripts/make_pipseq_tier_lists.py reads the lists off the barcode reads of your own library."
+  - "Reference: any STAR index works. scripts/make_pipseq_reference_gtf.py writes the annotation meant for this mode from a GENCODE GTF (docs/PIPSEQ_RNA.md, Reference)."
+  - "The mode trims the cDNA read itself (solo_pipseq_trim Kit) and sets --alignIntronMax 25000; give it the raw FASTQ pair. Use solo_pipseq_trim None for reads trimmed beforehand."
+  - "This recipe writes no BAM. The mode can write one (docs/PIPSEQ_RNA.md, BAM output)."
+  - "The cell caller is STAR's EmptyDrops_CR on the estimated-transcript matrix, not tuned for this assay; None writes the raw matrix only."
+default_output_layout: Solo.out/<feature>/raw and filtered MEX folders, Pipseq.groups.tsv and Pipseq.metrics.tsv under out_file_name_prefix.
+
+scripts:
+  - role: entry
+    path: core/legacy/source/STAR
+    description: STAR binary
+    language: native
+  - role: helper
+    path: scripts/make_pipseq_tier_lists.py
+    description: Reads the four tier allowlists off the barcode reads of a library.
+    language: python
+  - role: helper
+    path: scripts/make_pipseq_reference_gtf.py
+    description: Writes the annotation for a reference of this mode from a GENCODE GTF.
+    language: python
+
+parameter_groups:
+  - name: core
+    title: Reads and reference
+    parameters:
+      - run_mode
+      - genome_dir
+      - read_files_cdna
+      - read_files_barcode
+      - read_files_command
+  - name: barcodes
+    title: Tier allowlists
+    description: Tier 1 to tier 4 in read order.
+    parameters:
+      - solo_pipseq_mode
+      - whitelist_tier1
+      - whitelist_tier2
+      - whitelist_tier3
+      - whitelist_tier4
+      - solo_pipseq_multi_match
+  - name: counting
+    title: Counting and output
+    parameters:
+      - solo_pipseq_trim
+      - solo_pipseq_ipm
+      - solo_strand
+      - solo_features
+      - solo_cell_filter
+      - out_sam_type
+      - out_file_name_prefix
+      - run_thread_n
+
+parameters:
+  - name: run_mode
+    cli_flag: --runMode
+    type: string
+    required: false
+    default: alignReads
+    description: STAR run mode.
+    category: core
+  - name: genome_dir
+    cli_flag: --genomeDir
+    type: directory
+    required: true
+    path_must_exist: true
+    description: STAR genome index directory.
+    category: core
+  - name: read_files_cdna
+    cli_flag: --readFilesIn
+    type: string
+    required: true
+    operand_group: readfiles_pipseq
+    description: cDNA read FASTQ, R2 (first argument to --readFilesIn); lanes of one library as a comma-separated list.
+    category: core
+  - name: read_files_barcode
+    cli_flag: --readFilesIn
+    type: string
+    required: true
+    operand_group: readfiles_pipseq
+    description: Barcode read FASTQ, R1 (second argument to --readFilesIn), lanes in the same order.
+    category: core
+  - name: read_files_command
+    cli_flag: --readFilesCommand
+    type: string
+    required: false
+    description: Command that writes the reads to standard output; zcat for gzipped FASTQ files. Leave empty for plain FASTQ.
+    category: core
+  - name: solo_pipseq_mode
+    cli_flag: --soloPipseqMode
+    type: enum
+    required: false
+    default: Illumina
+    choices: [Illumina]
+    description: Counting for the newer PIP chemistry (binning index, no UMI).
+    category: barcodes
+  - name: whitelist_tier1
+    cli_flag: --soloPipseqWhitelist
+    type: file
+    required: true
+    path_must_exist: true
+    operand_group: pipseq_whitelist
+    description: Tier-1 allowlist, 8-base sequences (for example share/star-suite/barcode_lists/pipseq_readderived/readderived_tier1.tsv).
+    category: barcodes
+  - name: whitelist_tier2
+    cli_flag: --soloPipseqWhitelist
+    type: file
+    required: true
+    path_must_exist: true
+    operand_group: pipseq_whitelist
+    description: Tier-2 allowlist, 6-base sequences.
+    category: barcodes
+  - name: whitelist_tier3
+    cli_flag: --soloPipseqWhitelist
+    type: file
+    required: true
+    path_must_exist: true
+    operand_group: pipseq_whitelist
+    description: Tier-3 allowlist, 6-base sequences.
+    category: barcodes
+  - name: whitelist_tier4
+    cli_flag: --soloPipseqWhitelist
+    type: file
+    required: true
+    path_must_exist: true
+    operand_group: pipseq_whitelist
+    description: Tier-4 allowlist, 8-base sequences.
+    category: barcodes
+  - name: solo_pipseq_multi_match
+    cli_flag: --soloPipseqMultiMatch
+    type: enum
+    required: false
+    default: Reject
+    choices: [Reject, FirstListed]
+    skip_when_default: true
+    description: A tier with no exact entry and several entries one substitution away. Reject drops the read and does not depend on the order of a list; FirstListed takes the first listed entry.
+    category: barcodes
+  - name: solo_pipseq_trim
+    cli_flag: --soloPipseqTrim
+    type: enum
+    required: false
+    default: Kit
+    choices: [Kit, None]
+    skip_when_default: true
+    description: Kit trims the cDNA read before alignment (one leading base, the template-switch and SMART PCR adapters at the 5' end, poly-A and poly-G at the 3' end). None leaves reads as they are, for reads trimmed beforehand.
+    category: counting
+  - name: solo_pipseq_ipm
+    cli_flag: --soloPipseqIPM
+    type: float
+    required: false
+    default: 0
+    skip_when_default: true
+    description: Fragments per molecule. 0 estimates it from the run; a value of 1 or more supplies it.
+    category: counting
+  - name: solo_strand
+    cli_flag: --soloStrand
+    type: enum
+    required: true
+    choices: [Forward, Reverse, Unstranded]
+    description: "Strand of the cDNA read relative to the transcript (required; no default so it is always chosen for the library). Forward for the libraries the mode was checked on."
+    category: counting
+  - name: solo_features
+    cli_flag: --soloFeatures
+    type: enum
+    required: false
+    default: GeneFull_Ex50pAS
+    choices: [Gene, GeneFull, GeneFull_Ex50pAS, GeneFull_ExonOverIntron]
+    description: Gene model for counting; the mode takes exactly one. GeneFull_Ex50pAS is the closest STAR rule to the documented gene assignment; the mode itself defaults to GeneFull.
+    category: counting
+  - name: solo_cell_filter
+    cli_flag: --soloCellFilter
+    type: enum
+    required: false
+    default: EmptyDrops_CR
+    choices: [EmptyDrops_CR, None]
+    description: Cell calling. EmptyDrops_CR writes filtered/ beside raw/; None writes the raw matrix only.
+    category: counting
+  - name: out_sam_type
+    cli_flag: --outSAMtype
+    type: enum
+    required: false
+    default: None
+    choices: [None]
+    description: This recipe writes no BAM.
+    category: counting
+  - name: out_file_name_prefix
+    cli_flag: --outFileNamePrefix
+    type: string
+    required: true
+    is_output_root: true
+    description: Output prefix (a fresh directory path ending with / is recommended).
+    category: counting
+  - name: run_thread_n
+    cli_flag: --runThreadN
+    type: int
+    required: false
+    default: 16
+    description: Thread count.
+    category: counting
+
+constraints:
+  - kind: positive
+    params: [run_thread_n]
+    message: Must be positive.
+  - kind: non_negative
+    params: [solo_pipseq_ipm]
+    message: Must be zero or positive.
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    - run_mode
+    - genome_dir
+    - read_files_cdna
+    - read_files_barcode
+    - read_files_command
+    - solo_pipseq_mode
+    - whitelist_tier1
+    - whitelist_tier2
+    - whitelist_tier3
+    - whitelist_tier4
+    - solo_pipseq_multi_match
+    - solo_pipseq_trim
+    - solo_pipseq_ipm
+    - solo_strand
+    - solo_features
+    - solo_cell_filter
+    - out_sam_type
+    - out_file_name_prefix
+    - run_thread_n

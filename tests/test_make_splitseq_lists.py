@@ -4,7 +4,8 @@ bundled v3 lists.
 
   python3 tests/test_make_splitseq_lists.py --out tests/splitseq_lists_output
 
---tool PATH runs the checks on another copy of the tool.
+--tool PATH runs the checks on another copy of the tool; --bundle PATH
+checks another copy of the bundled lists (an installed share/star-suite).
 """
 import argparse
 import hashlib
@@ -40,8 +41,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--tool", type=Path, default=TOOL)
+    ap.add_argument("--bundle", type=Path, default=BUNDLE, help="the splitseq_v3 folder of the bundled lists")
     args = ap.parse_args()
     run.tool = args.tool.resolve()
+    bundle = args.bundle.resolve()
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=False)
     onlist, replace = out / "onlist.txt", out / "replace.txt"
@@ -176,10 +179,10 @@ def main():
     # the bundled lists are what the tool writes from the bundled source files
     for wells in (96, 48):
         d = out / ("bundle_%d" % wells)
-        run(["--onlist", BUNDLE / "source" / "splitseqv3_barcodes.txt", "--replace", BUNDLE / "source" / "splitseqv3_replace.txt",
+        run(["--onlist", bundle / "source" / "splitseqv3_barcodes.txt", "--replace", bundle / "source" / "splitseqv3_replace.txt",
              "--wells", wells, "--out-dir", d])
         for name in ("round1.tsv", "round2.tsv", "round3.tsv", "crosswalk.tsv", "summary.json"):
-            assert (d / name).read_bytes() == (BUNDLE / ("%d_wells" % wells) / name).read_bytes(), (wells, name)
+            assert (d / name).read_bytes() == (bundle / ("%d_wells" % wells) / name).read_bytes(), (wells, name)
     print("PASS make_splitseq_lists: lists, wells, labels, column order, errors, reuse of an output directory, bundled files")
 
 

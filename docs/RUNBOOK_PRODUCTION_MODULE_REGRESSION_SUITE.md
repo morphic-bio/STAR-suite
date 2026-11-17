@@ -65,6 +65,11 @@ agent use:
 - `input-binseq / binseq-conversion-parity`
 - `core-yremove / yremove-fastq-se`
 - `feature-tools / assignbarcodes-regression`
+- `scrna-solo / cell-filtering-raw-matrix` (cell filtering of a raw matrix
+  and `TopCells`, generated matrices)
+- `perturb-addons / splitseq-pipseq-contract` (the experimental split-pool
+  and PIP RNA modes and their list tools, generated inputs and the bundled
+  barcode lists)
 
 Network-fetched contract cases validate external fixtures but are not part of
 the offline contract set:

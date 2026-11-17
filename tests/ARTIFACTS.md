@@ -31,6 +31,21 @@ update this file with its output location.
 - Complete archive files were not downloaded or MD5-verified. Data and
   generated files remain untracked; this is not an alignment benchmark.
 
+## Contract tests of the STAR-perturb add-ons and of cell filtering (2026-11-17)
+
+- `tests/run_perturb_addons_contract.sh` (split-pool and PIP RNA modes, their
+  list and reference tools) and `tests/run_solo_cell_filtering_contract.sh`
+  (`--runMode soloCellFiltering`, `TopCells`) generate their inputs and write
+  to `OUT_ROOT`, by default a fresh
+  `/tmp/star_suite_perturb_addons_contract_<UTC>_<pid>/` or
+  `/tmp/star_suite_solo_cell_filtering_contract_<UTC>_<pid>/`. Both are rows of
+  `tests/production_module_regression_manifest.tsv` and Tier A container
+  smokes. The recipe tests
+  (`mcp_server/tests/test_star_splitseq_pipseq_recipes.py`) write under
+  pytest's temporary directory.
+- `make -C core/legacy/source test_SplitSeq` writes its small allowlists to
+  `core/legacy/test/test_splitseq_work/` (untracked).
+
 ## Split-pool v3 lists and the GSE352893 check (2026-11-16, 2026-11-17)
 
 - Bundled lists: `share/star-suite/barcode_lists/splitseq_v3/` (source files of
