@@ -66,7 +66,8 @@ void SoloFeature::cellFiltering()
 
             uint32 nUMImax=0, nUMImin=0;
             if (pSolo.cellFilter.type[0]=="TopCells") {
-                nUMImin = nUMIperCBsorted[min(nCB-1,pSolo.cellFilter.topCells)];    
+                //count of the N-th cell (N>=1 is checked in ParametersSolo, nCB>=1 above): N cells are reported, and any cells tied with the N-th
+                nUMImin = nUMIperCBsorted[min(nCB,pSolo.cellFilter.topCells)-1];
             } else {//other filtering types require simple filtering first
                 //find robust max
                 uint32 maxind=int(round(pSolo.cellFilter.knee.nExpectedCells*(1.0-pSolo.cellFilter.knee.maxPercentile)));//cell number for robust max
