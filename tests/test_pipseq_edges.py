@@ -55,6 +55,11 @@ def main():
     ed = run("emptydrops", original_r2, original_r1, ["--soloCellFilter", "EmptyDrops_CR", "--runThreadN", "1"])
     assert (ed / "filtered/matrix.mtx").exists()
     assert (ed / "filtered/barcodes.tsv").read_text().splitlines() == ["ACGTACGTGACTGCCTAGCATGCATGCA"]
+    # EmptyDrops_CR is the mode's default: no --soloCellFilter gives the same call.
+    default = run("default_caller", original_r2, original_r1, ["--runThreadN", "1"])
+    for name in ("barcodes.tsv", "features.tsv", "matrix.mtx"):
+        assert (default / "filtered" / name).read_bytes() == (ed / "filtered" / name).read_bytes(), name
+    assert "[PIP effective] soloCellFilter = EmptyDrops_CR" in (default.parent.parent / "Log.out").read_text()
     # Shallow input with no assigned barcode should yield valid empty outputs.
     empty_r1, empty_r2 = args.out / "invalid_R1.fastq", args.out / "invalid_R2.fastq"
     sequence = original_r2.read_text().splitlines()[1]

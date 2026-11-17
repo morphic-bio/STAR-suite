@@ -56,7 +56,7 @@ void ParametersSolo::initializePipseq() {
     parameter("soloMultiMappers", "Unique", true);
     parameter("soloCellReadStats", "None", true);
     parameter("soloFeatures", "GeneFull", false);
-    parameter("soloCellFilter", "None", false);
+    parameter("soloCellFilter", "EmptyDrops_CR", false);
     if (featureIn.size() != 1 || (featureIn[0] != "Gene" && featureIn[0] != "GeneFull" &&
                                   featureIn[0] != "GeneFull_Ex50pAS" && featureIn[0] != "GeneFull_ExonOverIntron"))
         fail("requires exactly one --soloFeatures Gene, GeneFull, GeneFull_Ex50pAS or GeneFull_ExonOverIntron");

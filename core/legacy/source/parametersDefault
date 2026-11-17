@@ -1659,7 +1659,7 @@ soloSplitseqUMIposition      -
     string: zero-based offset_length for the UMI (length 1-16); standard STAR UMI counting. Coordinates must not overlap barcode rounds.
 
 soloPipseqMode               None
-    string: None or Illumina. Newer PIP RNA BI/IMI counting; requires R2 then R1 FASTQs. Sets --alignIntronMax 25000 unless given. BAM output may carry CR, CB, UR, sS, GX, GN and sF; UB is not defined.
+    string: None or Illumina. Newer PIP RNA BI/IMI counting; requires R2 then R1 FASTQs. Defaults to GeneFull and EmptyDrops_CR, and sets --alignIntronMax 25000, unless given. BAM output may carry CR, CB, UR, sS, GX, GN and sF; UB is not defined.
 
 soloPipseqWhitelist          -
     strings: four single-column tier allowlists in read order (8/6/6/8 bases); no Cartesian expansion. Each tier: exact match first, then one substitution.
