@@ -2,11 +2,12 @@
 
 STAR Suite updates the original STAR aligner by integrating four modules — STAR-core (with integrated TranscriptVB quantification), STAR-perturb, STAR-Flex, and STAR-SLAM — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (STAR Suite 1.9.4: **1.6–4.2x for bulk RNA-seq** against an external stepwise pipeline; against Cell Ranger 9.0.1, **3.9x for scRNA-seq**, **4.8–5.8x for Perturb-seq**, and **17–23x for Flex** from the delivered FASTQ, up to **42x** from CBQ input) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
-Current production release: **[STAR Suite v1.12.2](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.12.2)**. The suite release tag and
-source-packaging version are `v1.12.2` / `1.12.2-1`; `STAR --version` reports
-`1.12.2`. This patch makes spatial barcode decoding faster without changing
-decoded barcodes or output matrices; see the
-[release notes](docs/RELEASE_NOTES_v1.12.2.md).
+Current production release: **[STAR Suite v1.13.0](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.13.0)**. The suite release tag and
+source-packaging version are `v1.13.0` / `1.13.0-1`; `STAR --version` reports
+`1.13.0`. This release adds two experimental add-ons for STAR-perturb, RNA
+counting for split-pool barcoding and for the newer PIP chemistry, and
+corrects cell filtering of a raw matrix; see the
+[release notes](docs/RELEASE_NOTES_v1.13.0.md).
 The benchmark results below retain their measured release identities.
 GitHub Releases also provides Ubuntu 22.04- and 24.04-built `.deb`
 packages from the same source revision.
