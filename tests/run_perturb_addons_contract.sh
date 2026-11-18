@@ -33,8 +33,10 @@ step() {
 
 cd "$ROOT_DIR"
 step splitseq_smoke python3 tests/test_splitseq_smoke.py --star "$STAR_BIN" --out "${OUT_ROOT}/splitseq_smoke"
+step splitseq_rounds python3 tests/test_splitseq_rounds.py --star "$STAR_BIN" --out "${OUT_ROOT}/splitseq_rounds"
 step pipseq_smoke python3 tests/test_pipseq_smoke.py --star "$STAR_BIN" --out "${OUT_ROOT}/pipseq_smoke"
 step pipseq_edges python3 tests/test_pipseq_edges.py --star "$STAR_BIN" --fixture "${OUT_ROOT}/pipseq_smoke" --out "${OUT_ROOT}/pipseq_edges"
 step pipseq_reference_gtf python3 tests/test_make_pipseq_reference_gtf.py --out "${OUT_ROOT}/pipseq_reference_gtf"
+step pipseq_tier_lists python3 tests/test_make_pipseq_tier_lists.py --out "${OUT_ROOT}/pipseq_tier_lists"
 step splitseq_lists python3 tests/test_make_splitseq_lists.py --bundle "${SHARE}/barcode_lists/splitseq_v3" --out "${OUT_ROOT}/splitseq_lists"
 echo "PASS: perturb add-on contract tests (${OUT_ROOT})"

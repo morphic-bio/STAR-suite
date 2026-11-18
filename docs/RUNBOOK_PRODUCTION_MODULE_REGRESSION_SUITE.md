@@ -84,6 +84,12 @@ developer smoke unless requested:
 - `feature-tools / pf-dynamic-permit-100k`
 - `flex / flex-hash-screen-100k`
 - `slam / slam-pe-100k`
+- `perturb-addons / splitseq-gse352893-100k` and
+  `perturb-addons / pipseq-gse295097-100k` (the experimental split-pool and
+  PIP RNA modes on the first 100,000 read pairs of one public library each,
+  with the packaged barcode lists, against
+  `tests/fixtures/perturb_addons_100k_golden.json`; fixtures from
+  `tests/setup_perturb_addons_100k_fixture.py`)
 
 The manifest is the source of truth for required fixture paths, tools, and
 per-case environment fallbacks. If a path moves, update the manifest rather than

@@ -141,10 +141,21 @@ no external data). These cover correction in multiple rounds, a single
 non-ACGT base, ambiguous and invalid barcodes, replacement aliases, 24-base
 cell IDs, ordinary UMI collapse, default EmptyDrops, empty results, thread
 consistency and exon-priority gene assignment.
+Two and four rounds: `tests/test_splitseq_rounds.py` runs both ends of the
+range from FASTQ to matrix, the four-round layout with the largest cell
+barcode the mode allows (31 bases), and checks that 32 bases and five rounds
+are refused.
 List tool: `tests/test_make_splitseq_lists.py` (generated lists, well
 restriction, labels, errors, an output directory used again, a replacement
 of its files that fails part way, and the bundled lists against their source
 files).
+`tests/run_perturb_addons_contract.sh` runs these Python tests together.
+Public reads: `tests/run_perturb_addons_100k_regression.sh` runs the mode on
+the first 100,000 read pairs of SRR41469160 (GSE352893) with the bundled
+`48_wells` lists and compares mapping counts, the raw and filtered matrices
+and every row of `Splitseq.metrics.tsv` with
+`tests/fixtures/perturb_addons_100k_golden.json`. The fixture is made by
+`tests/setup_perturb_addons_100k_fixture.py` and is not tracked.
 
 ### Public libraries
 

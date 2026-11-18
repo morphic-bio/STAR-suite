@@ -97,6 +97,10 @@ The independently built core binaries also run `tests/test_scrna_gex_counts.py`:
 exact synthetic counts for default Solo and every UMI deduplication method,
 Gene/GeneFull intron behavior, poly-G-tailed gzip reads, and filtered-cell
 identity. The same check runs in Tier A against the packaged binary.
+The `core` job then runs `mcp_server/tests/test_star_splitseq_pipseq_recipes.py`
+with `STAR_RECIPE_E2E=required`: the two add-on recipes are rendered and their
+commands run with the independently built binary on generated reads that use
+the packaged barcode lists.
 The original Solo smoke also requires exactly two molecules from three known
 reads, in addition to BAM validity; a header-only matrix no longer passes.
 
@@ -287,6 +291,10 @@ It checks the portable configuration, relocated installed payload, required
 Multiome inputs, runtime capabilities, job serialization/cancellation, and the
 Chromium form/run/reload flow using tiny fixture processes. No biological
 benchmark is run. Browser evidence is uploaded as a workflow artifact.
+It also runs the contract part of the add-on recipe tests
+(`mcp_server/tests/test_star_splitseq_pipseq_recipes.py`: registration,
+required fields, rendered commands, shapes of the packaged lists); their
+end-to-end part needs a STAR binary and runs in the `core` partial-build job.
 
 `release.yml` requires both `partial-builds` and `launchpad-checks` before
 `build-release-artifacts`, so failing UI tests block tarball and Debian builds

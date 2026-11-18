@@ -327,6 +327,17 @@ chemistry, guide reads.
 - `tests/test_make_pipseq_reference_gtf.py`: the reference tool on a small
   generated GTF: each dropped class, read-through genes and transcripts, the
   documented list, both attribute names and the features-file check.
+- `tests/test_make_pipseq_tier_lists.py`: the tier-list tool on generated
+  barcode reads with known tier words: the words come back whatever the
+  order of the reads, from gzipped and plain FASTQ; the counts in
+  `summary.json`, `--compare`, and input with no usable read.
+- `tests/run_perturb_addons_contract.sh` runs these Python tests together.
+- `tests/run_perturb_addons_100k_regression.sh`: the mode on the first 100,000
+  read pairs of SRR33231853 (GSE295097) with the bundled tier lists and
+  `GeneFull_Ex50pAS`; mapping counts, the raw and filtered matrices, every row
+  of `Pipseq.metrics.tsv` and the digest of `Pipseq.groups.tsv` are compared
+  with `tests/fixtures/perturb_addons_100k_golden.json`. The fixture is made by
+  `tests/setup_perturb_addons_100k_fixture.py` and is not tracked.
 
 ```bash
 python3 tests/test_pipseq_smoke.py --star core/legacy/source/STAR --out tests/pipseq_output_example

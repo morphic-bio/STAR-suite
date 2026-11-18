@@ -4,7 +4,8 @@ Contract: schema load -> validate -> render -> assert the argv.
 End to end: the rendered command is run with a built STAR binary on a small
 generated genome and generated reads that use the bundled allowlists, and the
 count matrices are checked. The end-to-end tests are skipped when no STAR
-binary is found (STAR_BIN, or core/legacy/source/STAR of this repository).
+binary is found (STAR_BIN, or core/legacy/source/STAR of this repository);
+with STAR_RECIPE_E2E=required a missing binary is an error instead.
 No external data is needed.
 """
 
@@ -32,6 +33,8 @@ LISTS = REPO_ROOT / "share" / "star-suite" / "barcode_lists"
 SPLITSEQ_LISTS = LISTS / "splitseq_v3" / "48_wells"
 PIPSEQ_LISTS = LISTS / "pipseq_readderived"
 STAR = Path(os.environ.get("STAR_BIN", REPO_ROOT / "core" / "legacy" / "source" / "STAR"))
+if os.environ.get("STAR_RECIPE_E2E") == "required" and not STAR.is_file():
+    raise RuntimeError(f"STAR_RECIPE_E2E=required, but there is no STAR binary at {STAR}")
 needs_star = pytest.mark.skipif(not STAR.is_file(), reason="no STAR binary (set STAR_BIN or build core/legacy/source/STAR)")
 
 

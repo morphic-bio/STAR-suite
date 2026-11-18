@@ -27,7 +27,7 @@ jobs:
       - name: Validate bundled recipes and provenance
         run: python scripts/release/validate_official_snapshots.py
       - name: Test relocated install, input validation and browser execution
-        run: python -m pytest -q mcp_server/tests/test_launchpad_portability.py mcp_server/tests/test_launchpad.py mcp_server/tests/test_workflow_validation.py mcp_server/tests/test_workflow_render.py mcp_server/tests/test_config.py
+        run: python -m pytest -q mcp_server/tests/test_launchpad_portability.py mcp_server/tests/test_launchpad.py mcp_server/tests/test_workflow_validation.py mcp_server/tests/test_workflow_render.py mcp_server/tests/test_config.py mcp_server/tests/test_star_splitseq_pipseq_recipes.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

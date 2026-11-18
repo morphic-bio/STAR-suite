@@ -56,3 +56,16 @@ jobs:
         env:
           STAR_BIN: ${{ runner.temp }}/partial-build/${{ matrix.target }}/source/core/legacy/source/STAR
         run: python3 tests/test_scrna_gex_counts.py
+      - name: Set up Python for the recipe tests
+        if: matrix.target == 'core'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run the split-pool and PIP recipes end to end with the independently built core
+        if: matrix.target == 'core'
+        env:
+          STAR_BIN: ${{ runner.temp }}/partial-build/core/source/core/legacy/source/STAR
+          STAR_RECIPE_E2E: required
+        run: |
+          python -m pip install -r mcp_server/requirements.txt
+          python -m pytest -q mcp_server/tests/test_star_splitseq_pipseq_recipes.py

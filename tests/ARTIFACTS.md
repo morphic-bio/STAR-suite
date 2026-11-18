@@ -46,6 +46,20 @@ update this file with its output location.
 - Some manifest rows write under `/tmp` (`/tmp/slam_*`,
   `/tmp/pf_dynamic_permit_100k_*`, `/tmp/star_cellbender_cuda_*`).
 
+## 100K fixtures of the STAR-perturb add-on regression (2026-11-18)
+
+- `/storage/downsampled_100K/splitseq_gse352893/` and
+  `/storage/downsampled_100K/pipseq_gse295097/`: the first 100,000 read pairs
+  of SRR41469160 (GSE352893) and of SRR33231853 (GSE295097), written by
+  `tests/setup_perturb_addons_100k_fixture.py` as `cDNA.fastq.gz` and
+  `barcode.fastq.gz` with a `manifest.json` that holds their SHA256
+  (source files: the next two sections). About 9 MB and 8 MB; untracked.
+- `tests/run_perturb_addons_100k_regression.sh` reads them with
+  `/storage/autoindex_110_44/bulk_index` and the packaged lists and compares
+  with `tests/fixtures/perturb_addons_100k_golden.json` (recorded with a build
+  of the v1.13.0 source, 8 threads). Outputs go to `OUT_ROOT`, by default a
+  fresh `/tmp/star-perturb-addons-100k-*`.
+
 ## Contract tests of the STAR-perturb add-ons and of cell filtering (2026-11-17)
 
 - `tests/run_perturb_addons_contract.sh` (split-pool and PIP RNA modes, their

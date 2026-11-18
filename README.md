@@ -584,9 +584,11 @@ BAM output in the split-pool mode; the older PIP chemistry with a 12-base UMI.
 
 Tests: `make -C core/legacy/source test_SplitSeq test_PipSeq`,
 `tests/run_perturb_addons_contract.sh` (both modes from FASTQ to matrices on
-generated inputs, and the list and reference tools) and
+generated inputs, and the list and reference tools),
 `mcp_server/tests/test_star_splitseq_pipseq_recipes.py` (the recipes, run on
-generated reads with the packaged lists).
+generated reads with the packaged lists) and
+`tests/run_perturb_addons_100k_regression.sh` (each mode on the first 100,000
+read pairs of a public library, against pinned matrices and metrics).
 
 ### OCM scRNA-seq
 
