@@ -46,7 +46,6 @@ void ParametersSolo::initializeSplitseq() {
     parameter("soloInlineCBCorrection", "no", true);
     parameter("soloSkipProcessing", "no", true);
     parameter("soloWriteKeysBin", "no", true);
-    parameter("soloCrMultimapRescue", "no", true);
     parameter("soloCellReadStats", "None", true);
     parameter("soloUMICorrection", "none", true); // Keep standard soloUMIdedup; no optional postprocessor.
     parameter("soloMultiMappers", "Unique", false);
@@ -55,6 +54,9 @@ void ParametersSolo::initializeSplitseq() {
     if (featureIn.size() != 1 || (featureIn[0] != "Gene" && featureIn[0] != "GeneFull" &&
                                   featureIn[0] != "GeneFull_Ex50pAS" && featureIn[0] != "GeneFull_ExonOverIntron"))
         fail("requires exactly one --soloFeatures Gene, GeneFull, GeneFull_Ex50pAS or GeneFull_ExonOverIntron");
+    // The shared GEX resolver uses the GEX feature to select automatic intronic fallback.
+    parameter("soloCrGexFeature", featureIn.front() == "Gene" ? "Gene" : "GeneFull", false);
+    parameter("soloCrMultimapRescue", "yes", false);
     cbWLsize = 0;
     for (size_t i = 0; i < splitseqDecoder->regions().size(); ++i)
         pP->inOut->logMain << "[SPLIT] round " << i + 1 << " entries=" << splitseqDecoder->tierSize(i) << '\n';

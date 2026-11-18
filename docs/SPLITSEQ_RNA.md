@@ -6,6 +6,15 @@ UMI, then uses ordinary STAR alignment and UMI counting. It defaults to
 The ordinary `soloUMIdedup` default (`1MM_All`) remains in effect; explicit
 standard UMI deduplication/filtering options remain available.
 
+Fixed mode uses the shared STAR Suite GEX resolver (`--soloCrMultimapRescue yes`).
+With its default evidence policy, one countable exonic alignment wins across
+genomic loci. With an intron-inclusive feature, one countable intronic alignment
+can win when there are no countable exonic alignments. On a single alignment
+overlapping several gene bodies, `GeneFull` gives transcript-concordant exons
+priority. The default `--soloMultiMappers Unique` counts reads resolved to one
+gene before UMI collapse. For the v1.13.0 split-pool behavior, specify
+`--soloCrMultimapRescue no`.
+
 ## Invocation
 
 Supply a layout and allowlists for the actual library. Coordinates below are
@@ -140,7 +149,7 @@ FASTQ-to-MEX checks: `tests/test_splitseq_smoke.py` (small generated genome;
 no external data). These cover correction in multiple rounds, a single
 non-ACGT base, ambiguous and invalid barcodes, replacement aliases, 24-base
 cell IDs, ordinary UMI collapse, default EmptyDrops, empty results, thread
-consistency and exon-priority gene assignment.
+consistency, nested and shared exons, and genomic multimapper rescue.
 Two and four rounds: `tests/test_splitseq_rounds.py` runs both ends of the
 range from FASTQ to matrix, the four-round layout with the largest cell
 barcode the mode allows (31 bases), and checks that 32 bases and five rounds
@@ -152,7 +161,7 @@ files).
 `tests/run_perturb_addons_contract.sh` runs these Python tests together.
 Public reads: `tests/run_perturb_addons_100k_regression.sh` runs the mode on
 the first 100,000 read pairs of SRR41469160 (GSE352893) with the bundled
-`48_wells` lists and compares mapping counts, the raw and filtered matrices
+`48_wells` lists and the v1.13.0 rescue-off setting. It compares mapping counts, the raw and filtered matrices
 and every row of `Splitseq.metrics.tsv` with
 `tests/fixtures/perturb_addons_100k_golden.json`. The fixture is made by
 `tests/setup_perturb_addons_100k_fixture.py` and is not tracked.
@@ -168,7 +177,7 @@ adds five matrix entries.
 
 One public v3 library at full depth: GEO GSE352893, run SRR41469160
 (97,458,666 read pairs, 48 round-1 wells), with the bundled `48_wells` lists,
-the mode's defaults and a GENCODE v44 index with 38,606 genes; 5.5 minutes on
+the v1.13.0 defaults and a GENCODE v44 index with 38,606 genes; 5.5 minutes on
 16 threads, 31 GB. The deposited matrix
 (`GSE352893_iPSC_K562_mixed_integrated.h5mu`, 16,818 cells, named by well
 indices, filtered to fewer than 5,000 counts per cell) comes from the

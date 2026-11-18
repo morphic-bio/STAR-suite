@@ -4,6 +4,12 @@
 
 Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction install and clear provenance.
 
+## Release v1.13.1 (2026-11-18)
+
+Tag `v1.13.1` and Debian source version `1.13.1-1` include the shared GEX
+transcript lookup fix. Split-pool RNA uses GEX rescue by default. Existing
+compatible genome indexes can be reused. [Release notes](RELEASE_NOTES_v1.13.1.md).
+
 ## Release v1.13.0 (2026-11-17)
 
 - Release tag: `v1.13.0`; notes: [release notes](RELEASE_NOTES_v1.13.0.md).

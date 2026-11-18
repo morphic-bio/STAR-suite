@@ -1647,7 +1647,7 @@ waspOutputMode              None
 
 ### STARsolo (single cell RNA-seq) parameters
 soloSplitseqMode             None
-    string: None or Fixed. Split-pool RNA with explicit fixed barcode/UMI coordinates; cDNA FASTQ first, barcode FASTQ last; outSAMtype None. Defaults to GeneFull and EmptyDrops_CR.
+    string: None or Fixed. Split-pool RNA with explicit fixed barcode/UMI coordinates; cDNA FASTQ first, barcode FASTQ last; outSAMtype None. Fixed defaults to GeneFull, soloCrMultimapRescue yes, soloMultiMappers Unique and EmptyDrops_CR. Set soloCrMultimapRescue no for the v1.13.0 split-pool policy.
 
 soloSplitseqWhitelist        -
     strings: 2-4 per-round allowlists in cell-ID order. Rows contain observed ACGT sequence and optional same-length canonical replacement; correction is exact then unique Hamming-1 per round (one non-ACGT base counts as the substitution).
