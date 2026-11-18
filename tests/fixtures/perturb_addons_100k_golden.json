@@ -1,0 +1,150 @@
+{
+  "schema": "perturb-addons-100k-regression-v1",
+  "binary_sha256": "e8bc82a717d333222ffc7188967134c80b58c1ebc3b2ff0ddcf7f7479cc98a77",
+  "version": "1.13.0",
+  "source_revision": "7bf2189b983f5c53ca18d2bd4c756dfca1d4f5cf",
+  "reference_metadata": {
+    "genomeParameters.txt": "8b4b8c2255f2e8eab40cdd87dcae2dec3937309ec5d76b0ceeff96e6311d213a",
+    "chrNameLength.txt": "d525ee20551f34768f4017c7a779a3f3c7b947dacdea27838a5776508834b306",
+    "geneInfo.tab": "40f6ac3112cdb0c36ccef1543eb40c075904f02efc2aae33644f1d90424a6e08",
+    "exonInfo.tab": "2d4e2260991cd97219776fe89130a262dac70e87a6b61ea428e21d13223289bd"
+  },
+  "profiles": {
+    "splitseq": {
+      "inputs": {
+        "dataset": "GSE352893",
+        "run": "SRR41469160",
+        "read_pairs": 100000,
+        "cdna_sha256": "d6c58db8938693461cbd576eb7877e57132dee8e4987318275cd8bfa09d0e389",
+        "barcode_sha256": "9f7d37e8f791ba9b17ab6279e251e16a08f1043e5969608efdcf43001d888dd9",
+        "lists_sha256": {
+          "splitseq_v3/48_wells/round1.tsv": "761c5071c0f1651966fd7350106e255b141b9edbadb080c74f7d48bc5030f4c8",
+          "splitseq_v3/48_wells/round2.tsv": "346ecc6bf50e72c91e0ec115ca22918abbfa8d3dae7be0dab9e602a1564de199",
+          "splitseq_v3/48_wells/round3.tsv": "35e18a9c0b63befe55320c25384232cecabbed7211a56454f6d77eef5e192b34"
+        }
+      },
+      "qc": {
+        "Number of input reads": 100000,
+        "Uniquely mapped reads number": 59309,
+        "Number of reads mapped to multiple loci": 27433,
+        "Number of reads mapped to too many loci": 539
+      },
+      "matrices": {
+        "raw": {
+          "genes": 38606,
+          "barcodes": 15032,
+          "nnz": 30054,
+          "counts": 30069,
+          "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+          "barcodes_sha256": "aebbda65707cfa7595fff9952fe3fb4f61e64d893edf3c1d1c64bc422b7b8fa5",
+          "counts_sha256": "aadaafb8f31a2859481e8715dc1190c019c2af231beb4ef121dcf5eca0bde778"
+        },
+        "filtered": {
+          "genes": 38606,
+          "barcodes": 15032,
+          "nnz": 30054,
+          "counts": 30069,
+          "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+          "barcodes_sha256": "aebbda65707cfa7595fff9952fe3fb4f61e64d893edf3c1d1c64bc422b7b8fa5",
+          "counts_sha256": "aadaafb8f31a2859481e8715dc1190c019c2af231beb4ef121dcf5eca0bde778"
+        }
+      },
+      "metrics": {
+        "metric": "value",
+        "reads_total": "100000",
+        "barcode_exact": "60674",
+        "barcode_corrected": "4477",
+        "read_too_short": "0",
+        "barcode_non_acgt": "0",
+        "barcode_no_match": "34511",
+        "barcode_ambiguous": "337",
+        "umi_non_acgt": "0",
+        "umi_homopolymer": "1",
+        "round1_corrected": "2432",
+        "round2_corrected": "1241",
+        "round3_corrected": "1365",
+        "round4_corrected": "0"
+      }
+    },
+    "pipseq": {
+      "inputs": {
+        "dataset": "GSE295097",
+        "run": "SRR33231853",
+        "read_pairs": 100000,
+        "cdna_sha256": "c3476fee2be3dde905e1a26ff41b07599f310719689640f560d4fbaca38261ed",
+        "barcode_sha256": "3cff2fd2bda9057dea9775a12756a5f6254758152f65f5b4ce05ce4526525426",
+        "lists_sha256": {
+          "pipseq_readderived/readderived_tier1.tsv": "15c54f6fc2e0538c473c5c27fbb6584476f65912792d8b7fcbed629a96be38a5",
+          "pipseq_readderived/readderived_tier2.tsv": "6d7cce1aeae0f88ee624b53522cebdc5533e3b0ccdb3ce6675ff3a492858c3f4",
+          "pipseq_readderived/readderived_tier3.tsv": "7d1ff6846475bb5c61b7b4eeeae35bb66a247725519f1a68f66c334753ab75a0",
+          "pipseq_readderived/readderived_tier4.tsv": "c65bb07d2dbd80cd5b82cb294e3bbadc793587a4f2df93e66aa94ff780018514"
+        }
+      },
+      "qc": {
+        "Number of input reads": 100000,
+        "Uniquely mapped reads number": 81512,
+        "Number of reads mapped to multiple loci": 10550,
+        "Number of reads mapped to too many loci": 365
+      },
+      "matrices": {
+        "raw": {
+          "genes": 38606,
+          "barcodes": 14253,
+          "nnz": 47191,
+          "counts": 47557,
+          "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+          "barcodes_sha256": "4c1ab48fea7da936d61f2ca8cc5e6e8baef4f1926230ee9d02f470da8135f661",
+          "counts_sha256": "b9605f67db550d3b293bbbbd8aa7bdb6862d0140ef8a0d17123bd9e990a58dc9"
+        },
+        "filtered": {
+          "genes": 38606,
+          "barcodes": 4791,
+          "nnz": 34791,
+          "counts": 35125,
+          "features_sha256": "a43b88e9ab0b251f30ee794d3809b0ea94603f4cd2336fd146a8bb1a5307b440",
+          "barcodes_sha256": "360d8e943e338965e106ba0c29c3c17e59e2121e623f80811ea12a1548877f45",
+          "counts_sha256": "0094c39cd0a0be21246a750eabc52dbfbf69fe4b6a335c16863182df01fdc3e0"
+        }
+      },
+      "metrics": {
+        "metric": "value",
+        "mode": "Illumina",
+        "count_units": "estimated_transcripts",
+        "imi_policy": "strand_aware_aligned_5prime_base",
+        "phase_tie_policy": "reject",
+        "barcode_correction": "exact_then_one_substitution_per_tier",
+        "barcode_multi_match": "reject",
+        "cdna_trim": "kit",
+        "calibration_population": "all_assigned_cell_gene_groups_before_cell_filtering",
+        "ipm_source": "estimated",
+        "ipm_raw": "0.968245784",
+        "ipm_effective": "1",
+        "ipm_calibration_groups": "1",
+        "ipm_floor_applied": "1",
+        "observed_barcodes_with_counts": "14253",
+        "unique_bi_imi": "47638",
+        "estimated_transcripts": "47557",
+        "reads_total": "100000",
+        "barcode_exact": "91003",
+        "barcode_corrected": "2084",
+        "barcode_invalid": "0",
+        "barcode_nonmatch": "5721",
+        "barcode_phase_tie": "980",
+        "bi_invalid_with_valid_barcode": "0",
+        "barcode_ambiguous": "212",
+        "reads_rejected_barcode": "6913",
+        "reads_rejected_bi": "0",
+        "reads_unmapped": "5768",
+        "reads_multimapped": "9939",
+        "reads_no_unique_gene": "11499",
+        "reads_counted": "65881"
+      },
+      "groups_sha256": "793a883f44059b98616e9182aa1ffa805a7b87526f138e6e99c3e9253819e6c2"
+    }
+  },
+  "baseline_provenance": {
+    "date": "2026-11-18",
+    "basis": "Recorded with a build of the v1.13.0 source (master 7bf2189; no STAR source file differs from tag v1.13.0), 8 threads, genome index of the PBMC 100K regression. The full-depth runs of the same two libraries with this source equal the pre-merge runs byte for byte (docs/RELEASE_NOTES_v1.13.0.md, Validation).",
+    "fixtures": "tests/setup_perturb_addons_100k_fixture.py: the first 100,000 read pairs of SRR41469160 (GSE352893) and of SRR33231853 (GSE295097)"
+  }
+}
