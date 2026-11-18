@@ -2,16 +2,20 @@
 """Tier allowlists for --soloPipseqMode, derived from the barcode reads of a
 library.
 
-The four tier lists are not bundled with STAR Suite. This tool reads them off
-the data: a read is used when exactly one phase (0-3 leading bases) puts the
-three constant linkers at their positions with no mismatch and all four tier
-words are A/C/G/T; the words at each tier position are then ranked by read
-count and the most frequent ones (96 by default) are written. No reference
-list selects reads or sequences. Lists given with --compare are only compared
-with the result afterwards.
+This tool reads the four tier lists off the data: a read is used when exactly
+one phase (0-3 leading bases) puts the three constant linkers at their
+positions with no mismatch and all four tier words are A/C/G/T; the words at
+each tier position are then ranked by read count and the most frequent ones
+(96 by default) are written. No reference list selects reads or sequences.
+Lists given with --compare are only compared with the result afterwards. (A
+set made this way from one public library is bundled in
+share/star-suite/barcode_lists/pipseq_readderived/.)
 
   make_pipseq_tier_lists.py --barcode-fastq R1.fastq.gz --out-dir DIR
       [--top 96] [--compare LABEL=tier1,tier2,tier3,tier4 ...]
+
+The barcode FASTQ may be gzipped or plain. When no read can be used, the tool
+stops with a message and writes nothing.
 
 Output: readderived_tier{1..4}.tsv (pass these to --soloPipseqWhitelist in
 this order), tier{1..4}.counts.tsv and summary.json. Check in summary.json
@@ -36,6 +40,11 @@ def sha256(path):
 def hamming(a, b):
     return sum(x != y for x, y in zip(a, b))
 
+def open_reads(path):
+    with open(path, "rb") as f:
+        gz = f.read(2) == b"\x1f\x8b"
+    return gzip.open(path, "rt") if gz else open(path, "rt")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--barcode-fastq", required=True)
@@ -43,11 +52,22 @@ def main():
     ap.add_argument("--top", type=int, default=96)
     ap.add_argument("--compare", action="append", default=[])
     a = ap.parse_args()
-    os.makedirs(a.out_dir, exist_ok=True)
+    if a.top < 1:
+        sys.exit("make_pipseq_tier_lists.py: --top must be at least 1")
+    compare = {}
+    for item in a.compare:
+        label, _, paths = item.partition("=")
+        files = paths.split(",")
+        if not label or len(files) != len(TIERS):
+            sys.exit("make_pipseq_tier_lists.py: --compare takes LABEL=tier1,tier2,tier3,tier4, got " + item)
+        try:
+            compare[label] = [open(p).read().split() for p in files]
+        except OSError as e:
+            sys.exit("make_pipseq_tier_lists.py: cannot read a --compare list: %s" % e)
     counts = [collections.Counter() for _ in TIERS]
     status = collections.Counter()
     phases = collections.Counter()
-    with gzip.open(a.barcode_fastq, "rt") as f:
+    with open_reads(a.barcode_fastq) as f:
         for i, line in enumerate(f):
             if i % 4 != 1:
                 continue
@@ -67,10 +87,11 @@ def main():
             phases[p] += 1
             for c, w in zip(counts, words):
                 c[w] += 1
-    compare = {}
-    for item in a.compare:
-        label, paths = item.split("=", 1)
-        compare[label] = [open(p).read().split() for p in paths.split(",")]
+    if not status["used"]:
+        sys.exit("make_pipseq_tier_lists.py: no read has the three linkers at exactly one phase with A/C/G/T tier words "
+                 "(reads %d, no linker phase %d, several phases %d, non-ACGT tier %d); nothing written"
+                 % (status["reads"], status["no_linker_phase"], status["several_linker_phases"], status["non_acgt_tier"]))
+    os.makedirs(a.out_dir, exist_ok=True)
     summary = {"schema": "pipseq_tier_lists_from_reads/1", "barcode_fastq": a.barcode_fastq,
                "barcode_fastq_sha256": sha256(a.barcode_fastq), "script_sha256": sha256(__file__),
                "selection": "exactly one phase with all three linkers exact; tier words A/C/G/T only; no reference list",
