@@ -1,3 +1,12 @@
+star-suite (1.13.1-1) unstable; urgency=medium
+
+  * Fix transcript lookup during shared GEX multimapper rescue. Check the
+    current transcript before ending the search for earlier overlaps.
+  * Enable the shared GEX resolver by default for fixed split-pool RNA.
+    Use --soloCrMultimapRescue no for the 1.13.0 split-pool counting policy.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Wed, 18 Nov 2026 23:00:00 +0000
+
 star-suite (1.13.0-1) unstable; urgency=medium
 
   * Add two experimental add-ons for STAR-perturb, RNA only: split-pool
