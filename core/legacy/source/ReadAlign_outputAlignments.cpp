@@ -225,10 +225,11 @@ static CrRescueEvidence classifyAlignmentCrRescue(const Transcriptome& tr,
     std::set<uint32_t> exonicGenes;
     const int64_t trIdx0 = findLastStartLE(tr.trS, tr.nTr, aStart);
     for (int64_t trIdx = trIdx0; trIdx >= 0; --trIdx) {
-        if (tr.trEmax[trIdx] < aEnd) {
-            break;
-        }
         if (tr.trE[trIdx] < aEnd) {
+            // trEmax bounds earlier transcripts; the current one can extend farther.
+            if (tr.trEmax[trIdx] < aEnd) {
+                break;
+            }
             continue;
         }
         if (!isSenseForTranscript(aln, tr.trStr[trIdx], strandType)) {

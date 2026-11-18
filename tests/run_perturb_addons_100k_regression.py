@@ -7,7 +7,7 @@ Two profiles, each one STAR run on the first 100,000 read pairs of a public
 library with the barcode lists packaged in share/star-suite/barcode_lists:
 
   splitseq  --soloSplitseqMode Fixed, v3 short-linker layout, 48_wells lists;
-            GEO GSE352893, run SRR41469160
+            v1.13.0 counting policy (rescue off), GEO GSE352893, run SRR41469160
   pipseq    --soloPipseqMode Illumina, GeneFull_Ex50pAS, the read-derived tier
             lists; GEO GSE295097, run SRR33231853
 
@@ -81,7 +81,8 @@ def command(profile, star, genome, threads, fixture, lists, out):
     tail = ["--soloStrand", "Forward", "--outSAMtype", "None", "--outFileNamePrefix", str(out) + "/"]
     if profile == "splitseq":
         return common + ["--soloSplitseqMode", "Fixed", "--soloSplitseqCBposition", "50_8", "30_8", "10_8",
-                         "--soloSplitseqUMIposition", "0_10", "--soloSplitseqWhitelist", *lists] + tail
+                         "--soloSplitseqUMIposition", "0_10", "--soloSplitseqWhitelist", *lists,
+                         "--soloCrMultimapRescue", "no"] + tail
     return common + ["--soloPipseqMode", "Illumina", "--soloPipseqWhitelist", *lists,
                      "--soloFeatures", "GeneFull_Ex50pAS"] + tail
 

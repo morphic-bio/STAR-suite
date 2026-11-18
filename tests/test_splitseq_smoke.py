@@ -52,10 +52,23 @@ def main():
 
     rng = random.Random(2703)
     genome = "".join(rng.choice("ACGT") for _ in range(8000))
-    (out / "genome.fa").write_text(">chrSynthetic\n" + genome + "\n")
+    # The copied 50-mers give known two-locus alignments on the same strand.
+    rescue_chr = list("".join(rng.choices("ACGT", k=2400)))
+    for src, dest in ((500, 1500), (700, 2100), (1560, 1820)):
+        rescue_chr[dest:dest + 50] = rescue_chr[src:src + 50]
+    rescue_chr = "".join(rescue_chr)
+    (out / "genome.fa").write_text(f">chrSynthetic\n{genome}\n>chrRescue\n{rescue_chr}\n")
     (out / "genes.gtf").write_text(
         'chrSynthetic\tfixture\texon\t501\t3500\t.\t+\t.\tgene_id "PLUS"; transcript_id "PLUS.1"; gene_name "PLUS";\n'
         'chrSynthetic\tfixture\texon\t4501\t7500\t.\t-\t.\tgene_id "MINUS"; transcript_id "MINUS.1"; gene_name "MINUS";\n')
+    with (out / "genes.gtf").open("a") as gtf:
+        for gene, start, end in (("HOST", 101, 170), ("HOST", 1301, 1400),
+                                 ("NESTED", 301, 410), ("SHARED_A", 901, 980),
+                                 ("SHARED_B", 901, 980), ("EXON", 1501, 1640),
+                                 ("COMPETITOR", 1801, 1900), ("DECOY", 2071, 2190)):
+            biotype = "processed_pseudogene" if gene == "DECOY" else "protein_coding"
+            gtf.write(f'chrRescue\tfixture\texon\t{start}\t{end}\t.\t+\t.\tgene_id "{gene}"; '
+                      f'transcript_id "{gene}.1"; gene_name "{gene}"; gene_type "{biotype}";\n')
     index = out / "index"
     index.mkdir()
     run("index", [star, "--runMode", "genomeGenerate", "--genomeDir", index,
@@ -165,6 +178,35 @@ def main():
         results[label] = {"counts": {c + "/" + g: n for (c, g), n in actual.items()}, "metrics": metrics}
     assert results["default"] == results["threads4"]
 
+    # One distinct gene per expected positive. Shared exons and two competing
+    # exonic loci must add zero entries to the final unique-gene matrix.
+    policy_reads = [rescue_chr[pos:pos + 50] for pos in (300, 500, 700, 900, 1560)] + [plus]
+    policy_umis = [u1, u2, "GTAGCTACGA", "TACGTGAGCA", "CAGTAGCTGA", "ATAGAGCATA"]
+    policy_records = [(seq, barcode(umi=umi), cell_a, umi) for seq, umi in zip(policy_reads, policy_umis)]
+    policy_rna, policy_cb = fastqs("policy", policy_records)
+    for label, feature, extra, genes, rescues in (
+        ("policy_default", "GeneFull", [], ["PLUS", "NESTED", "EXON", "HOST"], (1, 1)),
+        ("policy_release", "GeneFull", ["--soloCrMultimapRescue", "no"], ["PLUS"], None),
+        ("policy_ex50", "GeneFull_Ex50pAS", [], ["PLUS", "NESTED", "EXON", "HOST"], (1, 1)),
+        ("policy_exon_priority", "GeneFull_ExonOverIntron", [], ["PLUS", "NESTED", "EXON", "HOST"], (1, 1)),
+    ):
+        target = out / label
+        target.mkdir()
+        run(label, base + ["--readFilesIn", policy_rna, policy_cb] + split + extra +
+            ["--soloFeatures", feature, "--soloCellFilter", "None", "--runThreadN", "1",
+             "--outFileNamePrefix", str(target) + "/"])
+        actual = matrix(target / "Solo.out" / feature / "raw")
+        assert actual == {(cell_a, gene): 1 for gene in genes}, (label, actual)
+        log = (target / "Log.final.out").read_text()
+        if rescues:
+            stats = {k.strip(): v.strip() for k, v in (line.split("|", 1) for line in log.splitlines() if "|" in line)}
+            assert stats["Rescued by exonic winner (Phase 3)"] == str(rescues[0]), (label, stats)
+            assert stats["Rescued by intronic fallback (Phase 3)"] == str(rescues[1]), (label, stats)
+            assert stats["No rescue: multiple exonic loci"] == "1", (label, stats)
+        else:
+            assert "Multimap reads entering rescue block" not in log
+        results[label] = {"counted_genes": sorted(genes)}
+
     # Exon-priority gene assignment is accepted and gives the same counts here.
     target = out / "ex50pas"
     target.mkdir()
@@ -174,14 +216,23 @@ def main():
 
     # Mode-off reference: the same accepted records, flattened to canonical CB+UMI.
     flat_rna, flat_cb = fastqs("flat", [r for r in records if r[2]], flat=True)
+    ordinary = ["--soloType", "CB_UMI_Simple", "--soloCBwhitelist", "None", "--soloCBlen", "24",
+                "--soloUMIstart", "25", "--soloUMIlen", "10", "--soloFeatures", "GeneFull",
+                "--soloCellFilter", "None", "--runThreadN", "1"]
     target = out / "ordinary"
     target.mkdir()
-    run("ordinary", base + ["--readFilesIn", flat_rna, flat_cb, "--soloType", "CB_UMI_Simple",
-                            "--soloCBwhitelist", "None", "--soloCBlen", "24", "--soloUMIstart", "25", "--soloUMIlen", "10",
-                            "--soloFeatures", "GeneFull", "--soloCellFilter", "None", "--runThreadN", "1",
-                            "--outFileNamePrefix", str(target) + "/"])
+    run("ordinary", base + ["--readFilesIn", flat_rna, flat_cb] + ordinary + ["--outFileNamePrefix", str(target) + "/"])
     assert matrix(target / "Solo.out/GeneFull/raw") == expected
     assert not (target / "Solo.out/Splitseq.metrics.tsv").exists()
+
+    # Ordinary GEX must resolve the same genomic placements as split-pool GEX.
+    flat_rna, flat_cb = fastqs("flat_policy", policy_records, flat=True)
+    target = out / "ordinary_policy"
+    target.mkdir()
+    run("ordinary_policy", base + ["--readFilesIn", flat_rna, flat_cb] + ordinary +
+        ["--soloCrGexFeature", "GeneFull", "--soloCrMultimapRescue", "yes", "--soloMultiMappers", "Unique",
+         "--outFileNamePrefix", str(target) + "/"])
+    assert matrix(target / "Solo.out/GeneFull/raw") == matrix(out / "policy_default/Solo.out/GeneFull/raw")
 
     empty_rna, empty_cb = fastqs("invalid", [invalid[1]])
     target = out / "empty"
