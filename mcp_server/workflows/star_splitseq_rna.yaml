@@ -54,6 +54,7 @@ parameter_groups:
     parameters:
       - solo_strand
       - solo_features
+      - solo_cr_multimap_rescue
       - solo_cell_filter
       - out_sam_type
       - out_file_name_prefix
@@ -168,6 +169,14 @@ parameters:
     choices: [Gene, GeneFull, GeneFull_Ex50pAS, GeneFull_ExonOverIntron]
     description: Gene model for counting; the mode takes exactly one.
     category: counting
+  - name: solo_cr_multimap_rescue
+    cli_flag: --soloCrMultimapRescue
+    type: enum
+    required: false
+    default: "yes"
+    choices: ["yes", "no"]
+    description: Apply STAR Suite GEX rescue before UMI counting. Select no to reproduce the v1.13.0 split-pool policy.
+    category: counting
   - name: solo_cell_filter
     cli_flag: --soloCellFilter
     type: enum
@@ -222,6 +231,7 @@ rendering:
     - whitelist_round3
     - solo_strand
     - solo_features
+    - solo_cr_multimap_rescue
     - solo_cell_filter
     - out_sam_type
     - out_file_name_prefix

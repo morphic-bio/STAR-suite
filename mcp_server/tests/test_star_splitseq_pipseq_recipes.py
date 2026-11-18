@@ -152,6 +152,7 @@ def test_splitseq_renders_one_star_command(recipes, tmp_path):
         str(SPLITSEQ_LISTS / "round3.tsv"),
         "--soloStrand", "Forward",
         "--soloFeatures", "GeneFull",
+        "--soloCrMultimapRescue", "yes",
         "--soloCellFilter", "EmptyDrops_CR",
         "--outSAMtype", "None",
         "--outFileNamePrefix", str(tmp_path / "out/"),
