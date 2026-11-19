@@ -1,0 +1,54 @@
+{
+  "schema": "pipseq-ipm-barcode-regression-v1",
+  "source": {
+    "run": "SRR33231853",
+    "dataset": "GSE295097",
+    "ranks_inclusive": [
+      2001,
+      2020
+    ],
+    "order": "counted reads descending, barcode ascending",
+    "expected_rows": "Full-depth GeneFull_Ex50pAS ledger, subset-specific calibration and IPM=1 counts frozen before extraction.",
+    "ledger_sha256": "1bb2750f952eb9c2e41bf20fedf696295fda3f388898125f728a43f9f9443a25"
+  },
+  "read_pairs": 389865,
+  "expected": {
+    "barcodes": 20,
+    "counted_reads": 293187,
+    "groups": 43151,
+    "calibration_groups_5_to_32_bins": 2787,
+    "ipm_raw": 1.5388910482717182,
+    "groups_above_ten_bins": 927,
+    "groups_whose_count_differs_from_ipm_1": 918,
+    "estimated_transcripts": 87015
+  },
+  "fixture_sha256": {
+    "cDNA.fastq.gz": "e6ea3defe2b9ee995323c74cbec4f6b29339e08b75a2b6afe2495c62d3260f2c",
+    "barcode.fastq.gz": "4bc6d10154295cfc947762d0ec2294f0a409eadbc23864709c8679ccb34c3b8f",
+    "expected.tsv": "3b20e64f27f612b68db3c1018e8d6c36abd581a2320075cda9a6820cd6ab534a"
+  },
+  "features_sha256": "2348c172d28ae3228111e9d028334d9469ca0725a710c12eeadb115ccc97d359",
+  "index_sha256": {
+    "Genome": "6f67ab87e4fd74015fe13eb9661a9d041cdbe0282122c3b87a869dc12ca2d838",
+    "SA": "8e2975cbd544293b375b000fcc425021e47906a8d135bc08537a3b891f493c7e",
+    "SAindex": "fa0a14a5560deeacd69a328f4922041596b0f5985fd29a05ece05a56acfdea4f",
+    "chrLength.txt": "b297c2398f93cd3d4c8aa1d4e10d6148c9550a1c2175139c29f9aab505422a17",
+    "chrName.txt": "12d83750559b9ae7d273b4b7ce6077e6f24c43eb65672d1fbcfa2e1593fd3ee8",
+    "chrNameLength.txt": "d525ee20551f34768f4017c7a779a3f3c7b947dacdea27838a5776508834b306",
+    "chrStart.txt": "09e1d0f13d91fd4540be6e87c62f05c57bb54e465ea67bc1e24d347f623ea121",
+    "exonGeTrInfo.tab": "af99069e6deb9dffdab1341da4e2bba1d727f03835505f66674d880cf7b8dfcf",
+    "exonInfo.tab": "2fb2c6a005e20851af3c8eea5c48fb27e21179db5a945d6f91227e08e2c0dd71",
+    "geneInfo.tab": "1dee5311c1c3d5cb2e2c577350830d4219acd6056c0ec0b44c4fd48efa99382a",
+    "genomeParameters.txt": "12e46b7ef6234b7788772822c65e1d622e58a540df9a7c97ec645ed9c3df360a",
+    "sjdbInfo.txt": "02f4967ea9d4ad9ef3b9f1c756e4c355288408831f0977a11dca81abd3a34384",
+    "sjdbList.fromGTF.out.tab": "cb41e17eb7dd72d69c9c1621c984c40a8ea3fb29dd04229c89cbf86ef1901f16",
+    "sjdbList.out.tab": "35f359909af0646037e0b83be0d73e3c1237006dabda850139a3787acddc7dfa",
+    "transcriptInfo.tab": "22c361152b7121d253400292c9f552946806b4b3e222a70f0daa5d732a38b15c"
+  },
+  "lists_sha256": {
+    "pipseq_readderived/readderived_tier1.tsv": "15c54f6fc2e0538c473c5c27fbb6584476f65912792d8b7fcbed629a96be38a5",
+    "pipseq_readderived/readderived_tier2.tsv": "6d7cce1aeae0f88ee624b53522cebdc5533e3b0ccdb3ce6675ff3a492858c3f4",
+    "pipseq_readderived/readderived_tier3.tsv": "7d1ff6846475bb5c61b7b4eeeae35bb66a247725519f1a68f66c334753ab75a0",
+    "pipseq_readderived/readderived_tier4.tsv": "c65bb07d2dbd80cd5b82cb294e3bbadc793587a4f2df93e66aa94ff780018514"
+  }
+}

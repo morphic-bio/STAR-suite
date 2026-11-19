@@ -60,6 +60,24 @@ update this file with its output location.
   of the v1.13.0 source, 8 threads). Outputs go to `OUT_ROOT`, by default a
   fresh `/tmp/star-perturb-addons-100k-*`.
 
+## PIP automatic IPM on 20 full-depth barcodes (2026-11-18)
+
+The local manifest case `perturb-addons/pipseq-barcode-ipm` uses
+`/storage/pipseq_v5/GSE295097/ipm_fixture_20cb_v1/` (`PIPSEQ_IPM_FIXTURE`).
+It contains 389,865 read pairs and `expected.tsv` for ranks 2,001–2,020 of SRR33231853
+by descending assigned reads, with barcode sequence breaking ties. The expected
+cell/gene rows come from the full-depth ledger before fixture execution. Counts
+were recalculated using the subset's IPM. Of 43,151 groups, 918 would change
+if IPM were fixed at one.
+
+The case checks the paired FASTQs, expected rows, packaged lists and PIP-specific
+index against `tests/fixtures/pipseq_ipm_golden.json`. The index defaults to
+`/storage/references_public/pipseq_gencode_v44/index` (`PIPSEQ_IPM_GENOME`).
+Run `tests/run_production_module_regression_suite.sh --run --case pipseq-barcode-ipm`
+or `tests/run_pipseq_ipm_regression.sh`. The standalone runner writes the STAR
+output, exact argv, verification report and `PASS` in a fresh `OUT_ROOT`
+or `/tmp/star-pipseq-ipm-*`.
+
 ## Contract tests of the STAR-perturb add-ons and of cell filtering (2026-11-17)
 
 - `tests/run_perturb_addons_contract.sh` (split-pool and PIP RNA modes, their
@@ -72,6 +90,9 @@ update this file with its output location.
   smokes. The recipe tests
   (`mcp_server/tests/test_star_splitseq_pipseq_recipes.py`) write under
   pytest's temporary directory.
+- The PIP gene-assignment regression writes its generated genome, paired FASTQs,
+  per-case logs, ledgers and matrices under `OUT_ROOT/pipseq_gene_assignment/`
+  in the add-on contract, or the explicit `--out` for a standalone run.
 - `make -C core/legacy/source test_SplitSeq` writes its small allowlists to
   `core/legacy/test/test_splitseq_work/` (untracked).
 

@@ -6,6 +6,8 @@ on:
       - ".github/workflows/ci-launchpad.yml"
       - "scripts/launchpad*.py"
       - "scripts/launchpad*.sh"
+      - "scripts/make_pipseq_reference_gtf.py"
+      - "scripts/make_pipseq_tier_lists.py"
       - ".github/workflows/ci-pr.yml"
       - ".github/workflows/ci-partial-builds.yml"
       - ".github/workflows/ci-dev-release.yml"

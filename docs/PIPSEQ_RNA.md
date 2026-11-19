@@ -131,11 +131,16 @@ with at most one other base; the read is cut at the window's start. Give other
 sequences with the clip parameters. Use `--soloPipseqTrim None` for reads that
 were trimmed beforehand.
 
-**Gene assignment.** The documentation describes reads that are at least half
-exonic as assigned first, then reads inside a gene, with antisense and
-multi-gene reads left out. `GeneFull_Ex50pAS` is the closest STAR rule.
-`GeneFull` drops every read that lies in two overlapping genes, which removes
-whole genes that sit inside another gene.
+**Gene assignment.** PIP counts a read with one genomic alignment and one
+assigned gene. The bare CLI defaults to `GeneFull`, which checks overlap with
+same-strand gene bodies. The recipe selects `GeneFull_Ex50pAS`, which considers
+transcripts that contain the alignment. A concordant exon can take priority
+over its same-strand intronic host. For a partially exonic alignment, the
+exonic priority requires **more than half** of the aligned bases in exons.
+Illumina describes 50% exon overlap and 20% gene-body overlap. Its mapping
+section includes equality at both thresholds, while its read-matching metrics
+use strict inequalities. The fixture below records STAR's behavior at both
+boundaries. [Illumina read classification](https://help.dragen.illumina.com/dragen-v4.6/product-guides/dragen-v4.6/dragen-single-cell-pipeline/dragen-scrna-illumina#mapping)
 
 ### BAM output
 
@@ -322,6 +327,14 @@ chemistry, guide reads.
   sequence, BAM tags (unsorted and sorted), exon-priority gene assignment, the
   worked example of the documentation as reads (count and saturation) and
   ordinary UMI counting with the mode off.
+- `tests/test_pipseq_gene_assignment.py` runs labeled FASTQ reads through
+  the CLI default and the recipe feature. It checks the rejection counters,
+  fragment ledger and raw matrix for nested and shared exons, an intronic
+  control, antisense, splicing and two genomic placements. Of 49, 50 and 51
+  exonic bases in a 100-base read overlapping two gene bodies, the recipe
+  resolves the exonic gene at 51. For 19, 20 and 21 bases across the end of
+  a single gene, the CLI default counts all three and the recipe rejects all
+  three. These partial overlaps extend outside the transcript span.
 - `tests/test_pipseq_edges.py`: EmptyDrops, empty matrices, merging across
   threads and calibration failures, on the smoke fixture's index.
 - `tests/test_make_pipseq_reference_gtf.py`: the reference tool on a small
@@ -338,6 +351,10 @@ chemistry, guide reads.
   of `Pipseq.metrics.tsv` and the digest of `Pipseq.groups.tsv` are compared
   with `tests/fixtures/perturb_addons_100k_golden.json`. The fixture is made by
   `tests/setup_perturb_addons_100k_fixture.py` and is not tracked.
+- `tests/run_pipseq_ipm_regression.sh` checks automatic calibration on 20
+  complete barcodes. It compares every cell/gene ledger row and raw matrix
+  entry with previously calculated counts. See the [fixture-host release
+  check](RUNBOOK_PRODUCTION_MODULE_REGRESSION_SUITE.md#pip-automatic-calibration-on-the-fixture-host).
 
 ```bash
 python3 tests/test_pipseq_smoke.py --star core/legacy/source/STAR --out tests/pipseq_output_example
@@ -469,12 +486,10 @@ every gene named is in all three lists.
   in ours. STAR places no read on the gene's strand there in the first four
   million reads; the reads it does place in the gene are poly-T reads that
   begin with reversed barcode sequence and have several alignments.
-- **Gene ends.** `GeneFull_Ex50pAS` leaves out reads that run past the
-  annotated end of a gene unless half of the read is exonic; `GeneFull` counts
-  any overlap. The documentation's rule (a read overlapping a gene by at least
-  20% of its length) lies between the two and is not available in STAR.
-  MT-CO2 shows it: 118,960 deposited, 62,768 with `GeneFull_Ex50pAS` on the
-  reference.
+- **Gene ends.** `GeneFull_Ex50pAS` skips a transcript when the alignment
+  extends beyond its span. `GeneFull` accepts a partial overlap with a unique
+  same-strand gene. At MT-CO2 the deposit has 118,960 counts and the
+  `GeneFull_Ex50pAS` run on the reference has 62,768.
 - **Cell set.** 675 barcodes outside the deposit total at least as much as the
   lowest deposited cell. None is one substitution from a deposited label;
   their genes detected and mitochondrial share are close to deposited cells of

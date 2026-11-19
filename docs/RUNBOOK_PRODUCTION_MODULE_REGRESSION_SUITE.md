@@ -132,6 +132,26 @@ FASTQ parity rather than direct ordered `diff`.
 5. Do not add full-depth production launches to this suite unless they are
    gated by a distinct `scale` value and are never selected by default.
 
+## PIP automatic calibration on the fixture host
+
+For PIP release validation, use the candidate binary and the local
+`perturb-addons / pipseq-barcode-ipm` case. The 100K fixture checks the IPM
+floor. The 20-barcode fixture exercises an estimated IPM above one and checks
+918 cell/gene groups whose transcript counts depend on calibration.
+
+```bash
+export STAR_BIN=/path/to/candidate/STAR
+fresh_output=/path/to/new/pip-release-check
+tests/run_production_module_regression_suite.sh --preflight --strict-preflight --case pipseq-barcode-ipm &&
+  tests/run_production_module_regression_suite.sh --run --case pipseq-barcode-ipm --out-root "$fresh_output"
+```
+
+Require the case's `PASS` row in
+`summary.tsv` and retain `work/report.json` from its case directory. The
+[fixture manifest and paths](../tests/ARTIFACTS.md#pip-automatic-ipm-on-20-full-depth-barcodes-2026-11-18)
+identify the indexed reference, tier lists, paired reads and expected counts.
+Hosted Tier A runs the generated PIP gene-assignment cases.
+
 ## Agent Policy
 
 - Default to `--preflight` when asked for status.
