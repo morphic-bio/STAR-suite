@@ -426,6 +426,15 @@ BAMoutput::~BAMoutput() {
         binBytes = nullptr;
     }
     if (binStream != nullptr) {
+        // Close this chunk's sort files now. Batch mode keeps the process alive across
+        // samples, so waiting for process exit would use up file descriptors and disk.
+        std::lock_guard<std::mutex> lock(P.inOut->ownedStreamsMutex);
+        auto &owned = P.inOut->ownedOfstreams;
+        for (uint ii = 0; ii < P.outBAMcoordNbins; ii++) {
+            binStream[ii]->close();
+            owned.erase(std::remove(owned.begin(), owned.end(), binStream[ii]), owned.end());
+            delete binStream[ii];
+        }
         delete[] binStream;
         binStream = nullptr;
     }
