@@ -32,6 +32,7 @@ SLAM = ("--slamQuantMode", "1", "--slamStrandness", "Sense")
 # The default sort limit follows genome size, which is too low for six merged files here.
 LARGE_SORT_RAM = ("--limitBAMsortRAM", "4000000000")
 
+# SLAM --trimScope per-file is covered by slam_per_file_tmp_regression.py.
 SCENARIOS = {
     "single_sorted": {"mode": "single", "samples": 1},
     "single_unsorted": {"mode": "single", "samples": 1, "sam": UNSORTED},
