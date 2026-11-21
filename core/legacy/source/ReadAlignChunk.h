@@ -64,6 +64,7 @@ public:
     void chunkFstreamCat (fstream &chunkOut, ofstream &allOut, bool mutexFlag, pthread_mutex_t &mutexVal);
     void chunkFilesCat(ostream *allOut, string filePrefix, uint &iC);
     void reopenYNoYFastqOutputsForReuse();
+    void resetCopiedOutputsForNextFile();
 
     void reinitSlamCompat(int trim5p_m1, int trim3p_m1, int trim5p_m2, int trim3p_m2);
     void reinitSlamCompat(int trim5p, int trim3p);

@@ -2216,6 +2216,9 @@ static int starRunMain(int argInN, char *argIn[], const star::host::Hooks *hooks
                 if (RAchunk[ii] != nullptr) {
                     RAchunk[ii]->reinitSlamCompat(P.quant.slam.compatTrim5p[0], P.quant.slam.compatTrim3p[0],
                                                   P.quant.slam.compatTrim5p[1], P.quant.slam.compatTrim3p[1]);
+                    if (fileIdx > 0) {
+                        RAchunk[ii]->resetCopiedOutputsForNextFile();
+                    }
                 }
             }
 

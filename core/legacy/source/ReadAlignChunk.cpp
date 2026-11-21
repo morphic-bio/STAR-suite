@@ -485,6 +485,30 @@ void ReadAlignChunk::reopenYNoYFastqOutputsForReuse() {
                      << " before repeated processChunks() invocation" << endl;
 }
 
+void ReadAlignChunk::resetCopiedOutputsForNextFile() {
+    // chunkFstreamCat rewinds a temporary file but keeps its length. If this chunk then
+    // writes less for the next input file, the end of the previous output is copied again.
+    const auto reopen = [this](const string &prefix, fstream &stream) {
+        stream.close();
+        stream.clear();
+        chunkFstreamOpen(prefix, iThread, stream);
+    };
+    if (P.pCh.segmentMin > 0) {
+        if (P.pCh.out.samOld) {
+            reopen(P.outFileTmp + "/Chimeric.out.sam.thread", RA->chunkOutChimSAM);
+        }
+        if (P.pCh.out.junctions) {
+            reopen(P.outFileTmp + "/Chimeric.out.junction.thread", *RA->chunkOutChimJunction);
+        }
+    }
+    if (P.outReadsUnmapped == "Fastx") {
+        for (uint32 imate = 0; imate < P.readNends; imate++) {
+            reopen(P.outFileTmp + "/Unmapped.out.mate" + to_string(imate) + ".thread",
+                   RA->chunkOutUnmappedReadsStream[imate]);
+        }
+    }
+}
+
 ///////////////
 void ReadAlignChunk::chunkFstreamOpen(string filePrefix, int iChunk, fstream &fstreamOut) {//open fstreams for chunks
     ostringstream fNameStream1;

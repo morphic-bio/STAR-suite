@@ -21,21 +21,31 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from batch_bam_handles_regression import NORMAL_LIMIT, SLAM, bam_digest, run_star, sha256_file, star_args  # noqa: E402
 
+EXTRA_OUTPUTS = ("--outReadsUnmapped", "Fastx", "--chimSegmentMin", "20", "--chimOutType", "Junctions")
 CASES = {
     "one_thread_two_files": {"files": 2, "threads": 1},
     "four_threads_two_files": {"files": 2, "threads": 4},
+    "one_thread_three_files_extra_outputs": {"files": 3, "threads": 1, "extra": EXTRA_OUTPUTS},
     "one_thread_two_files_auto_trim": {"files": 2, "threads": 1, "extra": ("--autoTrim", "variance"), "reference": False},
+    "four_threads_three_files_extra_outputs": {"files": 3, "threads": 4, "extra": EXTRA_OUTPUTS},
+    "one_thread_three_files_chimeric_sam": {
+        "files": 3,
+        "threads": 1,
+        "extra": ("--chimSegmentMin", "20", "--chimOutType", "Junctions", "SeparateSAMold"),
+    },
 }
 BAM = "Aligned.sortedByCoord.out.bam"
 EXACT_FILES = ("ReadsPerGene.out.tab", "SJ.out.tab")
-LINE_SET_FILES = ("Unmapped.out.mate1", "Unmapped.out.mate2", "Chimeric.out.junction")
+LINE_SET_FILES = ("Unmapped.out.mate1", "Unmapped.out.mate2", "Chimeric.out.junction", "Chimeric.out.sam")
 
 
 def line_set_digest(path: Path) -> str:
+    # FASTQ names start with @, so only SAM files treat @ as a header line.
+    skipped = b"@" if path.suffix == ".sam" else b"#"
     total = 0
     with path.open("rb") as handle:
         for line in handle:
-            if not line.startswith(b"#"):
+            if not line.startswith(skipped):
                 value = int.from_bytes(hashlib.blake2b(line, digest_size=16).digest(), "big")
                 total = (total + value) & ((1 << 128) - 1)
     return f"{total:032x}"
