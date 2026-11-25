@@ -102,6 +102,12 @@ update this file with its output location.
   `/storage/cc_perturb_seq/parse_v3_public_peeks/`.
 - Keep read files and deposited files untracked.
 
+## Public HAP1 and K562 SPLiT-seq comparisons (2026-11-25)
+
+- `/mnt/pikachu/cc-count-discrepancy-20261122/20261125T082901Z_parse_external_validation/`
+  contains the GSE296244 HAP1 inputs, the 16-million-pair GSE330222 K562
+  subset, the deposited count matrices and the paired STAR outputs.
+
 ## Newer PIP barcode tier lists (2026-11-14, revised 2026-11-15)
 
 - The four tier lists used for the PIP checks are derived from public reads
