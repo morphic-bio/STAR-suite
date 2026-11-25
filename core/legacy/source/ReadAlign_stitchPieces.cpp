@@ -51,6 +51,7 @@ void ReadAlign::stitchPieces(char **R, uint Lread) {
             for (uint iSA=PC[iP][PC_SAstart]; iSA<=PC[iP][PC_SAend]; iSA++) {//scan through all alignments of this piece
                 // going through ordered positions in the suffix array from PC_SAstart to PC_SAend
                 uint a1 = mapGen.SA[iSA];
+                if (!mapGen.alignExcludedRegions.empty() && mapGen.alignmentSeedExcluded(a1,aLength)) continue;
                 uint aStr = a1 >> mapGen.GstrandBit;
                 a1 &= mapGen.GstrandMask; //remove strand bit
 
@@ -141,6 +142,7 @@ void ReadAlign::stitchPieces(char **R, uint Lread) {
         for (uint iSA=PC[iP][PC_SAstart]; iSA<=PC[iP][PC_SAend]; iSA++) {//scan through all alignments
 
             uint a1 = mapGen.SA[iSA];
+            if (!mapGen.alignExcludedRegions.empty() && mapGen.alignmentSeedExcluded(a1,aLength)) continue;
             uint aStr = a1 >> mapGen.GstrandBit;
             a1 &= mapGen.GstrandMask; //remove strand bit
             uint aRstart=PC[iP][PC_rStart];

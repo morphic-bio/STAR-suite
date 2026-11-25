@@ -2256,3 +2256,10 @@ products and external validation logs are untracked.
   provenance repository under the host's provenance policy.
 - These prefix checks qualify development behaviour. The matched comparison
   for PIP is the GSE295097 entry above; there is none yet for split-seq.
+
+## Runtime alignment exclusion
+
+`test_runtime_alignment_exclusion.py` writes its synthetic FASTA, FASTQ, index,
+SAM files, command/exit records and `COMPLETE.json` to the required `--out` path.
+Use a fresh `/tmp/` directory or untracked `tests/*_output*/` directory. These
+generated artifacts must not be committed.

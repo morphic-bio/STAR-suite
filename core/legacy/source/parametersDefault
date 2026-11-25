@@ -1022,6 +1022,13 @@ alignIntronMin              21
 alignIntronMax              0
     int: maximum intron size, if 0, max intron size will be determined by (2^winBinNbits)*winAnchorDistNbins
 
+alignExcludeRegions        -
+    string: optional BED file of 0-based, half-open regions excluded from genomic alignments at runtime.
+            The existing genome and index are unchanged. Seeds and finalized aligned blocks must avoid these regions;
+            introns and deletions may span them. Unknown contigs and invalid intervals are fatal errors.
+            Supported for ordinary short-read alignReads without Flex, chimeric alignment, or transformed genomes.
+            This is placement exclusion, not guaranteed equivalence to an N-masked reference index. - disables it.
+
 alignMatesGapMax            0
     int: maximum gap between two mates, if 0, max intron gap will be determined by (2^winBinNbits)*winAnchorDistNbins
 

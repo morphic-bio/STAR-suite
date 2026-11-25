@@ -903,6 +903,7 @@ static int starRunMain(int argInN, char *argIn[], const star::host::Hooks *hooks
     ///////////////////////////////// Genome
     Genome genomeMain(P, P.pGe);
     genomeMain.genomeLoad();
+    genomeMain.loadAlignExcludedRegions();
 
     if (P.pGe.transform.outYes) {
         genomeMain.Var = new Variation(P, genomeMain.chrStart, genomeMain.chrNameIndex, false);//no variation for mapGen, only for genOut

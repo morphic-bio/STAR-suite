@@ -256,6 +256,7 @@ class Parameters {
         uint alignTranscriptsPerReadNmax;   //max number of alignments per read
         uint alignIntronMin;//min length to call a gap an intron
         uint alignIntronMax;//max length to call
+        string alignExcludeRegions; // runtime BED placement exclusion; does not modify the index
         uint alignMatesGapMax;//max gap between the mates (if paired-end)
         vector <int32> alignSJstitchMismatchNmax;
 

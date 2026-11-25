@@ -9,6 +9,7 @@
 #include "SuperTranscriptome.h"
 
 class GTF;
+class Transcript;
 
 class Genome {
 private:
@@ -75,6 +76,13 @@ public:
     void loadSJDB(string &genDir);
 
     void insertSequences();
+
+    // Per-run, read-only after loading. Never written to Genome/SA or shared-memory index data.
+    vector<array<uint64,2>> alignExcludedRegions;
+    void loadAlignExcludedRegions();
+    bool alignmentBlockExcluded(uint64 start, uint64 length) const;
+    bool alignmentSeedExcluded(uint64 packedSA, uint64 length) const;
+    bool alignmentTranscriptExcluded(const Transcript &tr) const;
 
     //void consensusSequence(); DEPRECATED
     

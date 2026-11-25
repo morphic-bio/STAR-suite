@@ -80,6 +80,10 @@ void stitchWindowAligns(uint iA, uint nA, int Score, bool WAincl[], uint tR2, ui
         };
         };
 
+        // Extension/stitching can cross an exclusion even when every seed avoided it.
+        // Reject before updating window/mate best scores or pruning competing transcripts.
+        if (!mapGen.alignExcludedRegions.empty() && mapGen.alignmentTranscriptExcluded(trA)) return;
+
         if (!P.alignSoftClipAtReferenceEnds.yes &&  \
                 ( (trA.exons[trA.nExons-1][EX_G] + Lread-trA.exons[trA.nExons-1][EX_R]) > (mapGen.chrStart[trA.Chr]+mapGen.chrLength[trA.Chr]) || \
                    trA.exons[0][EX_G]<(mapGen.chrStart[trA.Chr]+trA.exons[0][EX_R]) ) ) {

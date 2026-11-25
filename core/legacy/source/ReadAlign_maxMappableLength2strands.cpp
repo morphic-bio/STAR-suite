@@ -97,6 +97,24 @@ uint ReadAlign::maxMappableLength2strands(uint pieceStartIn, uint pieceLengthIn,
         };
     #endif
 
+        if (!mapGen.alignExcludedRegions.empty()) {
+            // Count allowed placements before applying seed/anchor repeat limits.
+            // If the longest exact match exists only inside excluded regions, shorten
+            // the query and search the unchanged SA again to expose allowed alternatives.
+            while (true) {
+                Nrep=0;
+                for (uint hit=indStartEnd[0]; hit<=indStartEnd[1]; ++hit) {
+                    if (!mapGen.alignmentSeedExcluded(mapGen.SA[hit],maxL)) {
+                        if (++Nrep>P.seedMultimapNmax) break; // enough evidence to reject a repetitive seed
+                    }
+                }
+                if (Nrep>0 || maxL<=P.seedMapMin) break;
+                const uint shorter=maxL-1;
+                maxL=0;
+                maxMappableLength(mapGen,Read1,pieceStart,shorter,0,mapGen.nSA-1,dirR,maxL,indStartEnd);
+            }
+        }
+
         if (maxL+iDist > maxLbest) {//this idist is better
             maxLbest=maxL+iDist;
         };

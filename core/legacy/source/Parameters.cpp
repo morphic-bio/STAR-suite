@@ -423,6 +423,7 @@ Parameters::Parameters() {//initalize parameters info
     
     parArray.push_back(new ParameterInfoScalar <uint>       (-1, -1, "alignIntronMin", &alignIntronMin));
     parArray.push_back(new ParameterInfoScalar <uint>       (-1, -1, "alignIntronMax", &alignIntronMax));
+    parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "alignExcludeRegions", &alignExcludeRegions));
     parArray.push_back(new ParameterInfoScalar <uint>       (-1, -1, "alignMatesGapMax", &alignMatesGapMax));
 
     parArray.push_back(new ParameterInfoScalar <uint>       (-1, -1, "alignTranscriptsPerReadNmax", &alignTranscriptsPerReadNmax));
@@ -1270,6 +1271,20 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     g_bamRecordIndex = 0;
     
     pGe.initialize(this);
+
+    if (alignExcludeRegions != "-") {
+        bool unsupported = runModeIn.at(0) != "alignReads" || pCh.segmentMin > 0;
+        string flexRequested = pSolo.flexModeStr;
+        std::transform(flexRequested.begin(), flexRequested.end(), flexRequested.begin(), ::tolower);
+        unsupported = unsupported || flexRequested != "no";
+        #ifdef COMPILE_FOR_LONG_READS
+        unsupported = true;
+        #endif
+        if (unsupported) {
+            exitWithError("EXITING because --alignExcludeRegions currently requires ordinary short-read alignReads, --flex no, and --chimSegmentMin 0.\n",
+                          std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
 
     if (outTmpDir=="-") {
         outFileTmp=outFileNamePrefix +"_STARtmp/";

@@ -14,6 +14,7 @@ void ReadAlign::storeAligns (uint iDir, uint Shift, uint Nrep, uint L, uint indS
         return;
     #endif
 
+    if (Nrep==0) return; // no placement outside runtime exclusions
     if ( Nrep > P.seedMultimapNmax ) {// if a piece maps too many times, do not store it
         if ( Nrep < multNmin || multNmin==0 ) {multNmin=Nrep; multNminL=L;};
         return;
