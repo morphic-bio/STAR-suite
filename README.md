@@ -2,10 +2,10 @@
 
 STAR Suite updates the original STAR aligner by integrating four modules — STAR-core (with integrated TranscriptVB quantification), STAR-perturb, STAR-Flex, and STAR-SLAM — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (STAR Suite 1.9.4: **1.6–4.2x for bulk RNA-seq** against an external stepwise pipeline; against Cell Ranger 9.0.1, **3.9x for scRNA-seq**, **4.8–5.8x for Perturb-seq**, and **17–23x for Flex** from the delivered FASTQ, up to **42x** from CBQ input) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
-**STAR Suite v1.13.1** fixes a shared GEX multimapper lookup that could miss an
-exonic alignment. Fixed split-pool RNA now uses the suite's GEX rescue policy
-by default. `STAR --version` reports `1.13.1`. The Debian source version is
-`1.13.1-1`. [Release](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.13.1) · [Release notes](docs/RELEASE_NOTES_v1.13.1.md).
+**STAR Suite v1.13.2** stops batch runs with sorted BAM output from
+accumulating open files, and fixes two ways SLAM `--trimScope per-file` could
+damage output from earlier input files. `STAR --version` reports `1.13.2`. The
+Debian source version is `1.13.2-1`. [Release](https://github.com/morphic-bio/STAR-suite/releases/tag/v1.13.2) · [Release notes](docs/RELEASE_NOTES_v1.13.2.md).
 The benchmark results below retain their measured release identities.
 GitHub Releases also provides Ubuntu 22.04- and 24.04-built `.deb`
 packages from the same source revision.
