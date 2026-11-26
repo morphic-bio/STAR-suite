@@ -4,6 +4,12 @@
 
 Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction install and clear provenance.
 
+## Release v1.13.2 (2026-11-26)
+
+Tag `v1.13.2` and Debian source version `1.13.2-1` close batch-mode BAM sort
+files after each sample and fix SLAM `--trimScope per-file` output from earlier
+input files. Existing genome indexes can be reused. [Release notes](RELEASE_NOTES_v1.13.2.md).
+
 ## Release v1.13.1 (2026-11-18)
 
 Tag `v1.13.1` and Debian source version `1.13.1-1` include the shared GEX

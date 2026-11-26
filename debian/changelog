@@ -1,3 +1,13 @@
+star-suite (1.13.2-1) unstable; urgency=medium
+
+  * Close each batch sample's BAM sort files when the sample finishes, so
+    batch runs no longer accumulate open files.
+  * SLAM --trimScope per-file: give each file's detection pass its own
+    temporary folder, and clear unmapped and chimeric temporary output
+    before each later input file.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Thu, 26 Nov 2026 12:00:00 +0000
+
 star-suite (1.13.1-1) unstable; urgency=medium
 
   * Fix transcript lookup during shared GEX multimapper rescue. Check the
