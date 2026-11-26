@@ -1990,10 +1990,21 @@ static int starRunMain(int argInN, char *argIn[], const star::host::Hooks *hooks
             P.runThreadN = 1;  // Single-threaded for detection
             P.readMapNumber = static_cast<uint64_t>(P.quant.slam.autoTrimDetectionReads);
             
+            // The mapping chunks already hold earlier files' output under the same thread-0
+            // temporary names, so this detection chunk must use its own folder.
+            const string mappingTmpDir = P.outFileTmp;
+            const string mappingBamSortTmpDir = P.outBAMsortTmpDir;
+            P.outFileTmp = mappingTmpDir + "slamPerFileDetection/";
+            mkdir(P.outFileTmp.c_str(), P.runDirPerm);
+            if (P.outBAMcoord) {
+                P.outBAMsortTmpDir = P.outFileTmp + "BAMsort/";
+                mkdir(P.outBAMsortTmpDir.c_str(), P.runDirPerm);
+            }
+
             // Create detection-only RAchunk
-            ReadAlignChunk *RAdetect = new ReadAlignChunk(P, genomeMain, transcriptomeMain, 0, 
+            ReadAlignChunk *RAdetect = new ReadAlignChunk(P, genomeMain, transcriptomeMain, 0,
                                                            libem_transcriptome.get());
-            
+
             // Run detection pass for this file only
             RAdetect->processChunks();
             
@@ -2164,8 +2175,10 @@ static int starRunMain(int argInN, char *argIn[], const star::host::Hooks *hooks
                 }
             }
             delete RAdetect;
+            P.outFileTmp = mappingTmpDir;
+            P.outBAMsortTmpDir = mappingBamSortTmpDir;
             P.quant.slam.autoTrimDetectionPass = false;
-            
+
             // Reset stats after each file's detection (detection reads should not show in final totals)
             // But preserve the overall timeStartMap for accurate speed/time reporting in Log.final.out
             g_statsAll.resetN();
@@ -2203,9 +2216,12 @@ static int starRunMain(int argInN, char *argIn[], const star::host::Hooks *hooks
                 if (RAchunk[ii] != nullptr) {
                     RAchunk[ii]->reinitSlamCompat(P.quant.slam.compatTrim5p[0], P.quant.slam.compatTrim3p[0],
                                                   P.quant.slam.compatTrim5p[1], P.quant.slam.compatTrim3p[1]);
+                    if (fileIdx > 0) {
+                        RAchunk[ii]->resetCopiedOutputsForNextFile();
+                    }
                 }
             }
-            
+
             // Run mapping for this file
             mapThreadsSpawn(P, RAchunk);
             

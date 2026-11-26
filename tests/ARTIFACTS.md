@@ -4,6 +4,15 @@ This file tracks where **test outputs and artifacts** should live and what is
 expected to be **untracked** in git. If you add a new smoke/regression test,
 update this file with its output location.
 
+## Batch BAM file handles and SLAM per-file regressions (2026-11-21)
+
+- `tests/batch_bam_handles_regression.py` compares a baseline and a candidate
+  STAR on single, merged and batch runs and records peak open files.
+- `tests/slam_per_file_tmp_regression.py` compares SLAM `--trimScope per-file`
+  outputs with a first-file-scope reference.
+- Both write only to the fresh directory passed as `--out`. Use `/tmp/` or
+  `tests/*_output*/`, and keep the outputs out of git.
+
 ## Public PIPseq v3 input download (2026-11-13)
 
 - Dataset: PRJNA1170298 / SRR30911721, wild-type mouse brain single-cell
