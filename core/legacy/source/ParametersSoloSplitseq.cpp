@@ -1,6 +1,8 @@
 #include "Parameters.h"
 #include "SplitSeq.h"
 #include "ErrorWarning.h"
+#include <cmath>
+#include <sstream>
 #include <stdexcept>
 
 void ParametersSolo::initializeSplitseq() {
@@ -8,12 +10,30 @@ void ParametersSolo::initializeSplitseq() {
         exitWithError("EXITING because of split-seq parameter error: " + message + "\n",
                       std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
     };
+    const bool edit2 = splitseqMode == "FixedEdit2";
+    if (!edit2) {
+        for (const auto* param : pP->parArray)
+            if (param->inputLevel > 0 && (param->nameString == "soloSplitseqMinPosterior" ||
+                                          param->nameString == "soloSplitseqFrequencyBackup"))
+                fail("--" + param->nameString + " requires --soloSplitseqMode FixedEdit2");
+    }
     if (splitseqMode == "None") {
         if (splitseqWhitelist != vector<string>{"-"} || splitseqCBposition != vector<string>{"-"} || splitseqUMIposition != "-")
-            fail("--soloSplitseqWhitelist/CBposition/UMIposition require --soloSplitseqMode Fixed");
+            fail("--soloSplitseqWhitelist/CBposition/UMIposition require --soloSplitseqMode Fixed or FixedEdit2");
         return;
     }
-    if (splitseqMode != "Fixed") fail("--soloSplitseqMode must be None or Fixed");
+    if (splitseqMode != "Fixed" && !edit2) fail("--soloSplitseqMode must be None, Fixed or FixedEdit2");
+    if (edit2) {
+        if (splitseqFrequencyBackup != "yes" && splitseqFrequencyBackup != "no")
+            fail("--soloSplitseqFrequencyBackup must be yes or no");
+        pP->inOut->logMain << "[SPLIT effective] soloSplitseqFrequencyBackup = " << splitseqFrequencyBackup << '\n';
+        // Validate the whole token. A malformed cutoff interpreted as zero would admit calls.
+        std::istringstream input(splitseqMinPosteriorInput);
+        if (!(input >> splitseqMinPosterior) || !input.eof() || !std::isfinite(splitseqMinPosterior) ||
+            splitseqMinPosterior < 0.0 || splitseqMinPosterior > 1.0)
+            fail("--soloSplitseqMinPosterior must be a probability from 0 to 1");
+        pP->inOut->logMain << "[SPLIT effective] soloSplitseqMinPosterior = " << splitseqMinPosteriorInput << '\n';
+    }
     if (pipseqMode != "None") fail("split-seq and PIPseq modes are mutually exclusive");
     if (pP->runMode != "alignReads" || pP->readFilesTypeN != 1 || pP->readNends != 2 || barcodeReadIn != 0)
         fail("requires alignReads, two FASTQ reads (cDNA then barcode/UMI), and --soloBarcodeMate 0");
@@ -23,7 +43,8 @@ void ParametersSolo::initializeSplitseq() {
         (!pP->pfMulti.pfMultiConfig.empty() && pP->pfMulti.pfMultiConfig != "-"))
         fail("Flex, two-pass, restart and pfMulti guide integration are not supported with split-seq RNA mode");
 
-    try { splitseqDecoder = std::make_shared<splitseq::Decoder>(splitseqCBposition, splitseqUMIposition, splitseqWhitelist); }
+    try { splitseqDecoder = std::make_shared<splitseq::Decoder>(splitseqCBposition, splitseqUMIposition, splitseqWhitelist,
+                    edit2 ? splitseq::Policy::Edit2 : splitseq::Policy::Hamming1); }
     catch (const std::exception& e) { fail(e.what()); }
 
     const auto parameter = [&](const string& name, const string& wanted, bool owned) {
@@ -60,6 +81,13 @@ void ParametersSolo::initializeSplitseq() {
     cbWLsize = 0;
     for (size_t i = 0; i < splitseqDecoder->regions().size(); ++i)
         pP->inOut->logMain << "[SPLIT] round " << i + 1 << " entries=" << splitseqDecoder->tierSize(i) << '\n';
-    pP->inOut->logMain << "[SPLIT] fixed layout; per-round exact then unique Hamming-1 correction; "
-        "replacement applied once; observed tuples only; standard UMI counting; one sublibrary per invocation\n";
+    if (edit2) {
+        const auto path = pP->outFileNamePrefix + "Splitseq.ties.tsv";
+        try { splitseqTieWriter = std::make_shared<splitseq::TieWriter>(path, pP->outFileTmp + "Splitseq.ties.pending"); }
+        catch (const std::ios_base::failure& e) { fail("cannot open tie trace " + path + ": " + e.what()); }
+    }
+    pP->inOut->logMain << "[SPLIT] fixed layout; "
+        << (edit2 ? "minimum edit distance, <=2 per round and <=6 total; Bayesian ties from full-input exact oligo counts; "
+                  : "per-round exact then unique Hamming-1 correction; ")
+        << "replacement applied once; observed tuples only; standard UMI counting; one sublibrary per invocation\n";
 }

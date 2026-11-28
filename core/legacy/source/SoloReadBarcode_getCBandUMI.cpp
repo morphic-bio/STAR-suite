@@ -309,13 +309,13 @@ bool SoloReadBarcode::getCBandUMIPackedFast(uint64 cbPackedLsb,
 void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readLen,
                                  const string &readNameExtraIn,
                                  const uint32 &readFilesIndex,
-                                 const char *readName, uint64 readNameLength)
+                                 const char *readName, uint64 readNameLength, uint64 oneBasedReadNumber)
 {
     if (pSolo.type==0)
         return;
 
     if (pSolo.pipseqDecoder) { getCBandUMIpipseq(readSeq, readLen); return; }
-    if (pSolo.splitseqDecoder) { getCBandUMIsplitseq(readSeq, readQual, readLen); return; }
+    if (pSolo.splitseqDecoder) { getCBandUMIsplitseq(readSeq, readQual, readLen, readName, readNameLength, readFilesIndex, oneBasedReadNumber); return; }
 
     // Initialize UR fields
     urSeq = "";

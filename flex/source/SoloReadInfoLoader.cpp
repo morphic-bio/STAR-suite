@@ -133,6 +133,11 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
             } else {
                 *rf.streamReads >> cb;
             }
+            if (rf.pSolo.splitseqTieWriter) {
+                const auto resolved = rf.pSolo.splitseqTieWriter->cellFor(cb);
+                if (resolved == UINT64_MAX) continue;
+                cb = resolved;
+            }
             if ( rf.pSolo.CBmatchWL.oneExact && cbmatch==1 && cbReadCountTotal[cb]==0 ) {
                 noMMtoWLwithoutExact = true;
                 reason = "noMMtoWLwithoutExact";

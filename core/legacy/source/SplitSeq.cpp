@@ -1,4 +1,8 @@
 #include "SplitSeq.h"
+#include "BarcodeEditDistance.h"
+#include "BarcodeAlignmentLikelihood.h"
+#include <cstdio>
+#include <iomanip>
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -44,7 +48,7 @@ std::string unpack(uint64_t value, unsigned length) {
 } // namespace
 
 Decoder::Decoder(const std::vector<std::string>& positions, const std::string& umiPosition,
-                 const std::vector<std::string>& whitelists) {
+                 const std::vector<std::string>& whitelists, Policy policy) : policy_(policy) {
     if (positions.size() < 2 || positions.size() > 4 || whitelists.size() != positions.size())
         throw std::runtime_error("requires 2-4 CB positions and one allowlist per position, in cell-ID round order");
     umi_ = region(umiPosition);
@@ -85,6 +89,8 @@ Decoder::Decoder(const std::vector<std::string>& positions, const std::string& u
         }
         if (input.bad() || tier.exact.empty()) throw std::runtime_error("empty or unreadable split-seq allowlist: " + whitelists[i]);
         for (const auto& entry : tier.exact) {
+            if (policy_ == Policy::Edit2)
+                tier.targets.emplace_back(entry.second, unpack(entry.first, regions_[i].length));
             for (unsigned base = 0; base < regions_[i].length; ++base) {
                 for (uint64_t change = 1; change < 4; ++change) {
                     const uint64_t neighbor = entry.first ^ (change << (2 * base));
@@ -98,11 +104,13 @@ Decoder::Decoder(const std::vector<std::string>& positions, const std::string& u
                 }
             }
         }
+        std::sort(tier.targets.begin(), tier.targets.end());
         tiers_.push_back(std::move(tier));
     }
 }
 
 Decoded Decoder::decode(const std::string& read) const {
+    if (policy_ == Policy::Edit2) return decodeEdit2(read);
     Decoded result;
     if (read.size() < minimumReadLength_) return result;
     result.umi = read.substr(umi_.offset, umi_.length);
@@ -147,6 +155,245 @@ Decoded Decoder::decode(const std::string& read) const {
     }
     result.status = Status::Accepted;
     return result;
+}
+
+RoundMatch Decoder::matchEdit2(const std::string& read, size_t round) const {
+    const Region r = regions_[round];
+    const auto& tier = tiers_[round];
+    uint64_t word;
+    RoundMatch match;
+    if (pack(read, r.offset, r.length, word)) {
+        const auto exact = tier.exact.find(word);
+        if (exact != tier.exact.end()) {
+            match.distance = 0;
+            match.canonical = exact->second;
+            return match;
+        }
+        // At equal lengths the only possible single edit is a substitution.
+        const auto neighbor = tier.neighbors.find(word);
+        if (neighbor != tier.neighbors.end() && neighbor->second != UINT64_MAX) {
+            match.distance = 1;
+            match.canonical = tier.exact.at(neighbor->second);
+            return match;
+        }
+    }
+    const barcode_edit::Myers64Pattern query(read.data() + r.offset, r.length);
+    for (const auto& target : tier.targets) {
+        const unsigned dist = query.distance(target.second.data(), r.length);
+        if (dist > 2 || dist > match.distance) continue;
+        if (dist < match.distance) {
+            match.distance = dist;
+            match.canonical = target.first;
+            match.alternatives.clear();
+        } else if (target.first != match.canonical &&
+                   (match.alternatives.empty() || match.alternatives.back() != target.first)) {
+            match.alternatives.push_back(target.first);
+        }
+    }
+    return match;
+}
+
+Decoded Decoder::decodeEdit2(const std::string& read) const {
+    Decoded result;
+    if (read.size() < minimumReadLength_) return result;
+    result.umi = read.substr(umi_.offset, umi_.length);
+    bool ambiguous = false;
+    for (size_t i = 0; i < regions_.size(); ++i) {
+        const auto r = regions_[i];
+        result.rawCell.append(read, r.offset, r.length);
+        auto& match = result.matches[i];
+        match = matchEdit2(read, i);
+        result.totalDistance += match.distance;
+        if (match.distance > 2 || result.totalDistance > 6) {
+            result.status = Status::NoMatch;
+            return result;
+        }
+        if (match.distance) result.correctedRounds |= 1U << i;
+        ambiguous |= !match.alternatives.empty();
+    }
+    // The Cartesian product of per-round minima gives every minimum-total tuple.
+    // Preserve it in factored form. Never emit an arbitrary cell for ties.
+    if (ambiguous) {
+        result.status = Status::Ambiguous;
+        return result;
+    }
+    for (size_t i = 0; i < regions_.size(); ++i) {
+        const auto length = regions_[i].length;
+        result.cell = (result.cell << (2 * length)) | result.matches[i].canonical;
+        result.canonicalCell += unpack(result.matches[i].canonical, length);
+    }
+    result.status = Status::Accepted;
+    return result;
+}
+
+void countExact(const Decoded& result, ExactCounts& counts, ExactCounts* prefixCounts) {
+    uint64_t raw;
+    if (result.status == Status::Accepted && result.totalDistance == 0 && pack(result.rawCell, raw)) {
+        ++counts[raw];
+        if (prefixCounts) ++(*prefixCounts)[raw];
+    }
+}
+
+static uint64_t uniquePrefixWinner(const std::map<uint64_t, std::array<uint64_t, 2>>& support) {
+    uint64_t bestCount = 0, winner = UINT64_MAX;
+    for (const auto& cell : support) {
+        const uint64_t count = cell.second[1];
+        if (count > bestCount) {
+            bestCount = count;
+            winner = cell.first;
+        } else if (count == bestCount) {
+            winner = UINT64_MAX;
+        }
+    }
+    return winner;
+}
+
+Posterior Decoder::resolveTie(Decoded& result, const std::string& barcodeQual,
+                              const ExactCounts& counts, double cutoff, const ExactCounts* prefixCounts) const {
+    if (result.status != Status::Ambiguous || barcodeQual.size() != cellLength_)
+        throw std::logic_error("invalid split-seq tie or barcode qualities");
+    struct Oligo { uint64_t raw, canonical; double logLikelihood; };
+    std::vector<std::vector<Oligo>> options(regions_.size());
+    size_t offset = 0;
+    for (size_t i = 0; i < regions_.size(); ++i) {
+        const unsigned len = regions_[i].length;
+        const auto word = result.rawCell.substr(offset, len);
+        const auto qual = barcodeQual.substr(offset, len);
+        offset += len;
+        const barcode_edit::Myers64Pattern query(word.data(), len);
+        double maximum = -INFINITY;
+        for (const auto& target : tiers_[i].targets) {
+            if (query.distance(target.second.data(), len) != result.matches[i].distance) continue;
+            uint64_t raw;
+            pack(target.second, raw);
+            const double likelihood = barcode_quality::alignmentLogLikelihood(word, qual, target.second);
+            options[i].push_back({raw, target.first, likelihood});
+            maximum = std::max(maximum, likelihood);
+        }
+        // Subtract the same constant from every candidate in a round. The
+        // best joint likelihood is now one, even at very low base qualities.
+        for (auto& option : options[i]) option.logLikelihood -= maximum;
+    }
+    Posterior posterior;
+    std::function<void(size_t, uint64_t, uint64_t, double)> visit =
+        [&](size_t round, uint64_t raw, uint64_t canonical, double logLikelihood) {
+            if (round == options.size()) {
+                const auto it = counts.find(raw);
+                const uint64_t count = it == counts.end() ? 0 : it->second;
+                posterior.cells[canonical] += (count + 1.0) * std::exp(logLikelihood);
+                if (prefixCounts) {
+                    auto& support = posterior.exactSupport[canonical];
+                    support[0] += count;
+                    const auto prefix = prefixCounts->find(raw);
+                    if (prefix != prefixCounts->end()) support[1] += prefix->second;
+                }
+                return;
+            }
+            const unsigned bits = 2 * regions_[round].length;
+            for (const auto& option : options[round])
+                visit(round + 1, (raw << bits) | option.raw, (canonical << bits) | option.canonical,
+                      logLikelihood + option.logLikelihood);
+        };
+    visit(0, 0, 0, 0.0);
+    double sum = 0;
+    for (const auto& cell : posterior.cells) sum += cell.second;
+    uint64_t winner = 0;
+    double runnerUp = 0;
+    for (auto& cell : posterior.cells) {
+        cell.second /= sum;
+        if (cell.second > posterior.best) {
+            runnerUp = posterior.best;
+            posterior.best = cell.second;
+            winner = cell.first;
+        } else {
+            runnerUp = std::max(runnerUp, cell.second);
+        }
+    }
+    // A permissive cutoff still needs a unique winner after floating-point normalization.
+    if (posterior.best < cutoff || posterior.best - runnerUp <= 1e-12) {
+        winner = uniquePrefixWinner(posterior.exactSupport);
+        if (winner == UINT64_MAX) return posterior;
+        posterior.frequencyRescued = true;
+    }
+    result.cell = winner;
+    result.canonicalCell = unpack(winner, cellLength_);
+    result.status = Status::Accepted;
+    return posterior;
+}
+
+TieWriter::TieWriter(const std::string& path, const std::string& pendingPath) : pendingPath_(pendingPath) {
+    out_.exceptions(std::ios::badbit | std::ios::failbit);
+    out_.open(path);
+    out_ << "read_name\tread_file_index\traw_barcode\traw_umi\ttotal_edits\tround_edits\tcanonical_candidates"
+            "\tbest_posterior\tassigned_barcode\tcandidate_posteriors\tassignment_method\tassigned_posterior\tcandidate_exact_counts\n";
+}
+
+uint64_t TieWriter::defer(const std::string& name, unsigned fileIndex, const std::string& read,
+                          const std::string& cbQual, const std::string& umiQual, int umiStatus) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (!pending_.is_open()) {
+        pending_.exceptions(std::ios::badbit | std::ios::failbit);
+        pending_.open(pendingPath_, std::ios::in | std::ios::out | std::ios::trunc);
+    }
+    pending_ << fileIndex << '\t' << read << '\t' << cbQual << '\t' << umiQual << '\t'
+             << umiStatus << '\t' << name << '\n';
+    return pendingBit | rows_++;
+}
+
+void TieWriter::finish(const Decoder& decoder, const ExactCounts& counts, double cutoff, const Decision& record,
+                       const ExactCounts* prefixCounts) {
+    if (rows_) {
+        pending_.seekg(0);
+        decisions_.reserve(rows_);
+        std::string name, read, cbQual, umiQual;
+        unsigned fileIndex;
+        int umiStatus;
+        for (uint64_t i = 0; i < rows_; ++i) {
+            pending_ >> fileIndex >> read >> cbQual >> umiQual >> umiStatus;
+            pending_.get(); // tab before the FASTQ identifier, which can contain spaces
+            std::getline(pending_, name);
+            auto result = decoder.decode(read);
+            const auto posterior = decoder.resolveTie(result, cbQual, counts, cutoff, prefixCounts);
+            decisions_.push_back(result.status == Status::Accepted ? result.cell : UINT64_MAX);
+            write(name, fileIndex, result, decoder.regions(), posterior);
+            record(result, umiStatus, cbQual, umiQual);
+        }
+        pending_.close();
+        std::remove(pendingPath_.c_str());
+    }
+    out_.close();
+}
+
+void TieWriter::write(const std::string& readName, unsigned fileIndex, const Decoded& result,
+                      const std::vector<Region>& regions, const Posterior& posterior) {
+    std::ostringstream row;
+    row << readName << '\t' << fileIndex << '\t' << result.rawCell << '\t' << result.umi << '\t' << result.totalDistance;
+    for (size_t i = 0; i < regions.size(); ++i)
+        row << (i == 0 ? '\t' : ',') << result.matches[i].distance;
+    for (size_t i = 0; i < regions.size(); ++i) {
+        const auto& match = result.matches[i];
+        row << (i == 0 ? '\t' : '|') << unpack(match.canonical, regions[i].length);
+        for (auto candidate : match.alternatives) row << ',' << unpack(candidate, regions[i].length);
+    }
+    row << std::setprecision(17) << '\t' << posterior.best << '\t'
+        << (result.status == Status::Accepted ? result.canonicalCell : "-") << '\t';
+    for (auto it = posterior.cells.begin(); it != posterior.cells.end(); ++it) {
+        if (it != posterior.cells.begin()) row << ',';
+        row << unpack(it->first, result.rawCell.size()) << '=' << it->second;
+    }
+    if (result.status == Status::Accepted) {
+        row << (posterior.frequencyRescued ? "\tprefix_frequency\t" : "\tbayesian\t")
+            << posterior.cells.at(result.cell);
+    } else {
+        row << "\tunresolved\t-";
+    }
+    row << '\t';
+    if (posterior.exactSupport.empty()) row << '-';
+    for (auto it = posterior.exactSupport.begin(); it != posterior.exactSupport.end(); ++it) {
+        if (it != posterior.exactSupport.begin()) row << ',';
+        row << unpack(it->first, result.rawCell.size()) << '=' << it->second[0] << '/' << it->second[1];
+    }
+    out_ << row.str() << '\n';
 }
 
 void writeMetrics(std::ostream& out, const std::array<uint64_t, 13>& stats) {

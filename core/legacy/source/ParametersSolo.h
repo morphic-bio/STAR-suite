@@ -19,7 +19,7 @@ class ParametersSolo;
 namespace flex_decision_sidecar { class Writer; }
 namespace star { namespace solo { class CbBucketStore; } }
 namespace pipseq { class Decoder; }
-namespace splitseq { class Decoder; }
+namespace splitseq { class Decoder; class TieWriter; }
 
 class UMIdedup {
 public:
@@ -96,7 +96,11 @@ public:
     string splitseqMode = "None";
     vector<string> splitseqWhitelist{"-"}, splitseqCBposition{"-"};
     string splitseqUMIposition = "-";
+    string splitseqMinPosteriorInput;
+    string splitseqFrequencyBackup;
+    double splitseqMinPosterior;
     std::shared_ptr<splitseq::Decoder> splitseqDecoder;
+    std::shared_ptr<splitseq::TieWriter> splitseqTieWriter;
     void initializeSplitseq();
     // Shared by the two assay modes (ParametersSolo_assayParameter.cpp).
     void assayParameter(const string& assay, const string& mode, const string& logTag,
@@ -177,6 +181,7 @@ public:
     //filtering
     char QSbase,QSmax;//quality score base and cutoff
 
+    static constexpr double defaultCbMinP = 0.975;
     #ifdef MATCH_CellRanger
     double cbMinP;//for CBs with non-exact matching to WL, min posterior probability
     #else

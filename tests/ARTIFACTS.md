@@ -2233,6 +2233,10 @@ products and external validation logs are untracked.
 
 - `tests/splitseq_output_*/`: synthetic FASTQs, per-round allowlists, small STAR
   indexes, decoder test binaries, command receipts and raw/filtered MEX outputs.
+  The smoke fixture writes candidate posteriors in `edit2/Splitseq.ties.tsv`. The `edit_bayes/` and `edit_bayes_strict/` traces and raw matrices exercise the 0.95 default and a 0.975 override on the same reads.
+  `tests/test_splitseq_frequency_backup.py` writes two synthetic lanes, a tiny
+  index, per-read traces and raw UMI matrices under its fresh `--out` directory
+  to exercise the million-pair boundary.
 - `make -C core/legacy/source test_SplitSeq` builds `core/legacy/test/test_splitseq`
   and writes its small allowlist fixtures to `core/legacy/test/test_splitseq_work/`.
 - Test source: `core/legacy/test/test_splitseq.cpp` and

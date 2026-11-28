@@ -5,6 +5,7 @@
 #include "Parameters.h"
 #include "SoloReadBarcodeStats.h"
 #include "PipSeq.h"
+#include "SplitSeq.h"
 
 class SoloReadBarcode {
 private:
@@ -25,6 +26,9 @@ public:
     // no match, ambiguous, non-ACGT UMI, homopolymer UMI.
     // [9]..[12]: accepted reads corrected in round 1-4 (a read can count in several).
     std::array<uint64_t, 13> splitStats{};
+    splitseq::ExactCounts splitExactCounts, splitPrefixCounts;
+    void finishSplitseqTies();
+    void countSplitseqBarcode(const splitseq::Decoded& decoded, int umiStatus);
     // total, exact, corrected, invalid CB, nonmatch, phase tie, invalid BI
     // (also counted in exact or corrected), ambiguous tier
     std::array<uint64_t, 8> pipStats{};
@@ -61,7 +65,7 @@ public:
     SoloReadBarcode(Parameters &Pin);
     void getCBandUMI(char **readSeq, char **readQual, uint64 *readLen,
                      const string &readNameExtraIn, const uint32 &readFilesIndex,
-                     const char *readName, uint64 readNameLength=UINT64_MAX);
+                     const char *readName, uint64 readNameLength=UINT64_MAX, uint64 oneBasedReadNumber=UINT64_MAX);
     // Handle the common exact/unique-H1 simple-barcode case directly from
     // LSB-first two-bit CB/UMI values. Returns false when the existing string
     // path is required (ambiguous/N/unsupported configuration).
@@ -78,7 +82,8 @@ public:
     void addStats(const int32 cbMatch1);
     // Segmented-barcode assays (SoloReadBarcode_segmentedAssays.cpp).
     void getCBandUMIpipseq(char **readSeq, uint64 *readLen);
-    void getCBandUMIsplitseq(char **readSeq, char **readQual, uint64 *readLen);
+    void getCBandUMIsplitseq(char **readSeq, char **readQual, uint64 *readLen,
+                             const char *readName, uint64 readNameLength, uint32 fileIndex, uint64 oneBasedReadNumber);
     
 
 protected:

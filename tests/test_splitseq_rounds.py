@@ -170,6 +170,29 @@ def main():
           {"barcode_no_match": 1, "barcode_non_acgt": 1, "read_too_short": 1})
     assert len(cell_a) == 31
 
+    # The largest physical cell key (31 T bases) sits directly below the
+    # first deferred key. Rescue the first read into that cell at matrix output.
+    high_lists = []
+    for j, width in enumerate((8, 8, 8, 7)):
+        allowlist = out / f"high_round{j+1}.tsv"
+        allowlist.write_text("T" * width + "\n" + ("TTTTTTA\n" if j == 3 else ""))
+        high_lists.append(allowlist)
+    exact_cell = "T" * 31
+    high = ["T" * 8] * 3
+    rna, cb = fastqs("high", [(minus, four(*high, "TTTTTTC"))] +
+                     [(plus, four(*high, "TTTTTTT"))] * 40)
+    target = out / "high_key"
+    target.mkdir()
+    edit2 = base.copy()
+    edit2[edit2.index("Fixed")] = "FixedEdit2"
+    run("high_key", edit2 + ["--readFilesIn", rna, cb, "--soloSplitseqCBposition", *layout,
+        "--soloSplitseqWhitelist", *high_lists, "--soloCellFilter", "None", "--runThreadN", "2",
+        "--outFileNamePrefix", str(target) + "/"])
+    assert matrix(target / "Solo.out/GeneFull/raw") == {(exact_cell, "PLUS"): 1, (exact_cell, "MINUS"): 1}
+    with (target / "Splitseq.ties.tsv").open() as stream:
+        decision, = csv.DictReader(stream, delimiter="\t")
+    assert decision["assigned_barcode"] == exact_cell
+
     # four rounds of eight bases are 32 bases of cell barcode: refused
     lists8 = out / "round4_eight.tsv"
     lists8.write_text(a4 + "A\n")

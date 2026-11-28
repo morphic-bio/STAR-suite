@@ -88,6 +88,11 @@ void SoloReadFeature::inputRecords(uint32 **cbP, uint32 cbPstride, vector<uint32
             } else {
                 *streamReads >> cb;
             }
+            if (pSolo.splitseqTieWriter) {
+                const auto resolved = pSolo.splitseqTieWriter->cellFor(cb);
+                if (resolved == UINT64_MAX) continue;
+                cb = resolved;
+            }
             if ( pSolo.CBmatchWL.oneExact && cbmatch==1 && cbReadCountTotal[cb]==0 ) {
                 noMMtoWLwithoutExact = true;
             } else {

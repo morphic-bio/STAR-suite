@@ -726,7 +726,7 @@ void ReadAlign::outputAlignments() {
 
         {
         //the operations below are both for mapped and unmapped reads
-        soloRead->readBar->getCBandUMI(Read0, Qual0, readLengthOriginal, readNameExtra[0], readFilesIndex, readName);
+        soloRead->readBar->getCBandUMI(Read0, Qual0, readLengthOriginal, readNameExtra[0], readFilesIndex, readName, UINT64_MAX, iReadAll);
         
         // Store CB sequence for Phase 2 resolution (will be looked up in BAMoutput if needed)
         // Note: For ambiguous CBs, the sequence is stored in pendingAmbiguous_ and will be

@@ -198,7 +198,12 @@ void SoloReadFeature::addCounts(const SoloReadFeature &rfIn)
         };
     } else {
         for (auto ii=rfIn.cbReadCountMap.cbegin(); ii!=rfIn.cbReadCountMap.cend(); ++ii) {
-            cbReadCountMap[ii->first] += ii->second;
+            auto cb = ii->first;
+            if (pSolo.splitseqTieWriter) {
+                cb = pSolo.splitseqTieWriter->cellFor(cb);
+                if (cb == UINT64_MAX) continue;
+            }
+            cbReadCountMap[cb] += ii->second;
         };
     };
     
@@ -212,6 +217,9 @@ void SoloReadFeature::addStats(const SoloReadFeature &rfIn)
 {
     for (uint32 ii=0; ii<stats.nStats; ii++)
         stats.V[ii] += rfIn.stats.V[ii];
+
+    for (const auto& entry : rfIn.splitPendingFeatureStats)
+        if (pSolo.splitseqTieWriter->cellFor(entry.first) != UINT64_MAX) ++stats.V[entry.second];
 
     for (const auto &kv : rfIn.readFlag.flagCounts) {
         auto &dst = readFlag.flagCounts[kv.first];

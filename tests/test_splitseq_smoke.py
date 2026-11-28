@@ -142,6 +142,80 @@ def main():
                 for g, c, n in (s.split() for s in lines[1:])}
 
     expected = {(cell_a, "PLUS"): 2, (cell_a, "MINUS"): 1, (cell_b, "PLUS"): 1, (cell_c, "PLUS"): 1}
+    # Exercise a Levenshtein-only rescue and keep the two tied wells auditable
+    # even when the UMI itself would fail the downstream gate.
+    edit_reads = [(plus, barcode(second="ACTGACTG"), cell_a, u1),
+                  (plus, barcode(third="CTAGCTAC", umi="AAAAAAAAAA"), None, None)]
+    edit_rna, edit_cb = fastqs("edit2", edit_reads)
+    edit_mode = split.copy()
+    edit_mode[1] = "FixedEdit2"
+    target = out / "edit2"
+    target.mkdir()
+    run("edit2", base + ["--readFilesIn", edit_rna, edit_cb] + edit_mode +
+        ["--runThreadN", "2", "--soloCellFilter", "None", "--outFileNamePrefix", str(target) + "/"])
+    assert matrix(target / "Solo.out/GeneFull/raw") == {(cell_a, "PLUS"): 1}
+    with (target / "Splitseq.ties.tsv").open() as stream:
+        tie, = csv.DictReader(stream, delimiter="\t")
+    assert (tie["read_name"], tie["raw_umi"], tie["total_edits"], tie["round_edits"]) == (
+        "r1", "AAAAAAAAAA", "1", "0,0,1")
+    assert tie["canonical_candidates"] == "TGCATGCA|GACTGACT|CTAGCTAA,CTAGCTAG"
+    assert tie["assigned_barcode"] == "-" and float(tie["best_posterior"]) == 0.5
+
+    # A later lane supplies the entire prior for a tied read. Half its exact
+    # observations fail UMI QC and half have unmapped cDNA. The alternate
+    # primer aliases the same physical well but has no exact observations.
+    ambiguous = "CTAGCTAC"
+    queries = [(plus, barcode(third=ambiguous), None, None),
+               (minus, barcode(third=ambiguous, umi="AAAAAAAAAA"), None, None),
+               (minus, barcode(first="TGCATGCA", third=ambiguous), None, None)]
+    training = [(plus, barcode(umi="AAAAAAAAAA"), None, None)] * 9
+    training += [("N" * 50, barcode(), None, None)] * 9
+    qr, qb = fastqs("query", queries)
+    tr, tb = fastqs("training", training)
+    target = out / "edit_bayes"
+    target.mkdir()
+    bayes_args = base + ["--readFilesIn", f"{qr},{tr}", f"{qb},{tb}"] + edit_mode + [
+        "--runThreadN", "4", "--soloCellFilter", "None"]
+    run("edit_bayes", bayes_args + ["--outFileNamePrefix", str(target) + "/"])
+    assert "[SPLIT effective] soloSplitseqMinPosterior = 0.95\n" in (target / "Log.out").read_text()
+    assert matrix(target / "Solo.out/GeneFull/raw") == {(cell_a, "PLUS"): 1}
+    with (target / "Splitseq.ties.tsv").open() as stream:
+        decisions = {r["read_name"]: r for r in csv.DictReader(stream, delimiter="\t")}
+    assert set(decisions) == {"r0", "r1", "r2"}
+    for name in ("r0", "r1"):
+        assert decisions[name]["assigned_barcode"] == cell_a
+        assert float(decisions[name]["best_posterior"]) == 0.95
+    assert decisions["r2"]["assigned_barcode"] == "-" and float(decisions["r2"]["best_posterior"]) == 0.5
+    with (target / "Solo.out/Splitseq.metrics.tsv").open() as stream:
+        counts = dict(csv.reader(stream, delimiter="\t"))
+    assert [int(counts[k]) for k in ("reads_total", "barcode_exact", "barcode_corrected",
+            "umi_homopolymer", "barcode_ambiguous")] == [21, 9, 1, 10, 1], counts
+    strict = out / "edit_bayes_strict"
+    strict.mkdir()
+    run("edit_bayes_strict", bayes_args + ["--soloSplitseqMinPosterior", "0.975", "--soloSplitseqFrequencyBackup", "no",
+                                          "--outFileNamePrefix", str(strict) + "/"])
+    assert matrix(strict / "Solo.out/GeneFull/raw") == {}
+    with (strict / "Splitseq.ties.tsv").open() as stream:
+        stricter = {r["read_name"]: r for r in csv.DictReader(stream, delimiter="\t")}
+    assert stricter.keys() == decisions.keys()
+    for name, row in stricter.items():
+        assert row["assigned_barcode"] == "-"
+        assert row["assignment_method"] == "unresolved" and row["candidate_exact_counts"] == "-"
+        assert row["candidate_posteriors"] == decisions[name]["candidate_posteriors"]
+    # A shorter input uses its available pairs for the prefix. The strict
+    # Bayesian cutoff leaves two cases eligible for the frequency fallback.
+    short_prefix = out / "edit_short_prefix"
+    short_prefix.mkdir()
+    run("edit_short_prefix", bayes_args + ["--soloSplitseqMinPosterior", "0.975",
+                                          "--outFileNamePrefix", str(short_prefix) + "/"])
+    with (short_prefix / "Splitseq.ties.tsv").open() as stream:
+        short_rows = {r["read_name"]: r for r in csv.DictReader(stream, delimiter="\t")}
+    assert {n: r["assignment_method"] for n, r in short_rows.items()} == {
+        "r0": "prefix_frequency", "r1": "prefix_frequency", "r2": "unresolved"}
+    assert matrix(short_prefix / "Solo.out/GeneFull/raw") == {(cell_a, "PLUS"): 1}
+    for value in ("-0.01", "95", "nan", "0.95extra"):
+        run("invalid_posterior_" + value, bayes_args + ["--soloSplitseqMinPosterior", value,
+            "--outFileNamePrefix", str(out / ("invalid_" + value + "_"))], error="probability from 0 to 1")
     for label, extra in (("default", ["--runThreadN", "1"]),
                          ("threads4", ["--runThreadN", "4"]),
                          ("exact", ["--runThreadN", "2", "--soloUMIdedup", "Exact", "--soloCellFilter", "None"]),
@@ -248,6 +322,7 @@ def main():
         ("bad_layout", ["--soloSplitseqUMIposition", "10_10"], "must not overlap"),
         ("bam_unsupported", ["--outSAMtype", "BAM", "Unsorted"], "requires --outSAMtype None"),
         ("orphan", ["--soloSplitseqMode", "None"], "require --soloSplitseqMode Fixed"),
+        ("fixed_posterior", ["--soloSplitseqMinPosterior", "0.9"], "requires --soloSplitseqMode FixedEdit2"),
     ):
         # STAR rejects repeated parameter assignments; replace the existing argument when overriding.
         argv = list(common)

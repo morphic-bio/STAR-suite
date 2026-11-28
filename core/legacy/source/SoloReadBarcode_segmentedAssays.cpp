@@ -34,7 +34,8 @@ void SoloReadBarcode::getCBandUMIpipseq(char **readSeq, uint64 *readLen)
     else ++pipStats[7];
 }
 
-void SoloReadBarcode::getCBandUMIsplitseq(char **readSeq, char **readQual, uint64 *readLen)
+void SoloReadBarcode::getCBandUMIsplitseq(char **readSeq, char **readQual, uint64 *readLen,
+                                          const char *readName, uint64 readNameLength, uint32 fileIndex, uint64 oneBasedReadNumber)
 {
     ++splitStats[0];
     bSeq.assign(readSeq[pSolo.barcodeRead], readLen[pSolo.barcodeRead]);
@@ -47,7 +48,12 @@ void SoloReadBarcode::getCBandUMIsplitseq(char **readSeq, char **readQual, uint6
     cbMatchInd.clear(); cbMatchQual.clear(); cbMatchString.clear();
     urSeq.clear(); urPacked = UINT32_MAX; urValid = false;
     umiB = 0; umiCheck = -23; cbMatch = -11;
-    if (decoded.status != splitseq::Status::Accepted) {
+    const bool tied = pSolo.splitseqTieWriter && decoded.status == splitseq::Status::Ambiguous;
+    if (pSolo.splitseqTieWriter) {
+        const bool trainPrefix = oneBasedReadNumber <= splitseq::frequencyPrefixReads && pSolo.splitseqFrequencyBackup == "yes";
+        splitseq::countExact(decoded, splitExactCounts, trainPrefix ? &splitPrefixCounts : nullptr);
+    }
+    if (decoded.status != splitseq::Status::Accepted && !tied) {
         switch (decoded.status) {
             case splitseq::Status::ShortRead: ++splitStats[3]; cbMatch = -11; break;
             case splitseq::Status::InvalidBarcode: ++splitStats[4]; cbMatch = -2; break;
@@ -63,22 +69,50 @@ void SoloReadBarcode::getCBandUMIsplitseq(char **readSeq, char **readQual, uint6
         cbQual.append(bQual, regions[i].offset, regions[i].length);
     const auto umi = pSolo.splitseqDecoder->umiRegion();
     umiQual = bQual.substr(umi.offset, umi.length);
-    for (unsigned char q : cbQual) ++qualHist[q];
-    for (unsigned char q : umiQual) ++qualHist[q];
-    cbSeqCorrected = decoded.canonicalCell;
-    if (!convertCheckUMI()) {
-        ++splitStats[umiCheck == -24 ? 8 : 7];
-        cbMatch = umiCheck;
-        addStats(cbMatch);
-        return;
+    if (convertCheckUMI()) umiCheck = 0;
+    uint64_t key = decoded.cell;
+    if (tied) {
+        string id = readNameLength == UINT64_MAX ? string(readName) : string(readName, readNameLength);
+        if (!id.empty() && id[0] == '@') id.erase(0, 1);
+        key = pSolo.splitseqTieWriter->defer(id, fileIndex, bSeq, cbQual, umiQual, umiCheck);
+    } else {
+        cbSeqCorrected = decoded.canonicalCell;
+        for (unsigned char q : cbQual) ++qualHist[q];
+        for (unsigned char q : umiQual) ++qualHist[q];
+        countSplitseqBarcode(decoded, umiCheck);
     }
-    // Counted only now, so every read falls in exactly one category.
-    ++splitStats[decoded.correctedRounds ? 2 : 1];
-    for (size_t i = 0; i < regions.size(); ++i)
-        if (decoded.correctedRounds & (1U << i)) ++splitStats[9 + i];
-    umiCheck = 0;
+    if (umiCheck < 0) { cbMatch = umiCheck; return; }
     cbMatch = decoded.correctedRounds ? 1 : 0;
-    cbMatchInd.push_back(decoded.cell); // 64-bit sparse key, remapped after mapping.
-    cbMatchString = std::to_string(decoded.cell);
-    addStats(cbMatch);
+    cbMatchInd.push_back(key);
+    cbMatchString = std::to_string(key);
+}
+
+void SoloReadBarcode::countSplitseqBarcode(const splitseq::Decoded& decoded, int umiStatus)
+{
+    if (decoded.status == splitseq::Status::Ambiguous) {
+        ++splitStats[6];
+        addStats(-3);
+    } else if (umiStatus < 0) {
+        ++splitStats[umiStatus == -24 ? 8 : 7];
+        addStats(umiStatus);
+    } else {
+        ++splitStats[decoded.correctedRounds ? 2 : 1];
+        for (size_t i = 0; i < pSolo.splitseqDecoder->regions().size(); ++i)
+            if (decoded.correctedRounds & (1U << i)) ++splitStats[9 + i];
+        addStats(decoded.correctedRounds ? 1 : 0);
+    }
+}
+
+void SoloReadBarcode::finishSplitseqTies()
+{
+    pSolo.splitseqTieWriter->finish(*pSolo.splitseqDecoder, splitExactCounts, pSolo.splitseqMinPosterior,
+        [this](const splitseq::Decoded& result, int umiStatus, const string& cbQ, const string& umiQ) {
+            if (result.status == splitseq::Status::Accepted) {
+                for (unsigned char q : cbQ) ++qualHist[q];
+                for (unsigned char q : umiQ) ++qualHist[q];
+            }
+            countSplitseqBarcode(result, umiStatus);
+        }, pSolo.splitseqFrequencyBackup == "yes" ? &splitPrefixCounts : nullptr);
+    splitseq::ExactCounts().swap(splitExactCounts);
+    splitseq::ExactCounts().swap(splitPrefixCounts);
 }

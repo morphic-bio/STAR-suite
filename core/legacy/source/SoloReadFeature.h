@@ -34,6 +34,7 @@ public:
     uint32 homoPolymer[4];//homopolymer constants
 
     vector<uint32> cbReadCount;
+    vector<pair<uintCB, uint32>> splitPendingFeatureStats; // mapping failures on provisional CBs
     map <uintCB,uint32> cbReadCountMap;
     
     vector<uint32> transcriptDistCount;

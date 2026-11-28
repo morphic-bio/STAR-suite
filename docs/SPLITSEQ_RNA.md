@@ -1,7 +1,9 @@
 # SPLiT-seq RNA baseline
 
 `--soloSplitseqMode Fixed` decodes fixed split-pool barcode segments and a real
-UMI, then uses ordinary STAR alignment and UMI counting. It defaults to
+UMI, then uses ordinary STAR alignment and UMI counting. Select
+`--soloSplitseqMode FixedEdit2` for two-edit barcode matching with Bayesian tie resolution and a per-read trace.
+Both modes default to
 `GeneFull` and the existing `EmptyDrops_CR` caller without assay-specific tuning.
 The ordinary `soloUMIdedup` default (`1MM_All`) remains in effect; explicit
 standard UMI deduplication/filtering options remain available.
@@ -93,7 +95,7 @@ and has no `summary.json`; use a directory only when `summary.json` is there.
   an optional second column giving its same-length canonical replacement.
   Files have no header. Empty lines are ignored; duplicate observed entries,
   invalid bases, wrong lengths, extra columns and empty files are errors.
-- Each round uses an exact match first, then a unique Hamming-distance-one
+- In `--soloSplitseqMode Fixed`, each round uses an exact match first, then a unique Hamming-distance-one
   match. Several rounds can each be corrected in one read. A segment one
   substitution from several observed entries is rejected as ambiguous, unless
   all of them map to the same canonical sequence. One non-ACGT base in a round
@@ -104,6 +106,46 @@ and has no `summary.json`; use a directory only when `summary.json` is there.
   observed entries may map to one canonical sequence, allowing primer-barcode
   aliases or explicit well replacement. The caller must supply the correct
   mapping; no sample/well mapping is guessed or downloaded.
+- Select `--soloSplitseqMode FixedEdit2` to rank the allowlist oligos by global
+  Levenshtein distance to each full barcode at its configured zero-based R2
+  offset. Both ends of each window stay fixed. A substitution, insertion or
+  deletion costs one. A non-ACGT base matches no kit base. Allow up to two
+  edits per round and six across the read. For each round the closest oligos
+  determine the candidate wells, folding aliases before checking for ties.
+  All combinations of those wells share the minimum total distance.
+- In `FixedEdit2`, a unique minimum enters UMI processing directly. For ties,
+  STAR counts exact observations of each complete, primer-specific oligo tuple
+  across the input sublibrary, including reads with unmapped cDNA or invalid
+  UMIs. Each equally close oligo tuple receives its exact read count plus one,
+  multiplied by the base-quality likelihood across its barcode windows. STAR
+  uses the shared spatial barcode alignment likelihood (Phred-scaled
+  substitutions and insertions, Q30 deletion). It sums compatible primer
+  scores for each physical barcode and normalizes over the tied barcodes.
+  A unique winner with posterior at least **0.95** enters UMI processing.
+  Set `--soloSplitseqMinPosterior` to a probability from 0 to 1 to change
+  this inclusive cutoff. For example, `--soloSplitseqMinPosterior 0.975`
+  selects 97.5%. A top-two posterior difference of at most 1e-12 counts as a tie.
+- When the Bayesian call falls below the cutoff or ties, STAR ranks the same
+  candidate barcodes using exact observations from the **first 1,000,000
+  input read pairs** in supplied lane order. On shorter runs it uses every
+  input pair. It sums counts for equally close primer tuples belonging to each
+  candidate without pseudocounts. The unique candidate with the highest
+  positive count enters UMI processing, even if a different candidate leads
+  in the full library. Equal highest counts or zero observations leave the
+  read unresolved.
+  Use `--soloSplitseqFrequencyBackup no` to require the Bayesian cutoff alone.
+- `<outFileNamePrefix>Splitseq.ties.tsv` records every minimum-distance tie,
+  including reads with invalid UMIs. Each row gives the FASTQ identifier,
+  zero-based input file index, raw barcode and UMI, total and per-round edits,
+  the best posterior, the assigned barcode (`-` when unresolved), and all
+  candidate barcode/posterior pairs. `assignment_method` records `bayesian`,
+  `prefix_frequency`, or `unresolved`. `assigned_posterior` gives the
+  selected barcode's posterior, which can differ from the highest posterior.
+  `candidate_exact_counts` reports full/prefix counts for each candidate
+  when the frequency check is available. In `canonical_candidates`, commas
+  separate wells and vertical bars separate rounds in cell-ID order. Trace
+  row order can vary with mapping threads. STAR stages tied reads in its
+  temporary directory and resolves them before constructing the raw matrix.
 - Cell IDs concatenate canonical segments in the supplied order. Only observed
   tuples enter counting; the Cartesian barcode product is never allocated.
   IDs are deterministic and do not depend on allowlist ordering or threads.

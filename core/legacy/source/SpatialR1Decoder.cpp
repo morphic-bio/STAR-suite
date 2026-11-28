@@ -1,3 +1,4 @@
+#include "BarcodeAlignmentLikelihood.h"
 // Native Visium HD R1 anchored+indel decoder.
 //
 // Production-speed C++ port of scripts/probe_hd_r1_anchored_full_decode.py::decode_record.
@@ -15,6 +16,7 @@
 // command-line tool for parity work.
 
 #include "SpatialR1Decoder.h"
+#include "BarcodeEditDistance.h"
 
 #include <algorithm>
 #include <atomic>
@@ -46,45 +48,7 @@ namespace {
 
 // ---- distance helpers (match Python edit_distance exactly for accepted candidates) ----
 constexpr int kMaxLen = 64;
-struct Myers64Pattern {
-    uint64_t peq[256] = {};
-    int length;
-    uint64_t mask;
-    uint64_t last;
-
-    Myers64Pattern(const char* pattern, int m)
-        : length(m), mask(m == 64 ? ~0ULL : ((1ULL << m) - 1ULL)),
-          last(m == 0 ? 0 : (1ULL << (m - 1))) {
-        for (int i = 0; i < m; ++i) {
-            peq[static_cast<unsigned char>(pattern[i])] |= (1ULL << i);
-        }
-    }
-
-    int distance(const char* text, int n) const {
-        if (length == 0) return n;
-        if (n == 0) return length;
-        uint64_t pv = ~0ULL;
-        uint64_t mv = 0;
-        int score = length;
-        for (int j = 0; j < n; ++j) {
-            const uint64_t eq = peq[static_cast<unsigned char>(text[j])];
-            const uint64_t xv = eq | mv;
-            const uint64_t xh = (((eq & pv) + pv) ^ pv) | eq;
-            uint64_t ph = mv | ~(xh | pv);
-            uint64_t mh = pv & xh;
-            if (ph & last) {
-                ++score;
-            } else if (mh & last) {
-                --score;
-            }
-            ph = (ph << 1) | 1ULL;
-            mh <<= 1;
-            pv = (mh | ~(xv | ph)) & mask;
-            mv = (ph & xv) & mask;
-        }
-        return score;
-    }
-};
+using barcode_edit::Myers64Pattern;
 
 int edit_distance_myers64(const char* pattern, int m, const char* text, int n) {
     if (m == 0) return n;
@@ -6055,62 +6019,6 @@ std::string make_candidate_audit_line(const std::string& read_id,
     return line;
 }
 
-double raw_candidate_error_probability(int phred) {
-    const double probability =
-        std::pow(10.0, -static_cast<double>(std::max(0, phred)) / 10.0);
-    return std::max(1.0e-10, std::min(0.75, probability));
-}
-
-unsigned char raw_candidate_base_code(char base) {
-    switch (std::toupper(static_cast<unsigned char>(base))) {
-        case 'A': return 0;
-        case 'C': return 1;
-        case 'G': return 2;
-        case 'T': return 3;
-        default: return 4;
-    }
-}
-
-double raw_candidate_alignment_log_likelihood(
-    const std::string& observed, const std::string& qualities,
-    const std::string& candidate, int gap_q = 30, int missing_q = 30) {
-    std::vector<double> previous(candidate.size() + 1, 0.0);
-    std::vector<double> current(candidate.size() + 1, 0.0);
-    std::vector<unsigned char> candidate_bases(candidate.size());
-    for (size_t j = 0; j < candidate.size(); ++j) {
-        candidate_bases[j] = raw_candidate_base_code(candidate[j]);
-    }
-    const double deletion = std::log(raw_candidate_error_probability(gap_q));
-    const double ambiguous = std::log(0.25);
-    for (size_t j = 1; j <= candidate.size(); ++j) previous[j] = previous[j - 1] + deletion;
-    for (size_t i = 1; i <= observed.size(); ++i) {
-        const int q = i - 1 < qualities.size()
-            ? std::max(0, static_cast<int>(static_cast<unsigned char>(qualities[i - 1])) - 33)
-            : missing_q;
-        // These terms depend only on this observed base and its quality, not
-        // the candidate column. Keep the original operations and DP order so
-        // likelihoods (including ties) remain bit-identical.
-        const double error = raw_candidate_error_probability(q);
-        const double insertion = std::log(error / 4.0);
-        const double match = std::log1p(-error);
-        const double mismatch = std::log(error / 3.0);
-        const unsigned char obs = raw_candidate_base_code(observed[i - 1]);
-        current[0] = previous[0] + insertion;
-        for (size_t j = 1; j <= candidate.size(); ++j) {
-            const unsigned char truth = candidate_bases[j - 1];
-            const double pair = obs == 4 || truth == 4
-                ? ambiguous : (obs == truth ? match : mismatch);
-            current[j] = std::max({
-                previous[j - 1] + pair,
-                previous[j] + insertion,
-                current[j - 1] + deletion,
-            });
-        }
-        previous.swap(current);
-    }
-    return previous[candidate.size()];
-}
-
 std::string make_candidate_preserving_lines(
     const Record& record, const Decoded& decoded, const Config& cfg) {
     struct Choice {
@@ -6139,7 +6047,7 @@ std::string make_candidate_preserving_lines(
             : std::string();
         const std::string candidate = cfg.bc1_oligos[static_cast<size_t>(trace.col2)] +
                                       cfg.bc2_oligos[static_cast<size_t>(trace.row2)];
-        const double likelihood = raw_candidate_alignment_log_likelihood(
+        const double likelihood = barcode_quality::alignmentLogLikelihood(
             observed, qualities, candidate);
         const std::pair<int, int> coordinate(trace.row2, trace.col2);
         auto found = choices.find(coordinate);
@@ -7429,7 +7337,7 @@ bool Decoder::decode(const char *sequence, std::size_t sequenceLength,
         const std::string candidate =
             impl_->config.bc1_oligos[static_cast<std::size_t>(trace.col2)] +
             impl_->config.bc2_oligos[static_cast<std::size_t>(trace.row2)];
-        const double likelihood = raw_candidate_alignment_log_likelihood(
+        const double likelihood = barcode_quality::alignmentLogLikelihood(
             observed, observedQuality, candidate);
         const std::uint32_t coordinate =
             static_cast<std::uint32_t>(trace.row2) *

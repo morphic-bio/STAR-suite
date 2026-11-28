@@ -159,6 +159,14 @@ def test_splitseq_renders_one_star_command(recipes, tmp_path):
         "--runThreadN", "2",
     ]
     assert rendered.output_root == str(tmp_path / "out/")
+    edit2 = render_workflow_command(SPLITSEQ, {**params, "solo_splitseq_mode": "FixedEdit2",
+                                               "solo_splitseq_min_posterior": 0.975,
+                                               "solo_splitseq_frequency_backup": "no"})
+    assert edit2.argv[edit2.argv.index("--soloSplitseqMode") + 1] == "FixedEdit2"
+    assert edit2.argv[edit2.argv.index("--soloSplitseqMinPosterior") + 1] == "0.975"
+    assert edit2.argv[edit2.argv.index("--soloSplitseqFrequencyBackup") + 1] == "no"
+    assert not validate_workflow_parameters(SPLITSEQ, {**params, "solo_splitseq_mode": "FixedEdit2",
+                                                       "solo_splitseq_min_posterior": 95}).valid
 
 
 @pytest.mark.parametrize(

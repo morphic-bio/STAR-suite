@@ -96,6 +96,8 @@ void Solo::processAndOutput()
             };
         };
 
+        if (pSolo.splitseqTieWriter) readBarSum->finishSplitseqTies();
+
         ofstream *statsStream = &ofstrOpen(P.outFileNamePrefix+pSolo.outFileNames[0]+"Barcodes.stats",ERROR_OUT, P);
         readBarSum->statsOut(*statsStream);
         statsStream->close();

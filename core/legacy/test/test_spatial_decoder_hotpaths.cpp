@@ -71,7 +71,7 @@ std::string sequence(std::mt19937_64& rng, size_t length) {
 void checkLikelihood(const std::string& observed, const std::string& qualities,
                      const std::string& candidate, int gapQ, int missingQ, size_t trial) {
     const double expected=reference::likelihood(observed,qualities,candidate,gapQ,missingQ);
-    const double actual=raw_candidate_alignment_log_likelihood(observed,qualities,candidate,gapQ,missingQ);
+    const double actual=barcode_quality::alignmentLogLikelihood(observed,qualities,candidate,gapQ,missingQ);
     require(std::memcmp(&expected,&actual,sizeof(double))==0,"bitwise likelihood mismatch",trial);
 }
 int main() {

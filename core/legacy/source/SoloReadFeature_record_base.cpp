@@ -690,9 +690,16 @@ void record_base(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint n
     reFe.alignOut=alignOut;
     reFe.indAnnotTr = 0;    
 
+    // Mapping failures are reported only for barcodes that survive correction.
+    auto countFeatureStat = [&](uint32 stat) {
+        if (soloBar.pSolo.splitseqTieWriter && (soloBar.cbMatchInd[0] & splitseq::TieWriter::pendingBit))
+            soloReadFeat->splitPendingFeatureStats.emplace_back(soloBar.cbMatchInd[0], stat);
+        else
+            ++soloReadFeat->stats.V[stat];
+    };
     uint32 nFeat=0; //number of features in this read (could be >1 for SJs)
     if (nTr==0) {//unmapped
-        soloReadFeat->stats.V[soloReadFeat->stats.noUnmapped]++;
+        countFeatureStat(soloReadFeat->stats.noUnmapped);
         
     } else {
         switch (soloReadFeat->featureType) {
@@ -714,12 +721,12 @@ void record_base(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint n
                     };
                         
                     if (readGe->size()==0) {//check genes
-                        soloReadFeat->stats.V[soloReadFeat->stats.noNoFeature]++;//no gene
+                        countFeatureStat(soloReadFeat->stats.noNoFeature);//no gene
                     } else if (readGe->size()>1) {
-                        soloReadFeat->stats.V[soloReadFeat->stats.MultiFeature]++;//multi-gene reads
+                        countFeatureStat(soloReadFeat->stats.MultiFeature);//multi-gene reads
                         soloReadFeat->readFlag.setBit(soloReadFeat->readFlag.featureM);
                         if (nTr>1)
-                            soloReadFeat->stats.V[soloReadFeat->stats.subMultiFeatureMultiGenomic]++;//multigene caused by multimapper
+                            countFeatureStat(soloReadFeat->stats.subMultiFeatureMultiGenomic);//multigene caused by multimapper
 #ifdef DEBUG_CB_UB_PARITY
                         if (!g_traceReadsWriter.empty() && iRead!=(uint64)-1 && g_traceReadsWriter.count((uint32_t)iRead)) {
                             std::string genes;

@@ -184,7 +184,7 @@ workflows:
 
   - id: star_splitseq_rna
     title: Split-pool RNA (experimental)
-    summary: Experimental add-on for STAR-perturb. One STAR alignReads command with --soloSplitseqMode Fixed for split-pool RNA libraries with three barcode rounds, a fixed barcode layout and one allowlist per round.
+    summary: Experimental add-on for STAR-perturb. One STAR alignReads command with Fixed or FixedEdit2 barcode matching for split-pool RNA libraries with three barcode rounds, a fixed barcode layout and one allowlist per round.
     entry_script: core/legacy/source/STAR
     kind: star_cli
     schema_file: mcp_server/workflows/star_splitseq_rna.yaml

@@ -4,7 +4,7 @@
 # are always chosen for the library.
 id: star_splitseq_rna
 title: Split-pool RNA (experimental)
-summary: Single STAR alignReads with --soloSplitseqMode Fixed for split-pool (SPLiT-seq style) RNA libraries with three barcode rounds, fixed barcode and UMI positions and one allowlist per round; writes raw and EmptyDrops-filtered gene matrices.
+summary: Single STAR alignReads with Fixed or FixedEdit2 barcode matching for split-pool (SPLiT-seq style) RNA libraries with three barcode rounds, fixed barcode and UMI positions and one allowlist per round; writes raw and EmptyDrops-filtered gene matrices.
 kind: star_cli
 entry_script: core/legacy/source/STAR
 supported_modes: [local]
@@ -42,6 +42,8 @@ parameter_groups:
     description: Round 1, round 2, round 3 in that order for the positions and the lists.
     parameters:
       - solo_splitseq_mode
+      - solo_splitseq_min_posterior
+      - solo_splitseq_frequency_backup
       - cb_position_round1
       - cb_position_round2
       - cb_position_round3
@@ -100,8 +102,27 @@ parameters:
     type: enum
     required: false
     default: Fixed
-    choices: [Fixed]
-    description: Split-pool mode with fixed barcode and UMI positions.
+    choices: [Fixed, FixedEdit2]
+    description: Fixed accepts unique one-substitution corrections. FixedEdit2 allows two edits per barcode and six total at fixed offsets and resolves ties using full-input exact oligo counts and barcode qualities. Every tie is traced.
+    category: barcodes
+  - name: solo_splitseq_min_posterior
+    cli_flag: --soloSplitseqMinPosterior
+    type: float
+    required: false
+    default: 0.95
+    skip_when_default: true
+    min_value: 0
+    max_value: 1
+    description: Inclusive cutoff for the Bayesian stage of FixedEdit2.
+    category: barcodes
+  - name: solo_splitseq_frequency_backup
+    cli_flag: --soloSplitseqFrequencyBackup
+    type: enum
+    required: false
+    default: "yes"
+    choices: ["yes", "no"]
+    skip_when_default: true
+    description: After an unresolved Bayesian call in FixedEdit2, accept the unique positive exact-count winner in the first million input pairs (all pairs on shorter inputs).
     category: barcodes
   - name: cb_position_round1
     cli_flag: --soloSplitseqCBposition
@@ -222,6 +243,8 @@ rendering:
     - read_files_barcode
     - read_files_command
     - solo_splitseq_mode
+    - solo_splitseq_min_posterior
+    - solo_splitseq_frequency_backup
     - cb_position_round1
     - cb_position_round2
     - cb_position_round3

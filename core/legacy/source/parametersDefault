@@ -1647,10 +1647,16 @@ waspOutputMode              None
 
 ### STARsolo (single cell RNA-seq) parameters
 soloSplitseqMode             None
-    string: None or Fixed. Split-pool RNA with explicit fixed barcode/UMI coordinates; cDNA FASTQ first, barcode FASTQ last; outSAMtype None. Fixed defaults to GeneFull, soloCrMultimapRescue yes, soloMultiMappers Unique and EmptyDrops_CR. Set soloCrMultimapRescue no for the v1.13.0 split-pool policy.
+    string: None, Fixed or FixedEdit2. FixedEdit2 uses fixed-window Levenshtein distance <=2 per round, <=6 total, and resolves ties with full-input primer-specific exact counts and barcode qualities using soloSplitseqMinPosterior. Splitseq.ties.tsv traces every tie. Split-pool RNA with explicit fixed barcode/UMI coordinates; cDNA FASTQ first, barcode FASTQ last; outSAMtype None. Fixed defaults to GeneFull, soloCrMultimapRescue yes, soloMultiMappers Unique and EmptyDrops_CR. Set soloCrMultimapRescue no for the v1.13.0 split-pool policy.
+
+soloSplitseqMinPosterior     0.95
+    float: inclusive minimum posterior probability (0 to 1) for the primary Bayesian assignment in FixedEdit2. Requires a unique highest posterior.
+
+soloSplitseqFrequencyBackup  yes
+    string: yes or no. In FixedEdit2, after Bayesian abstention, assign the unique candidate with the highest positive exact barcode count in the first 1000000 input read pairs (all pairs for shorter inputs). Use no for posterior-only assignments.
 
 soloSplitseqWhitelist        -
-    strings: 2-4 per-round allowlists in cell-ID order. Rows contain observed ACGT sequence and optional same-length canonical replacement; correction is exact then unique Hamming-1 per round (one non-ACGT base counts as the substitution).
+    strings: 2-4 per-round allowlists in cell-ID order. Rows contain observed ACGT sequence and optional same-length canonical replacement; Fixed mode tries exact, then unique Hamming-1 matches per round (one non-ACGT base counts as the substitution).
 
 soloSplitseqCBposition       -
     strings: zero-based offset_length for each barcode round, in allowlist/cell-ID order; total barcode length <=31. No Cartesian expansion.

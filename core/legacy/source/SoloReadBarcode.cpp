@@ -32,6 +32,8 @@ void SoloReadBarcode::addCounts(const SoloReadBarcode &rfIn)
         };
     };
         
+    for (const auto& count : rfIn.splitExactCounts) splitExactCounts[count.first] += count.second;
+    for (const auto& count : rfIn.splitPrefixCounts) splitPrefixCounts[count.first] += count.second;
     for (uint32 ii=0; ii<qualHist.size(); ii++)
         qualHist[ii] += rfIn.qualHist[ii];
 };
